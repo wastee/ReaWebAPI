@@ -112,6 +112,18 @@ endif()
 
 # Native UI integration tests are opt-in and excluded from ctest.
 if(NOT WIN32 AND REAWEB_BUILD_EXTENSION)
+  add_library(swell_preferences MODULE EXCLUDE_FROM_ALL swell_preferences.cpp
+    "${PROJECT_SOURCE_DIR}/src/plugin/preferences.cpp")
+  target_include_directories(swell_preferences PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_BINARY_DIR}/sdk-layout/sdk" "${wdl_SOURCE_DIR}/WDL")
+  target_compile_definitions(swell_preferences PRIVATE SWELL_PROVIDED_BY_APP NOMINMAX)
+  set_target_properties(swell_preferences PROPERTIES PREFIX "" OUTPUT_NAME "reaper_preferences_test")
+  if(APPLE)
+    target_sources(swell_preferences PRIVATE "${wdl_SOURCE_DIR}/WDL/swell/swell-modstub.mm")
+    target_link_libraries(swell_preferences PRIVATE "-framework Cocoa")
+    set_target_properties(swell_preferences PROPERTIES SUFFIX .dylib)
+  else()
+    target_sources(swell_preferences PRIVATE "${wdl_SOURCE_DIR}/WDL/swell/swell-modstub-generic.cpp")
+  endif()
   add_library(swell_dock_windows MODULE EXCLUDE_FROM_ALL swell_dock_windows.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/shared/swell_window.cpp")
   target_link_libraries(swell_dock_windows PRIVATE reaweb_core)
@@ -145,6 +157,14 @@ if(UNIX AND NOT APPLE AND REAWEB_BUILD_EXTENSION)
   target_link_libraries(linux_navigation PRIVATE reaweb_core PkgConfig::WEBKIT X11::X11)
 endif()
 if(WIN32 AND REAWEB_BUILD_EXTENSION)
+  add_executable(windows_color_profile EXCLUDE_FROM_ALL windows_color_profile.cpp
+    "${PROJECT_SOURCE_DIR}/src/plugin/preferences.cpp" "${PROJECT_SOURCE_DIR}/src/plugin/preferences.rc")
+  target_link_libraries(windows_color_profile PRIVATE reaweb_core
+    "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
+    ole32 oleaut32 user32 gdi32 shlwapi shell32 version advapi32 uuid)
+  target_include_directories(windows_color_profile PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk" "${webview2_SOURCE_DIR}/build/native/include")
+  target_compile_definitions(windows_color_profile PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_options(windows_color_profile PRIVATE /utf-8)
   add_library(windows_dock_icons MODULE EXCLUDE_FROM_ALL windows_dock_icons.cpp)
   target_include_directories(windows_dock_icons SYSTEM PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk")
   target_compile_options(windows_dock_icons PRIVATE /utf-8)

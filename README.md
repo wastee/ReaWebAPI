@@ -39,6 +39,8 @@ For manual installation, place the native binary in `UserPlugins/`. On Linux, pl
 
 Run `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` from the Action List to open the example.
 
+**Preferences > Plug-ins > ReaWebAPI** provides **Use sRGB for WebView rendering**, unchecked by default. On Windows, checking it requests an sRGB display profile for all ReaWebAPI WebViews after restarting REAPER. **Restore defaults** clears the checkbox. Apply/OK saves changes. The checkbox is disabled on macOS and Linux. See [color profiles](docs/frontend.md#webview-color-profile).
+
 ## Development
 
 Lua opens an App with `reaper.ReaWeb_Open(path, instanceKey)`. Pass `debug.getinfo(1, "S").source` as `instanceKey` to reuse the launcher's window. Omitting the key creates a new window. In JavaScript, await `reaper.lifecycle.ready`, then call the REAPER Mirror or Runtime namespaces such as `reaper.window` and `reaper.events`. API calls return Promises, with arguments and results following REAPER's Lua signatures.

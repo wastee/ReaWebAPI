@@ -1,4 +1,5 @@
 #include <reaper_plugin.h>
+#include "plugin/preferences.hpp"
 #include "runtime/runtime.hpp"
 #include "core/file_time.hpp"
 #include <cstring>
@@ -206,13 +207,14 @@ template<class T> T load(reaper_plugin_info_t* rec, const char* name) {
 }
 }
 
-extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_HINSTANCE, reaper_plugin_info_t* rec) {
+extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t* rec) {
   if (!rec) { unload(); return 0; }
   if (rec->caller_version != REAPER_PLUGIN_VERSION || !rec->GetFunc || !rec->Register) return 0;
   register_api = rec->Register;
   try {
     console = load<void (*)(const char*)>(rec, "ShowConsoleMsg");
     auto resource = load<const char* (*)()>(rec, "GetResourcePath");
+    add_registration("prefpage", initialize_preferences(instance, fs::u8path(resource())));
     auto enum_projects = load<ReaProject* (*)(int, char*, int)>(rec, "EnumProjects");
     auto count_selected = load<int (*)(ReaProject*)>(rec, "CountSelectedTracks");
     auto get_selected = load<MediaTrack* (*)(ReaProject*, int)>(rec, "GetSelectedTrack");

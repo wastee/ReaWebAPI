@@ -87,6 +87,19 @@ cmake --build build --target macos_devtools
 build/tests/macos_devtools
 ```
 
+## WebView color profile
+
+- Open Preferences > Plug-ins > ReaWebAPI. Confirm the **ReaWebAPI settings** border fills the page and follows its edges when resizing. Only the **Use sRGB for WebView rendering** checkbox and bottom-right **Restore defaults** button appear inside it. On Windows, check Cancel, Apply/OK, persistence and restoring the unchecked default, including cancellation of a reset. Restart REAPER to apply each change. Open two Apps and a development WebView, close/reopen them, reload and dock/undock. Compare neutral and saturated CSS colors against native UI on standard, wide-gamut and HDR displays where available.
+- On macOS and Linux, confirm the checkbox is disabled and unchecked. Native color management must remain unchanged.
+
+```sh
+cmake --build build --config Release --target windows_color_profile
+build/tests/Release/windows_color_profile.exe
+build/tests/Release/windows_color_profile.exe srgb
+```
+
+On macOS/Linux, build `swell_preferences`. In a separate REAPER test resource directory, install only `reaper_preferences_test.dylib` or `.so` into `UserPlugins/` and create `preferences-test.enabled`. Launch REAPER with `-newinst -cfgfile <test-resource>/reaper.ini`. The test checks native SWELL controls, writes `preferences-test.log` and exits.
+
 ## Runtime and audio acceptance
 
 Optional navigation tests use real WebViews with a simulated system URL handler:

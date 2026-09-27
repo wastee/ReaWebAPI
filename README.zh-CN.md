@@ -40,6 +40,8 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 
 在 Action List 运行 `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` 即可打开示例。
 
+**Preferences > Plug-ins > ReaWebAPI** 提供 **Use sRGB for WebView rendering** 复选框，默认不勾选。Windows 上勾选后重启 REAPER，将为全部 ReaWebAPI WebView 请求固定 sRGB 显示配置。**Restore defaults** 取消勾选，通过 Apply/OK 保存修改。macOS 和 Linux 上该复选框禁用。参见[色彩配置](docs/frontend.zh-CN.md#webview-色彩配置)。
+
 ## 开发
 
 Lua 通过 `reaper.ReaWeb_Open(path, instanceKey)` 打开应用。传入 `debug.getinfo(1, "S").source` 作为 `instanceKey` 可复用该启动脚本的窗口，省略 key 则每次创建新窗口。JavaScript 等待 `reaper.lifecycle.ready` 后，可调用 REAPER Mirror 和 `reaper.window`、`reaper.events` 等 Runtime 接口。API 以 Promise 返回结果，参数和返回值顺序遵循 REAPER 的 Lua 签名。

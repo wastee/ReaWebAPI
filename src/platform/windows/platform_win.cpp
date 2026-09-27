@@ -6,6 +6,8 @@
 #include <shobjidl.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
+#include "platform/shared/color_profile.hpp"
 #include <vector>
 #include <algorithm>
 #include <cstring>
@@ -501,6 +503,11 @@ class WinPlatform final : public Platform {
   HWND clipboard_owner_ = nullptr;
 public:
   explicit WinPlatform(const fs::path& data) {
+    ComPtr<ICoreWebView2EnvironmentOptions> options;
+    if (startup_color_profile == ColorProfile::SRGB) {
+      options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+      check(options->put_AdditionalBrowserArguments(L"--force-color-profile=srgb"), "WebView2 color profile");
+    }
     check(OleInitialize(nullptr), "OleInitialize (WebView2 and native drag require STA)");
     com_ = true;
     // COM completion handlers can outlive extension teardown. Keep their code mapped until process exit.
@@ -513,7 +520,7 @@ public:
       OleUninitialize(); com_ = false; throw std::runtime_error("RegisterClass failed");
     }
     std::weak_ptr<EnvironmentState> weak = state_;
-    auto hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, data.c_str(), nullptr,
+    auto hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, data.c_str(), options.Get(),
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [weak](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
           auto state = weak.lock();
