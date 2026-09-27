@@ -12,6 +12,7 @@
 #include "platform/windows/win_devtools.hpp"
 #include "platform/windows/win_icon.hpp"
 #include "platform/windows/win_context_menu.hpp"
+#include "platform/shared/window_menu.hpp"
 
 namespace reaweb {
 using Microsoft::WRL::ComPtr;
@@ -110,6 +111,14 @@ public:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (self) {
+      if (msg == WM_CONTEXTMENU && self->devtools_) {
+        auto keep_alive = self->shared_from_this();
+        try {
+          show_window_menu(hwnd, lp, self->options_, self->devtools_->menu_state(),
+            [self](DevToolsAction action) { self->devtools_->perform(action); }, [self] { self->reload(); });
+        } catch (const std::exception& error) { self->options_.on_error(error.what()); }
+        return 0;
+      }
       if (msg == WM_SHOWWINDOW && wp) self->icon_.refresh(hwnd, self->icon_host(true));
       if (msg == WM_SYSCOMMAND && (wp & 0xfff0) == dock_command) {
         if (self->options_.on_dock_toggle) self->options_.on_dock_toggle();

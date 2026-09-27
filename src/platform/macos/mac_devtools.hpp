@@ -233,7 +233,7 @@ public:
   void perform(DevToolsAction action) {
     if (action == DevToolsAction::Open) open();
     else if (action == DevToolsAction::Hide) hide();
-    else {
+    else if (menu_state().mode_enabled()) {
       prefs_.floating = action == DevToolsAction::Float;
       present_needed_ = true;
     }
@@ -265,7 +265,7 @@ public:
     } else if (present_needed_) present();
   }
   DevToolsMenuState menu_state() const {
-    return {pending_ ? requested_ : visible(), prefs_.floating || !embedding_, embedding_};
+    return {visible(), prepared_ && requested_ ? !hosted_ : prefs_.floating || !embedding_, embedding_, supported_};
   }
   NSInteger insert_menu(NSMenu* menu, NSInteger index) const {
     auto state = menu_state();
@@ -277,7 +277,7 @@ public:
     };
     add(state.shown ? @"Hide DevTools" : @"Open DevTools", state.shown ? DevToolsAction::Hide : DevToolsAction::Open, supported_, true);
     add(state.floating ? @"Embed DevTools" : @"Float DevTools", state.floating ? DevToolsAction::Embed : DevToolsAction::Float,
-      supported_ && (!state.floating || state.embedded_supported), false);
+      state.mode_enabled(), false);
     return index;
   }
   Json state() const { return prefs_.state(); }

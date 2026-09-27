@@ -6,9 +6,11 @@ Press **Ctrl+Shift+I** on Windows/Linux or **Option+Command+I** on macOS in the 
 
 | Platform | Presentation | Mode switching |
 | --- | --- | --- |
-| Linux / WebKitGTK | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Dock right** in the panel toolbar |
+| Linux / WebKitGTK | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Embed DevTools** in the page or Docker tab context menu, or the panel toolbar |
 | Windows / WebView2 | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Embed DevTools** in the page context menu |
 | macOS / WKWebView | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Embed DevTools** in the page context menu |
+
+The page menu contains only docking and DevTools actions. Docker tab menus add lifecycle-aware reload, App folder and close actions, with the current docking state checked. Labels are English on all platforms. The same inspector controller supplies visibility and mode state for both menus.
 
 ## Linux
 
@@ -22,7 +24,7 @@ Floating DevTools is non-modal and associated with the current REAPER parent thr
 
 **Embedded** fills the right-hand panel with the WebView2 inspector content, hiding its title bar, window controls and frame without reserving space. There is no draggable caption. The panel defaults to 40% of the available width, adjustable between 20% and 80% with a 1px divider in the system window-frame color. Resizing preserves the ratio. **Floating** restores the inspector's native title bar, controls and frame without an additional host window. Mode switches reuse the same inspector window, retaining Console and Inspector state without reloading the page.
 
-Right-click the WebView page to access DevTools alongside **Dock in REAPER** / **Undock from REAPER**. The menu shows **Open DevTools** or **Hide DevTools** according to visibility, and **Float DevTools** when embedded or **Embed DevTools** when floating. Changing mode while hidden saves the preference without opening the inspector. The inspector fills its container without a host toolbar, and the Demo has no separate DevTools button.
+Right-click the WebView page to access DevTools alongside **Dock in REAPER** / **Undock from REAPER**. The menu shows **Open DevTools** or **Hide DevTools** according to visibility, and **Float DevTools** when embedded or **Embed DevTools** when floating. Mode switching is disabled while the inspector is hidden or still opening. The inspector fills its container without a host toolbar, and the Demo has no separate DevTools button.
 
 The menu, shortcut and APIs share one state manager. Ctrl+Shift+I and **Hide DevTools** hide the inspector and retain its session. The floating window's native close button ends the inspector session. Floating DevTools follows the current REAPER root owner and is raised without taking focus when another REAPER window becomes active. It is not globally always-on-top. Focusing DevTools does not suspend or reload the page. On Windows, embedded DevTools supports switching between docked WebViews, including when REAPER and WebView2 use different DPI contexts.
 
@@ -32,7 +34,7 @@ WebView2 exposes no public embedded-inspector controller. ReaWebAPI uses [`OpenD
 
 **Embedded** places the native Inspector content view beside the page without a window title bar, window buttons, wrapper frame or reserved decoration space. **Floating** returns the same view to WebKit's own Inspector window. No additional ReaWebAPI window or toolbar is created.
 
-The page context menu shows **Open DevTools** / **Hide DevTools** and **Float DevTools** / **Embed DevTools** according to the current state. **Option+Command+I** toggles visibility from the page or Inspector. Changing mode while hidden does not open it. The shortcut, menu, `reaper.debug.openDevTools()` and `ReaWeb_DevTools(id)` use the same controller. Hiding and switching modes retain the live Inspector view and connection, including Console entries and the selected tab. Native close controls end the session.
+The page context menu shows **Open DevTools** / **Hide DevTools** and **Float DevTools** / **Embed DevTools** according to the current state. **Option+Command+I** toggles visibility from the page or Inspector. Mode switching is disabled while the inspector is hidden. The shortcut, menu, `reaper.debug.openDevTools()` and `ReaWeb_DevTools(id)` use the same controller. Hiding and switching modes retain the live Inspector view and connection, including Console entries and the selected tab. Native close controls end the session.
 
 The panel defaults to 40% of the available width. Dragging the Inspector divider adjusts the saved ratio between 20% and 80%. Resizing preserves the ratio, including in compact windows. Host dimensions do not disable **Embed DevTools** or force Floating.
 

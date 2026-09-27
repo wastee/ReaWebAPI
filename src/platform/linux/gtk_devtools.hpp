@@ -72,6 +72,7 @@ class GtkDevTools {
     detaching_ = false;
   }
   void hide() {
+    requested_ = false;
     visible_ = false;
     gtk_widget_hide(panel_); gtk_widget_hide(floating_);
     gtk_widget_grab_focus(page_);
@@ -169,6 +170,12 @@ public:
     requested_ = true;
     if (inspector_view_) present(prefs_.floating);
     else if (!pending_) { pending_ = true; webkit_web_inspector_show(inspector_); }
+  }
+  DevToolsMenuState menu_state() const { return {visible_, prefs_.floating, true}; }
+  void perform(DevToolsAction action) {
+    if (action == DevToolsAction::Open) open();
+    else if (action == DevToolsAction::Hide) hide();
+    else if (menu_state().mode_enabled()) present(action == DevToolsAction::Float);
   }
   void restore(const Json& state) {
     prefs_.restore(state);

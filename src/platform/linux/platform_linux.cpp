@@ -1,6 +1,7 @@
 #include "platform/shared/swell_window.hpp"
 #include "platform/linux/linux_channel.hpp"
 #include "platform/shared/devtools.hpp"
+#include "platform/shared/window_menu.hpp"
 #include "platform/linux/linux_icon.hpp"
 #include <chrono>
 #include <cstring>
@@ -141,7 +142,7 @@ public:
     if (!parked_.erase(id)) throw Error("DOCK_BUSY", "WebKit is busy. Retry docking when the page is ready.");
   }
 };
-class LinuxWindow final : public Window {
+class LinuxWindow final : public Window, public std::enable_shared_from_this<LinuxWindow> {
   std::shared_ptr<LinuxProcess> process_;
   int id_;
   std::unique_ptr<SwellWindow> window_;
@@ -164,6 +165,22 @@ public:
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)}});
     process_->listeners.emplace(id_, std::move(options));
+    window_->context_menu = [this](LPARAM position) {
+      auto keep_alive = shared_from_this();
+      try {
+        process_->pump();
+        const auto options = process_->listeners.at(id_);
+        const auto it = process_->inspectors.find(id_);
+        DevToolsMenuState state;
+        if (it != process_->inspectors.end()) {
+          state.shown = it->second.value("visible", false);
+          state.floating = it->second.value("mode", "embedded") == "floating";
+        }
+        show_window_menu(static_cast<HWND>(window_->handle()), position, options, state, [this](DevToolsAction action) {
+          process_->send({{"id", id_}, {"op", "devtools-action"}, {"action", static_cast<int>(action)}});
+        }, [this] { reload(); });
+      } catch (const std::exception& error) { process_->listeners.at(id_).on_error(error.what()); }
+    };
   }
   ~LinuxWindow() override {
     process_->listeners.erase(id_);

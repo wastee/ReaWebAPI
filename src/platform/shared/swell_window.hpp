@@ -18,6 +18,7 @@ public:
   bool focused() const;
   Json placement() const;
   void restore_placement(const Json& value);
+  std::function<void(LPARAM)> context_menu;
 private:
   HWND window_ = nullptr;
   HWND owner_ = nullptr;

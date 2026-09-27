@@ -219,6 +219,7 @@ int main() {
       CHECK(profiles.back() == root / "ReaWebAPI" / "WebViewData");
       const auto app = result(runtime, *first, first->send("ReaWeb_GetAppInfo"))["result"];
       CHECK(app["id"] == web["appId"] && app["name"] == "Tool" && app["version"].is_null());
+      CHECK(first->options.app_name == app["name"]);
       CHECK(fs::equivalent(fs::u8path(app["rootPath"].get<std::string>()), entry.parent_path()));
       const auto data = fs::u8path(app["dataPath"].get<std::string>());
       CHECK(fs::is_directory(data) && data.filename() == "Data");
@@ -863,6 +864,12 @@ int main() {
     std::ofstream(metadata_root / "app.json") << R"({"name":"SendFlow","version":"1.2.3-beta.1"})";
     const auto metadata = app_info(metadata_root, root / "MetadataData", "stable-id");
     CHECK(metadata["name"] == "SendFlow" && metadata["version"] == "1.2.3-beta.1" && metadata["id"] == "stable-id");
+    std::ofstream(metadata_root / "index.html") << "<title>Different page title</title>";
+    {
+      Runtime runtime(host, root, [](const std::string&) {}, docks);
+      runtime.open((metadata_root / "index.html").u8string());
+      CHECK(windows.back().lock()->options.app_name == "SendFlow");
+    }
     for (const auto& content : {"not json", "[]", R"({"name":4})", R"({"name":"   "})", R"({"version":"bad"})"}) {
       std::ofstream(metadata_root / "app.json") << content;
       bool rejected = false;

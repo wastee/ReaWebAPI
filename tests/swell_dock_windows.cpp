@@ -5,6 +5,8 @@
 #include <cmath>
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
+#import <WebKit/WebKit.h>
+#import <objc/runtime.h>
 #else
 #include <X11/Xlib.h>
 #include <dlfcn.h>
@@ -26,6 +28,49 @@ bool ready, other_ready, acknowledged, floating;
 DWORD started;
 std::string inactive_caption;
 void require(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
+#ifdef __APPLE__
+std::function<void(NSMenu*)> inspect_popup;
+void inspect_menu(::id, SEL, NSMenu* menu, NSEvent*, NSView*) { if (inspect_popup) inspect_popup(menu); }
+void check_menus(HWND child, bool docked) {
+  std::string error;
+  bool received = false;
+  inspect_popup = [&](NSMenu* menu) {
+    received = true;
+    try {
+      require(menu.numberOfItems == 6, "Docker menu item count");
+      NSArray<NSString*>* labels = @[@"Dock Rea&GBA 音 in REAPER", @"Reload", @"Open DevTools",
+        @"Float DevTools", @"Open Rea&GBA 音 Folder", @"Close Rea&GBA 音"];
+      for (NSInteger i = 0; i < menu.numberOfItems; ++i)
+        require([[menu itemAtIndex:i].title isEqual:labels[i]], "Docker menu label");
+      require(([menu itemAtIndex:0].state == NSControlStateValueOn) == docked, "Docker menu checked state");
+      require(![menu itemAtIndex:3].enabled, "Hidden DevTools mode must be disabled");
+    } catch (const std::exception& failure) { error = failure.what(); }
+  };
+  const auto method = class_getClassMethod(NSMenu.class, @selector(popUpContextMenu:withEvent:forView:));
+  const auto original = method_setImplementation(method, reinterpret_cast<IMP>(inspect_menu));
+  SendMessage(child, WM_CONTEXTMENU, reinterpret_cast<WPARAM>(child), -1);
+  method_setImplementation(method, original); inspect_popup = {};
+  require(received && error.empty(), error.empty() ? "Docker context menu was not forwarded" : error.c_str());
+  WKWebView* page_view = nil;
+  std::vector<NSView*> views{(__bridge NSView*)GetDlgItem(child, 0)};
+  while (!views.empty() && !page_view) {
+    auto view = views.back(); views.pop_back();
+    if ([view isKindOfClass:WKWebView.class]) page_view = (WKWebView*)view;
+    else for (NSView* subview in view.subviews) views.push_back(subview);
+  }
+  require(page_view != nil, "Page WebView missing");
+  auto menu = [NSMenu new];
+  for (NSString* label in @[@"Back", @"Reload", @"Save As", @"Print", @"More Tools", @"Inspect Element"])
+    [menu addItemWithTitle:label action:NULL keyEquivalent:@""];
+  auto event = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown location:NSZeroPoint modifierFlags:0
+    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:page_view.window.windowNumber
+    context:nil eventNumber:0 clickCount:1 pressure:1];
+  [page_view willOpenMenu:menu withEvent:event];
+  require(menu.numberOfItems == 3, "Page menu must contain only host controls");
+  require([[menu itemAtIndex:0].title isEqual:docked ? @"Undock from REAPER" : @"Dock in REAPER"], "Page docking menu state");
+  require([[menu itemAtIndex:1].title isEqual:@"Open DevTools"] && ![menu itemAtIndex:2].enabled, "Page DevTools menu state");
+}
+#endif
 std::string caption(HWND hwnd) { char text[1024]{}; GetWindowText(hwnd, text, sizeof(text)); return text; }
 HWND native_window(HWND hwnd) {
 #ifdef __APPLE__
@@ -174,9 +219,15 @@ void tick() {
     switch (phase) {
       case 0:
         if (!ready || !matches(window, id, 0xff0000)) return;
+#ifdef __APPLE__
+        check_menus(window, is_docked(id));
+#endif
         require(set_docked(id, true), "Dock failed"); remove_dock(static_cast<HWND>(sibling->handle())); advance(); break;
       case 1:
         if (!matches(window, id, 0xff0000)) return;
+#ifdef __APPLE__
+        check_menus(window, true);
+#endif
         title("HTML title"); request("title"); advance(); break;
       case 2:
         if (!acknowledged) return;
@@ -250,6 +301,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   resource = fs::u8path(reinterpret_cast<const char*(*)()>(host->GetFunc("GetResourcePath"))());
   if (!fs::exists(resource / "swell-dock-test.enabled")) return 0;
   page = resource / "Scripts" / "swell-dock-test" / "index.html"; fs::create_directories(page.parent_path());
+  std::ofstream(page.parent_path() / "app.json") << R"({"name":"Rea&GBA 音"})";
   for (const auto& name : {"red", "green"}) std::ofstream(page.parent_path() / (std::string(name) + ".svg"))
     << "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='"
     << (std::string(name) == "red" ? "#ff0000" : "#00ff00") << "'/></svg>";

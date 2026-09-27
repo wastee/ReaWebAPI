@@ -6,9 +6,11 @@
 
 | 平台 | 显示方式 | 模式切换 |
 | --- | --- | --- |
-| Linux / WebKitGTK | 默认嵌入右侧，提供可拖动分隔条 | 面板工具栏的 **Float DevTools** / **Dock right** |
+| Linux / WebKitGTK | 默认嵌入右侧，提供可拖动分隔条 | 页面或 Docker 页签右键菜单的 **Float DevTools** / **Embed DevTools**，也可使用面板工具栏 |
 | Windows / WebView2 | 默认嵌入右侧，提供可拖动分隔条 | 页面右键菜单的 **Float DevTools** / **Embed DevTools** |
 | macOS / WKWebView | 默认嵌入右侧，提供可拖动分隔条 | 页面右键菜单的 **Float DevTools** / **Embed DevTools** |
+
+页面菜单仅包含停靠和 DevTools 操作。Docker 页签菜单另提供遵循生命周期的刷新、打开 App 文件夹和关闭操作，并勾选当前停靠状态。各平台默认使用英文菜单。两个菜单的可见性和模式状态均来自同一个检查器控制器。
 
 ## Linux
 
@@ -22,7 +24,7 @@ Ctrl+Shift+I 在检查器内同样有效。快捷键、工具栏 **Hide DevTools
 
 **Embedded** 以 WebView2 检查器内容填满右侧面板，隐藏标题栏、窗口控制按钮及边框，不保留装饰占位或可拖动标题栏。面板默认占可用宽度的 40%，拖动 1px 分割线可调整至 20%–80%，调整窗口大小时保留比例。分割线使用系统窗口边框颜色。**Floating** 恢复检查器原生标题栏、窗口控制按钮和边框，不再叠加宿主窗口。模式切换复用同一个检查器窗口，保留 Console / Inspector 状态，不重载页面。
 
-在 WebView 页面上右键，DevTools 操作与 **Dock in REAPER** / **Undock from REAPER** 位于同一菜单。隐藏时显示 **Open DevTools**，显示时提供 **Hide DevTools**。嵌入模式提供 **Float DevTools**，浮动模式提供 **Embed DevTools**。隐藏时切换模式只保存偏好，不打开检查器。检查器填满容器，不附加宿主工具栏，Demo 也不再单独提供 DevTools 按钮。
+在 WebView 页面上右键，DevTools 操作与 **Dock in REAPER** / **Undock from REAPER** 位于同一菜单。隐藏时显示 **Open DevTools**，显示时提供 **Hide DevTools**。嵌入模式提供 **Float DevTools**，浮动模式提供 **Embed DevTools**。隐藏或正在打开时禁用模式切换。检查器填满容器，不附加宿主工具栏，Demo 也不再单独提供 DevTools 按钮。
 
 右键菜单、快捷键和 API 共用状态管理。Ctrl+Shift+I 和 **Hide DevTools** 只隐藏检查器并保留会话。浮动窗口的原生关闭按钮会结束检查器会话。浮动窗口跟随当前 REAPER 根窗口，其他 REAPER 窗口激活时不抢焦点地提升层级，不设置全局置顶。焦点移至 DevTools 不会暂停或重载页面。Windows 嵌入式 DevTools 支持多个停靠 WebView 之间的切换，包括 REAPER 与 WebView2 使用不同 DPI 上下文的情况。
 
@@ -32,7 +34,7 @@ WebView2 没有公开的嵌入式检查器控制器。ReaWebAPI 通过 [`OpenDev
 
 **Embedded** 将原生检查器内容视图放在页面右侧，不显示独立窗口标题栏、窗口按钮、外层边框，也不预留装饰空间。**Floating** 将同一视图放回 WebKit 自身的检查器窗口，不额外创建 ReaWebAPI 窗口或工具栏。
 
-页面右键菜单根据当前状态显示 **Open DevTools** / **Hide DevTools** 和 **Float DevTools** / **Embed DevTools**。在页面或检查器中按 **Option+Command+I** 切换显示，隐藏时切换模式不会打开检查器。快捷键、菜单、`reaper.debug.openDevTools()` 和 `ReaWeb_DevTools(id)` 共用控制器。隐藏和切换模式保留检查器视图及连接，包括 Console 日志和当前选中的标签。原生关闭控件会结束会话。
+页面右键菜单根据当前状态显示 **Open DevTools** / **Hide DevTools** 和 **Float DevTools** / **Embed DevTools**。在页面或检查器中按 **Option+Command+I** 切换显示，隐藏时禁用模式切换。快捷键、菜单、`reaper.debug.openDevTools()` 和 `ReaWeb_DevTools(id)` 共用控制器。隐藏和切换模式保留检查器视图及连接，包括 Console 日志和当前选中的标签。原生关闭控件会结束会话。
 
 面板默认占可用宽度的 40%，拖动检查器分隔线可调整至 20%–80% 并保存比例。调整窗口大小时保留比例，窄窗口同样支持嵌入，不会因宿主尺寸禁用 **Embed DevTools** 或强制切换为 Floating。
 

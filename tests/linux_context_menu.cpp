@@ -1,4 +1,7 @@
 #include "platform/linux/gtk_context_menu.hpp"
+#include <gtk/gtkx.h>
+#include <gdk/gdkx.h>
+#include "platform/linux/gtk_devtools.hpp"
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -42,12 +45,11 @@ int main(int argc, char** argv) {
     gtk_window_set_default_size(GTK_WINDOW(window), 640, 480);
     auto view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     webkit_settings_set_enable_developer_extras(webkit_web_view_get_settings(view), TRUE);
-    gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
-    gtk_widget_show_all(window);
     struct State {
       std::vector<WebKitContextMenuItem*> defaults;
       bool docked = false, select = true;
       int toggles = 0, requested = 0;
+      reaweb::GtkDevTools* tools = nullptr;
       std::string error;
     } state;
     g_signal_connect(view, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu* menu, GdkEvent*, WebKitHitTestResult*, gpointer data) -> gboolean {
@@ -57,7 +59,11 @@ int main(int argc, char** argv) {
       return FALSE;
     }), &state);
     {
-      reaweb::GtkDockMenu docking(view, [&] { state.docked = !state.docked; ++state.toggles; });
+      reaweb::GtkDevTools tools(view, window, [](reaweb::Json) {});
+      state.tools = &tools;
+      gtk_widget_show_all(window);
+      reaweb::GtkDockMenu docking(view, [&] { state.docked = !state.docked; ++state.toggles; },
+        [&](reaweb::DevToolsAction action) { tools.perform(action); }, [&] { return tools.menu_state(); });
       g_signal_connect(view, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu* menu, GdkEvent*, WebKitHitTestResult*, gpointer data) -> gboolean {
         auto& state = *static_cast<State*>(data);
         try {
@@ -65,14 +71,19 @@ int main(int argc, char** argv) {
             CHECK(!webkit_context_menu_get_n_items(menu));
             return FALSE;
           }
-          CHECK(webkit_context_menu_get_n_items(menu) == state.defaults.size() + 2);
+          CHECK(webkit_context_menu_get_n_items(menu) == 3);
           auto item = webkit_context_menu_first(menu);
           G_GNUC_BEGIN_IGNORE_DEPRECATIONS
           CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(item)), state.docked ? "Undock from REAPER" : "Dock in REAPER"));
           G_GNUC_END_IGNORE_DEPRECATIONS
-          CHECK(webkit_context_menu_item_is_separator(webkit_context_menu_get_item_at_position(menu, 1)));
-          for (size_t i = 0; i < state.defaults.size(); ++i)
-            CHECK(webkit_context_menu_get_item_at_position(menu, i + 2) == state.defaults[i]);
+          const auto current = state.tools->menu_state();
+          auto visibility = webkit_context_menu_get_item_at_position(menu, 1);
+          auto mode = webkit_context_menu_get_item_at_position(menu, 2);
+          G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(visibility)), current.shown ? "Hide DevTools" : "Open DevTools"));
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(mode)), current.floating ? "Embed DevTools" : "Float DevTools"));
+          G_GNUC_END_IGNORE_DEPRECATIONS
+          CHECK(!!g_action_get_enabled(webkit_context_menu_item_get_gaction(mode)) == current.mode_enabled());
           if (state.select) g_action_activate(webkit_context_menu_item_get_gaction(item), nullptr);
         } catch (const std::exception& error) { state.error = error.what(); }
         ++state.requested; return TRUE;
@@ -91,6 +102,21 @@ int main(int argc, char** argv) {
         const auto before = state.requested;
         right_click(view, y); until([&] { return state.requested > before; }); CHECK(state.error.empty());
       }
+      const auto check_menu = [&] {
+        const auto before = state.requested;
+        right_click(view, 250); until([&] { return state.requested > before; }); CHECK(state.error.empty());
+      };
+      tools.perform(reaweb::DevToolsAction::Float);
+      CHECK(!tools.menu_state().floating && !tools.menu_state().mode_enabled());
+      tools.open(); until([&] { return tools.menu_state().shown; });
+      for (int i = 0; i < 3; ++i) {
+        check_menu(); tools.perform(reaweb::DevToolsAction::Float);
+        CHECK(tools.menu_state().floating); check_menu();
+        tools.perform(reaweb::DevToolsAction::Embed); CHECK(!tools.menu_state().floating);
+        tools.perform(reaweb::DevToolsAction::Hide); check_menu();
+        tools.open(); until([&] { return tools.menu_state().shown; });
+      }
+      tools.perform(reaweb::DevToolsAction::Hide);
       script(view, "window.suppress=true;window.events=0");
       const auto before = state.requested;
       right_click(view, 250);
@@ -102,7 +128,7 @@ int main(int argc, char** argv) {
       g_signal_handlers_disconnect_by_data(view, &state);
     }
     gtk_widget_destroy(window);
-    std::cout << "WebKitGTK context menu: labels, ordering, default actions, callback, external state and page cancellation passed\n";
+    std::cout << "WebKitGTK context menu: filtered actions, DevTools state, mode switching, docking and page cancellation passed\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

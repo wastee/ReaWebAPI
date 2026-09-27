@@ -92,10 +92,6 @@ public:
     webkit_user_script_unref(script);
     view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, "user-content-manager", manager_, nullptr));
     g_object_ref_sink(view_);
-    if (request.value("dockEnabled", false)) dock_menu_ = std::make_unique<GtkDockMenu>(view_, [this] {
-      try { channel_.send({{"id", id_}, {"op", "dock-toggle"}}); }
-      catch (const std::exception& error) { fail(error.what()); }
-    });
     auto settings = webkit_web_view_get_settings(view_);
     webkit_settings_set_enable_developer_extras(settings, TRUE);
     webkit_settings_set_enable_javascript(settings, TRUE);
@@ -163,6 +159,11 @@ public:
     devtools_ = std::make_unique<GtkDevTools>(view_, plug_, [this](Json state) {
       channel_.send({{"id", id_}, {"op", "devtools-state"}, {"state", std::move(state)}});
     });
+    dock_menu_ = std::make_unique<GtkDockMenu>(view_, request.value("dockEnabled", false) ? std::function<void()>([this] {
+      try { channel_.send({{"id", id_}, {"op", "dock-toggle"}}); }
+      catch (const std::exception& error) { fail(error.what()); }
+    }) : std::function<void()>{}, [this](DevToolsAction action) { devtools_->perform(action); },
+      [this] { return devtools_->menu_state(); });
     gtk_widget_realize(plug_);
     webkit_web_view_load_uri(view_, uri_.c_str());
   }
@@ -191,6 +192,8 @@ public:
       devtools_->open();
     } else if (op == "devtools-restore") {
       devtools_->restore(request.at("state"));
+    } else if (op == "devtools-action") {
+      devtools_->perform(static_cast<DevToolsAction>(request.at("action").get<int>()));
     } else if (op == "park") {
       // SWELL destroys its old X11 top-level when docking. Move out before that happens.
       set_host_focus(false);

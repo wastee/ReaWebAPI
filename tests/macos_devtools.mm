@@ -13,7 +13,7 @@ using namespace reaweb;
 @end
 
 std::function<void()> tick;
-void pump(const std::function<bool()>& done) {
+void pump_at(int line, const std::function<bool()>& done) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
   do {
     auto event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]
@@ -22,8 +22,9 @@ void pump(const std::function<bool()>& done) {
     if (tick) tick();
     if (done()) return;
   } while (std::chrono::steady_clock::now() < deadline);
-  throw std::runtime_error("macOS DevTools test timed out");
+  throw std::runtime_error("macOS DevTools test timed out at line " + std::to_string(line));
 }
+#define pump(...) pump_at(__LINE__, __VA_ARGS__)
 void settle() {
   const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
   pump([&] { return std::chrono::steady_clock::now() >= until; });
@@ -88,9 +89,8 @@ int main(int argc, char** argv) {
         CHECK(view.inspectable && !tools.visible());
         CHECK(tools.diagnostics()["nativeToggleSupported"] == true && tools.diagnostics()["embeddedSupported"] == true);
         tools.restore({{"mode", "embedded"}, {"widthRatio", 0.5}});
-        [menu(tools, @"Open DevTools", @"Float DevTools") performActionForItemAtIndex:1];
-        CHECK(!tools.visible() && tools.state()["mode"] == "floating");
-        [menu(tools, @"Open DevTools", @"Embed DevTools") performActionForItemAtIndex:1];
+        CHECK(![menu(tools, @"Open DevTools", @"Float DevTools") itemAtIndex:1].enabled);
+        tools.perform(DevToolsAction::Float);
         CHECK(!tools.visible() && tools.state()["mode"] == "embedded");
         id<ReaWebInspectorSPI> inspector = [(id<ReaWebInspectableSPI>)view _inspector];
         tools.open(); tools.hide();
@@ -132,9 +132,11 @@ int main(int argc, char** argv) {
         [front.window makeFirstResponder:front];
         shortcut(front.window, keys, true); CHECK(tools.visible());
         shortcut(front.window, keys); settle(); CHECK(!tools.visible() && [inspector isConnected]);
-        [menu(tools, @"Open DevTools", @"Embed DevTools") performActionForItemAtIndex:1];
-        CHECK(!tools.visible());
-        shortcut(window, keys); pump(embedded); settle(); check_session();
+        CHECK(![menu(tools, @"Open DevTools", @"Embed DevTools") itemAtIndex:1].enabled);
+        tools.perform(DevToolsAction::Embed);
+        CHECK(!tools.visible() && tools.state()["mode"] == "floating");
+        shortcut(window, keys); pump([&] { return tools.visible(); });
+        tools.perform(DevToolsAction::Embed); pump(embedded); settle(); check_session();
         tools.open(); settle(); check_session();
         shortcut(window, NSEventModifierFlagControl | NSEventModifierFlagShift); CHECK(tools.visible());
         [window setContentSize:NSMakeSize(1400, 800)]; settle();
@@ -213,7 +215,8 @@ int main(int argc, char** argv) {
         [inspector show];
         pump([&] { return [inspector isConnected] && [inspector extensionHostWebView].window; });
         auto front = [inspector extensionHostWebView];
-        evaluate(front, @"InspectorFrontendHost.requestSetDockSide = undefined; 'ok'");
+        pump([&] { return !front.loading && [evaluate(front, @"document.readyState === 'complete' && typeof WI?.updateDockedState === 'function'") boolValue]; });
+        CHECK([evaluate(front, @"InspectorFrontendHost.requestSetDockSide = undefined; typeof InspectorFrontendHost.requestSetDockSide") isEqualToString:@"undefined"]);
         tick = [&] { tools.tick(); };
         tools.open();
         pump([&] { return tools.diagnostics()["embeddedSupported"] == false && !tools.diagnostics()["pending"].get<bool>(); });
@@ -237,7 +240,7 @@ int main(int argc, char** argv) {
         CHECK(rejected);
       }
       [window close];
-      std::cout << "WKWebView DevTools: Embedded/Floating, menus, shortcuts, hidden mode changes, Console/Elements retention, resizing, native close, host migration, two views, capability fallback and cleanup passed\n";
+      std::cout << "WKWebView DevTools: Embedded/Floating, menus, shortcuts, disabled hidden mode actions, Console/Elements retention, resizing, native close, host migration, two views, capability fallback and cleanup passed\n";
       return 0;
     } catch (const std::exception& error) { tick = {}; std::cerr << error.what() << '\n'; return 1; }
   }

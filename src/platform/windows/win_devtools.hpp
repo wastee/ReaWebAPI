@@ -307,19 +307,28 @@ public:
     requested_ = true; if (valid()) present();
   }
   DevToolsMenuState menu_state() const {
-    return {requested_, (valid() && !hosted_) || prefs_.floating, fallback_.empty()};
+    return {valid() && requested_ && (GetWindowLongPtrW(window_, GWL_STYLE) & WS_VISIBLE) != 0,
+      valid() ? !hosted_ : prefs_.floating, fallback_.empty()};
   }
   void perform(DevToolsAction action) {
     if (action == DevToolsAction::Open) open();
     else if (action == DevToolsAction::Hide) hide();
-    else if (action == DevToolsAction::Float || fallback_.empty()) {
+    else if (menu_state().mode_enabled()) {
       prefs_.floating = action == DevToolsAction::Float;
       present(requested_);
     }
   }
   void tick(ICoreWebView2* webview) {
     if (window_ && !valid()) lost();
-    if (valid()) { update_owner(); panel_layout(); return; }
+    if (valid()) {
+      // A slow frontend can appear after the opening deadline. Retry that
+      // transient fallback without changing the user's presentation preference.
+      if (!hosted_ && !renderer_) {
+        renderer_ = renderer(window_);
+        if (renderer_) { fallback_.clear(); present(false); }
+      }
+      update_owner(); panel_layout(); return;
+    }
     if (!webview) return;
     if (!pending_) {
       if (!requested_ || opening_) return;

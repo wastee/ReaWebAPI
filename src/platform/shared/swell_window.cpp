@@ -10,6 +10,10 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
   if (message == WM_INITDIALOG) { SetWindowLong(window, GWL_USERDATA, parameter); return TRUE; }
   auto self = reinterpret_cast<SwellWindow*>(GetWindowLong(window, GWL_USERDATA));
   if (!self) return FALSE;
+  if (message == WM_CONTEXTMENU && self->context_menu) {
+    auto show = self->context_menu;
+    show(parameter); return TRUE;
+  }
   if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(command) == IDCANCEL && !HIWORD(command) && !parameter)) {
     if (self->close_) self->close_(); else self->closed_ = true;
     return TRUE;

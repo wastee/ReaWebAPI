@@ -7,6 +7,8 @@ namespace reaweb {
 enum class DevToolsAction { Open, Hide, Float, Embed };
 struct DevToolsMenuState {
   bool shown = false, floating = false, embedded_supported = true;
+  bool available = true;
+  bool mode_enabled() const { return shown && available && (!floating || embedded_supported); }
 };
 // Persist preferences, never visibility or a live debugging session.
 struct DevToolsPreferences {

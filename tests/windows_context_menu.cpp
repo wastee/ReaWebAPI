@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "platform/windows/win_context_menu.hpp"
 #include "platform/windows/win_devtools.hpp"
+#include "platform/shared/window_menu.hpp"
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -10,6 +11,25 @@
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Callback;
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
+void native_menu() {
+  reaweb::WindowOptions options;
+  options.app_name = "Rea&GBA 音"; options.title = "Different page title";
+  options.on_dock_toggle = [] {};
+  for (bool docked : {false, true}) for (bool shown : {false, true}) {
+    options.is_docked = [docked] { return docked; };
+    auto menu = reaweb::create_window_menu(options, {shown, true, true});
+    CHECK(menu && GetMenuItemCount(menu) == 6);
+    const wchar_t* expected[] = {L"Dock Rea&&GBA 音 in REAPER", L"Reload",
+      shown ? L"Hide DevTools" : L"Open DevTools", L"Embed DevTools", L"Open Rea&&GBA 音 Folder", L"Close Rea&&GBA 音"};
+    for (int i = 0; i < 6; ++i) {
+      wchar_t label[256]{}; GetMenuStringW(menu, i, label, 256, MF_BYPOSITION);
+      CHECK(!wcscmp(label, expected[i]));
+    }
+    CHECK(!!(GetMenuState(menu, 0, MF_BYPOSITION) & MF_CHECKED) == docked);
+    CHECK(!!(GetMenuState(menu, 3, MF_BYPOSITION) & MF_GRAYED) == !shown);
+    DestroyMenu(menu);
+  }
+}
 void pump(const std::function<bool()>& done) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
   do {
@@ -67,6 +87,7 @@ int main() {
   auto host = CreateWindowW(L"STATIC", L"ReaWebAPI context menu test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
     40, 40, 640, 480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
   try {
+    native_menu();
     ComPtr<ICoreWebView2Environment> environment;
     auto profile = std::filesystem::current_path() / ("context-menu-test-" + std::to_string(GetCurrentProcessId()));
     CHECK(SUCCEEDED(CreateCoreWebView2EnvironmentWithOptions(nullptr, profile.c_str(), nullptr,
@@ -84,18 +105,11 @@ int main() {
     RECT bounds{}; GetClientRect(host, &bounds); controller->put_Bounds(bounds);
     ComPtr<ICoreWebView2_11> menus; CHECK(SUCCEEDED(view.As(&menus)));
     std::vector<std::wstring> defaults;
-    int inspect_index = -1;
     EventRegistrationToken token{};
     menus->add_ContextMenuRequested(Callback<ICoreWebView2ContextMenuRequestedEventHandler>(
       [&](ICoreWebView2*, ICoreWebView2ContextMenuRequestedEventArgs* args) -> HRESULT {
         ComPtr<ICoreWebView2ContextMenuItemCollection> items; args->get_MenuItems(&items);
-        defaults = labels(items.Get()); inspect_index = -1;
-        for (UINT32 i = 0; i < defaults.size(); ++i) {
-          ComPtr<ICoreWebView2ContextMenuItem> item; items->GetValueAtIndex(i, &item);
-          LPWSTR name = nullptr; item->get_Name(&name);
-          if (name && !wcscmp(name, L"inspect")) inspect_index = static_cast<int>(i);
-          CoTaskMemFree(name);
-        }
+        defaults = labels(items.Get());
         return S_OK;
       }).Get(), &token);
     bool docked = false;
@@ -115,20 +129,14 @@ int main() {
         try {
           ComPtr<ICoreWebView2ContextMenuItemCollection> items; CHECK(SUCCEEDED(args->get_MenuItems(&items)));
           const auto current = labels(items.Get());
-          auto expected = defaults;
-          if (inspect_index >= 0) expected.erase(expected.begin() + inspect_index);
-          CHECK(!defaults.empty() && current.size() == expected.size() + 4);
+          CHECK(!defaults.empty() && current.size() == 3);
           CHECK(current.front() == (docked ? L"Undock from REAPER" : L"Dock in REAPER"));
           const auto state = tools->menu_state();
           CHECK(current[1] == (state.shown ? L"Hide DevTools" : L"Open DevTools"));
           CHECK(current[2] == (state.floating ? L"Embed DevTools" : L"Float DevTools"));
           ComPtr<ICoreWebView2ContextMenuItem> mode; items->GetValueAtIndex(2, &mode);
           BOOL enabled = FALSE; mode->get_IsEnabled(&enabled);
-          CHECK(!!enabled == (!state.floating || state.embedded_supported));
-          CHECK(std::vector<std::wstring>(current.begin() + 4, current.end()) == expected);
-          ComPtr<ICoreWebView2ContextMenuItem> separator; items->GetValueAtIndex(3, &separator);
-          COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND kind{}; separator->get_Kind(&kind);
-          CHECK(kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR);
+          CHECK(!!enabled == state.mode_enabled());
           if (select >= 0) {
             ComPtr<ICoreWebView2ContextMenuItem> item; items->GetValueAtIndex(select, &item);
             INT32 command = 0; item->get_CommandId(&command); args->put_SelectedCommandId(command);
@@ -163,22 +171,34 @@ int main() {
       pump([&] { return !error.empty() || developer_requests == before + 1; }); CHECK(error.empty());
     };
     auto visible = [&] { return tools->diagnostics()["visible"].get<bool>(); };
-    choose(2); CHECK(tools->state()["mode"] == "floating" && !visible());
-    choose(2); CHECK(tools->state()["mode"] == "embedded" && !visible());
-    choose(1); CHECK(tools->menu_state().shown && !visible());
+    tools->perform(reaweb::DevToolsAction::Float);
+    CHECK(tools->state()["mode"] == "embedded" && !tools->menu_state().mode_enabled());
     choose(1); CHECK(!tools->menu_state().shown && !visible());
+    tools->toggle(); CHECK(!tools->menu_state().shown && !visible());
     choose(1);
     pump([&] { tools->tick(view.Get()); return visible(); });
-    const auto inspector = inspector_for(tools.get()); CHECK(inspector && IsChild(host, inspector));
+    const auto inspector = inspector_for(tools.get());
+    if (!inspector || !IsChild(host, inspector)) {
+      std::cerr << tools->diagnostics().dump() << '\n';
+      if (inspector) EnumChildWindows(inspector, [](HWND child, LPARAM) -> BOOL {
+        wchar_t name[128]{}; GetClassNameW(child, name, 128);
+        RECT rect{}; GetClientRect(child, &rect);
+        std::wcerr << name << L" " << rect.right << L"x" << rect.bottom << L" visible=" << IsWindowVisible(child) << L'\n';
+        return TRUE;
+      }, 0);
+    }
+    CHECK(inspector && IsChild(host, inspector));
     for (int i = 0; i < 3; ++i) {
       choose(2); CHECK(tools->menu_state().floating && visible() && !IsChild(host, inspector));
       choose(2); CHECK(!tools->menu_state().floating && visible() && IsChild(host, inspector));
       choose(1); CHECK(!visible());
       choose(1); CHECK(visible() && inspector_for(tools.get()) == inspector);
     }
-    choose(1); choose(2); CHECK(tools->menu_state().floating && !visible());
+    choose(1);
+    tools->perform(reaweb::DevToolsAction::Float);
+    CHECK(!tools->menu_state().floating && !visible() && !tools->menu_state().mode_enabled());
     choose(1); CHECK(visible() && inspector_for(tools.get()) == inspector);
-    choose(2); CHECK(IsChild(host, inspector));
+    CHECK(IsChild(host, inspector));
     CHECK(toggles == 2 && navigations == 1 && script(view.Get(), L"window.retained") == L"42");
     script(view.Get(), L"window.suppress=true");
     const auto before = requested, events = page_events;
@@ -212,7 +232,7 @@ int main() {
     }
     DestroyWindow(mixed_host);
     controller->Close(); DestroyWindow(host);
-    std::cout << "WebView2 context menu: dynamic DevTools actions, hidden mode preferences, retained inspector, docking, default actions, page cancellation and DPI fallback passed\n";
+    std::cout << "WebView2 context menu: filtered actions, visibility and mode state, retained inspector, docking, page cancellation and DPI fallback passed\n";
     return 0;
   } catch (const std::exception& error) { DestroyWindow(host); std::cerr << error.what() << '\n'; return 1; }
 }

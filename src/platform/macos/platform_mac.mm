@@ -1,5 +1,6 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
+#include "platform/shared/window_menu.hpp"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
@@ -89,6 +90,7 @@ void open_external(const std::string& url) {
 - (void)willOpenMenu:(NSMenu*)menu withEvent:(NSEvent*)event {
   [super willOpenMenu:menu withEvent:event];
   if (sourceClosed || !menu.numberOfItems) return;
+  [menu removeAllItems];
   NSInteger index = 0;
   if (toggleDock) {
     auto item = [[NSMenuItem alloc] initWithTitle:isDocked && isDocked() ? @"Undock from REAPER" : @"Dock in REAPER"
@@ -97,7 +99,6 @@ void open_external(const std::string& url) {
     [menu insertItem:item atIndex:index++];
   }
   if (devtoolsMenu) index = devtoolsMenu(menu, index);
-  if (index) [menu insertItem:[NSMenuItem separatorItem] atIndex:index];
 }
 - (void)toggleDockFromMenu:(id)sender {
   (void)sender;
@@ -155,7 +156,7 @@ namespace reaweb {
 namespace {
 NSString* ns(const std::string& text) { return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding]; }
 char dock_icon_owner;
-class MacWindow final : public Window {
+class MacWindow final : public Window, public std::enable_shared_from_this<MacWindow> {
   std::unique_ptr<SwellWindow> window_;
   ReaWebNativeView* webview_;
   id mouse_monitor_;
@@ -248,6 +249,14 @@ public:
     [content addSubview:webview_];
     devtools_ = std::make_unique<MacDevTools>(webview_, [this] { if (!closed()) focus(); });
     webview_->devtoolsMenu = [this](NSMenu* menu, NSInteger index) { return devtools_->insert_menu(menu, index); };
+    window_->context_menu = [this](LPARAM position) {
+      auto keep_alive = shared_from_this();
+      try {
+        devtools_->tick();
+        show_window_menu(static_cast<HWND>(window_->handle()), position, delegate_->options, devtools_->menu_state(),
+          [this](DevToolsAction action) { devtools_->perform(action); }, [this] { reload(); });
+      } catch (const std::exception& error) { delegate_->options.on_error(error.what()); }
+    };
     if (delegate_->options.url.empty()) {
       auto url = [NSURL fileURLWithPath:ns(delegate_->options.entry.u8string())];
       [webview_ loadFileURL:url allowingReadAccessToURL:[url URLByDeletingLastPathComponent]];

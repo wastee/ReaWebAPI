@@ -2,10 +2,12 @@
 
 ## English
 
-- Open blocked external HTTP, HTTPS and mailto navigation with the system default handler on Windows, macOS and Linux, preserving the current page.
-- Report blocked local document and query navigation in the developer console, with guidance to use `reaper.window.open(path)` for local HTML.
+- Limit WebView context menus to docking and DevTools controls on Windows, macOS and Linux, hiding default browser entries including Inspect.
+- Synchronize DevTools menu state with visibility and presentation, disable mode switching while hidden, and recover Windows embedding when the inspector frontend loads late.
+- Add App-specific Docker tab menus for docking, reload, DevTools, opening the App folder and closing the App.
 
 ## 简体中文
 
-- Windows、macOS 和 Linux 将被拦截的外部 HTTP、HTTPS、mailto 导航交给系统默认程序打开，保留当前页面。
-- 在开发者控制台提示被拦截的本地文档和查询参数导航，并引导使用 `reaper.window.open(path)` 打开本地 HTML。
+- Windows、macOS、Linux 的 WebView 右键菜单仅保留停靠与 DevTools 控制，隐藏包括检查在内的浏览器默认菜单项。
+- DevTools 菜单与实际显示和模式状态同步，隐藏时禁用模式切换，并在 Windows 检查器内容延迟加载后恢复嵌入。
+- 新增对应 App 的 Docker 页签菜单，提供停靠、刷新、DevTools、打开 App 文件夹和关闭操作。
