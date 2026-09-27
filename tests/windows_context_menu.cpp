@@ -13,13 +13,13 @@ using Microsoft::WRL::Callback;
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
 void native_menu() {
   reaweb::WindowOptions options;
-  options.app_name = "Rea&GBA 音"; options.title = "Different page title";
+  options.app_name = [] { return "Rea&GBA 音"; }; options.title = "web";
   options.on_dock_toggle = [] {};
   for (bool docked : {false, true}) for (bool shown : {false, true}) {
     options.is_docked = [docked] { return docked; };
     auto menu = reaweb::create_window_menu(options, {shown, true, true});
     CHECK(menu && GetMenuItemCount(menu) == 6);
-    const wchar_t* expected[] = {L"Dock Rea&&GBA 音 in REAPER", L"Reload",
+    const wchar_t* expected[] = {L"Dock Rea&&GBA 音 in Docker", L"Reload",
       shown ? L"Hide DevTools" : L"Open DevTools", L"Embed DevTools", L"Open Rea&&GBA 音 Folder", L"Close Rea&&GBA 音"};
     for (int i = 0; i < 6; ++i) {
       wchar_t label[256]{}; GetMenuStringW(menu, i, label, 256, MF_BYPOSITION);
@@ -113,6 +113,7 @@ int main() {
         return S_OK;
       }).Get(), &token);
     bool docked = false;
+    std::wstring app_name = L"ReaGBA";
     int select = 0;
     int toggles = 0, requested = 0, page_events = 0, developer_requests = 0;
     std::unique_ptr<reaweb::WinDevTools> tools;
@@ -121,7 +122,7 @@ int main() {
     }, [&] { controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC); });
     CHECK(SUCCEEDED(reaweb::install_window_menu(view.Get(), [&] { docked = !docked; ++toggles; }, [&] { return docked; },
       [&](reaweb::DevToolsAction action) { tools->perform(action); ++developer_requests; },
-      [&] { return tools->menu_state(); })));
+      [&] { return tools->menu_state(); }, [&] { return L"Dock " + app_name + L" in Docker"; })));
     std::string error;
     menus->add_ContextMenuRequested(Callback<ICoreWebView2ContextMenuRequestedEventHandler>(
       [&](ICoreWebView2*, ICoreWebView2ContextMenuRequestedEventArgs* args) -> HRESULT {
@@ -130,7 +131,9 @@ int main() {
           ComPtr<ICoreWebView2ContextMenuItemCollection> items; CHECK(SUCCEEDED(args->get_MenuItems(&items)));
           const auto current = labels(items.Get());
           CHECK(!defaults.empty() && current.size() == 3);
-          CHECK(current.front() == (docked ? L"Undock from REAPER" : L"Dock in REAPER"));
+          CHECK(current.front() == L"Dock " + app_name + L" in Docker");
+          ComPtr<ICoreWebView2ContextMenuItem> docking; items->GetValueAtIndex(0, &docking);
+          BOOL checked = FALSE; docking->get_IsChecked(&checked); CHECK(!!checked == docked);
           const auto state = tools->menu_state();
           CHECK(current[1] == (state.shown ? L"Hide DevTools" : L"Open DevTools"));
           CHECK(current[2] == (state.floating ? L"Embed DevTools" : L"Float DevTools"));
@@ -154,6 +157,7 @@ int main() {
       <script>window.retained=42;addEventListener('contextmenu',e=>{if(window.suppress)e.preventDefault();chrome.webview.postMessage('context');});</script>)HTML");
     pump([&] { return navigations == 1; });
     for (int i = 0; i < 2; ++i) {
+      if (i) app_name = L"Rea&&GBA 音";
       right_click(view.Get(), 300, 250); pump([&] { return requested == i + 1 && (!error.empty() || toggles == i + 1); });
       CHECK(error.empty());
     }

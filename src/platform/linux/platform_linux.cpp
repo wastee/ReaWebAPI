@@ -163,7 +163,8 @@ public:
       try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
     }, options.on_close);
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
-      {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)}});
+      {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
+      {"appName", options.app_name ? options.app_name() : options.title}});
     process_->listeners.emplace(id_, std::move(options));
     window_->context_menu = [this](LPARAM position) {
       auto keep_alive = shared_from_this();
@@ -218,7 +219,7 @@ public:
     const auto& options = process_->listeners.at(id_);
     Json next = {{"id", id_}, {"op", "geometry"}, {"parent", get_xid(native)}, {"x", origin.x}, {"y", origin.y},
       {"width", rect.right - rect.left}, {"height", std::max(1, int(rect.bottom - rect.top))}, {"visible", visible()}, {"focused", focused()},
-      {"docked", options.is_docked && options.is_docked()}};
+      {"docked", options.is_docked && options.is_docked()}, {"appName", options.app_name ? options.app_name() : options.title}};
     if (geometry_ != next) { process_->send(next); geometry_ = std::move(next); }
   }
   void evaluate(const std::string& script) override { process_->send({{"id", id_}, {"op", "eval"}, {"script", script}}); }

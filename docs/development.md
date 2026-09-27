@@ -4,7 +4,7 @@
 
 ## Start a tool
 
-Install the extension for your REAPER architecture, then copy the SDK directory to a writable development location. Load its `starter/Open.lua` in the Action List. This opens `index.html` next to the Lua file. The starter reads the selected track. Right-click the page and choose **Dock in REAPER** or **Undock from REAPER**.
+Install the extension for your REAPER architecture, then copy the SDK directory to a writable development location. Load its `starter/Open.lua` in the Action List. This opens `index.html` next to the Lua file. The starter reads the selected track. Right-click the page and toggle **Dock <App> in Docker**. The checked state indicates docking.
 
 ```text
 SDK/

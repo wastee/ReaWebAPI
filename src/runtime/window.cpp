@@ -149,7 +149,11 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, dock_.add && dock_.remove && dock_.index && dock_.activate ? std::function<void()>([this, weak] {
       if (auto s = weak.lock(); s && !s->closing)
         s->native_dock_request = !s->native_dock_request.value_or(is_docked(s->id));
-    }) : std::function<void()>{}, [this, id] { return is_docked(id); }, app->info.at("name").get<std::string>()});
+    }) : std::function<void()>{}, [this, id] { return is_docked(id); }, [weak] {
+      if (auto s = weak.lock())
+        return s->title != s->default_title || s->title_explicit ? s->title : s->app->info.at("name").get<std::string>();
+      return std::string();
+    }});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);

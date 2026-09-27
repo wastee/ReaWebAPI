@@ -82,6 +82,7 @@ void open_external(const std::string& url) {
   std::function<void(reaweb::Json)> dragReply;
   std::function<void()> toggleDock;
   std::function<bool()> isDocked;
+  std::function<std::string()> appName;
   std::function<NSInteger(NSMenu*, NSInteger)> devtoolsMenu;
 }
 @end
@@ -93,9 +94,11 @@ void open_external(const std::string& url) {
   [menu removeAllItems];
   NSInteger index = 0;
   if (toggleDock) {
-    auto item = [[NSMenuItem alloc] initWithTitle:isDocked && isDocked() ? @"Undock from REAPER" : @"Dock in REAPER"
+    const auto label = "Dock " + appName() + " in Docker";
+    auto item = [[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:label.c_str()]
       action:@selector(toggleDockFromMenu:) keyEquivalent:@""];
     item.target = self;
+    item.state = isDocked && isDocked() ? NSControlStateValueOn : NSControlStateValueOff;
     [menu insertItem:item atIndex:index++];
   }
   if (devtoolsMenu) index = devtoolsMenu(menu, index);
@@ -230,6 +233,8 @@ public:
     webview_->receiveDrop = delegate_->options.on_drop;
     webview_->toggleDock = delegate_->options.on_dock_toggle;
     webview_->isDocked = delegate_->options.is_docked;
+    webview_->appName = delegate_->options.app_name ? delegate_->options.app_name :
+      std::function<std::string()>([title = delegate_->options.title] { return title; });
     [webview_ registerForDraggedTypes:@[NSPasteboardTypeFileURL, NSPasteboardTypeString]];
     __weak ReaWebNativeView* weak_view = webview_;
     mouse_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged handler:^NSEvent*(NSEvent* event) {

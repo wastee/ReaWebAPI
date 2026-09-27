@@ -27,7 +27,7 @@ struct WindowOptions {
   std::function<void(Json)> on_drop;
   std::function<void()> on_dock_toggle;
   std::function<bool()> is_docked;
-  std::string app_name;
+  std::function<std::string()> app_name;
 };
 class Window {
 public:

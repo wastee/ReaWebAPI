@@ -219,7 +219,7 @@ int main() {
       CHECK(profiles.back() == root / "ReaWebAPI" / "WebViewData");
       const auto app = result(runtime, *first, first->send("ReaWeb_GetAppInfo"))["result"];
       CHECK(app["id"] == web["appId"] && app["name"] == "Tool" && app["version"].is_null());
-      CHECK(first->options.app_name == app["name"]);
+      CHECK(first->options.app_name() == app["name"]);
       CHECK(fs::equivalent(fs::u8path(app["rootPath"].get<std::string>()), entry.parent_path()));
       const auto data = fs::u8path(app["dataPath"].get<std::string>());
       CHECK(fs::is_directory(data) && data.filename() == "Data");
@@ -755,7 +755,9 @@ int main() {
       CHECK(fallback == "ReaWebAPI — Tool");
       result(runtime, *window, window->send("__reawebHello", {1}));
       const auto title = [&](const std::string& text) {
-        return result(runtime, *window, window->send("ReaWeb_DocumentTitle", {text}));
+        auto reply = result(runtime, *window, window->send("ReaWeb_DocumentTitle", {text}));
+        CHECK(window->options.app_name() == (window->options.title == fallback ? "Tool" : window->options.title));
+        return reply;
       };
       CHECK(title("")["result"] == true && window->options.title == fallback);
       CHECK(title("SendFlow")["result"] == true && window->options.title == "SendFlow");
@@ -868,7 +870,24 @@ int main() {
     {
       Runtime runtime(host, root, [](const std::string&) {}, docks);
       runtime.open((metadata_root / "index.html").u8string());
-      CHECK(windows.back().lock()->options.app_name == "SendFlow");
+      CHECK(windows.back().lock()->options.app_name() == "SendFlow");
+    }
+    {
+      const auto entry = root / "ReaGBA" / "web" / "index.html";
+      fs::create_directories(entry.parent_path());
+      std::ofstream(entry) << "<title>ReaGBA</title>";
+      Runtime runtime(host, root, [](const std::string&) {}, docks);
+      const auto id = runtime.open(entry.u8string());
+      auto window = windows.back().lock();
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      result(runtime, *window, window->send("ReaWeb_DocumentTitle", {"ReaGBA"}));
+      CHECK(window->options.app_name() == "ReaGBA");
+      runtime.set_docked(id, true);
+      CHECK(window->options.app_name() == "ReaGBA");
+      result(runtime, *window, window->send("ReaWeb_SetTitle", {"Rea&GBA 音"}));
+      CHECK(window->options.app_name() == "Rea&GBA 音");
+      runtime.set_docked(id, false);
+      CHECK(window->options.app_name() == "Rea&GBA 音");
     }
     for (const auto& content : {"not json", "[]", R"({"name":4})", R"({"name":"   "})", R"({"version":"bad"})"}) {
       std::ofstream(metadata_root / "app.json") << content;

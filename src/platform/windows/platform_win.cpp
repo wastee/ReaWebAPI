@@ -97,6 +97,15 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   bool drop_enabled_ = false, dragging_ = false;
   WinIcon icon_;
   static constexpr UINT dock_command = 0x1800;
+  std::wstring dock_label() const {
+    const auto name = options_.app_name ? options_.app_name() : options_.title;
+    std::string escaped;
+    for (char c : name) {
+      if (c == '&') escaped += '&';
+      escaped += c == '\t' || c == '\r' || c == '\n' ? ' ' : c;
+    }
+    return wide("Dock " + escaped + " in Docker");
+  }
   void layout() {
     RECT rect{}; GetClientRect(hwnd_, &rect);
     if (devtools_) rect = devtools_->layout(rect);
@@ -124,6 +133,7 @@ public:
         if (self->options_.on_dock_toggle) self->options_.on_dock_toggle();
         return 0;
       } else if (msg == WM_INITMENU && reinterpret_cast<HMENU>(wp) == GetSystemMenu(hwnd, FALSE)) {
+        ModifyMenuW(reinterpret_cast<HMENU>(wp), dock_command, MF_BYCOMMAND | MF_STRING, dock_command, self->dock_label().c_str());
         CheckMenuItem(reinterpret_cast<HMENU>(wp), dock_command, MF_BYCOMMAND |
           (self->options_.is_docked && self->options_.is_docked() ? MF_CHECKED : MF_UNCHECKED));
       } else if (msg == WM_DPICHANGED) {
@@ -167,7 +177,7 @@ public:
     if (!hwnd_) throw std::runtime_error("CreateWindowEx failed");
     if (options_.on_dock_toggle) {
       auto menu = GetSystemMenu(hwnd_, FALSE);
-      AppendMenuW(menu, MF_SEPARATOR, 0, nullptr); AppendMenuW(menu, MF_STRING, dock_command, L"Dock in REAPER");
+      AppendMenuW(menu, MF_SEPARATOR, 0, nullptr); AppendMenuW(menu, MF_STRING, dock_command, dock_label().c_str());
     }
     try { devtools_ = std::make_unique<WinDevTools>(hwnd_, [this] { layout(); }, [this] { focus(); }); }
     catch (...) { DestroyWindow(hwnd_); throw; }
@@ -226,6 +236,9 @@ public:
     }, [weak] {
       auto self = weak.lock();
       return self && !self->closed_ ? self->devtools_->menu_state() : DevToolsMenuState{};
+    }, [weak] {
+      auto self = weak.lock();
+      return self ? self->dock_label() : std::wstring();
     }), "Install window context menu");
     check(controller_->add_AcceleratorKeyPressed(Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
       [weak](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {

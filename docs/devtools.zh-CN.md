@@ -24,7 +24,7 @@ Ctrl+Shift+I 在检查器内同样有效。快捷键、工具栏 **Hide DevTools
 
 **Embedded** 以 WebView2 检查器内容填满右侧面板，隐藏标题栏、窗口控制按钮及边框，不保留装饰占位或可拖动标题栏。面板默认占可用宽度的 40%，拖动 1px 分割线可调整至 20%–80%，调整窗口大小时保留比例。分割线使用系统窗口边框颜色。**Floating** 恢复检查器原生标题栏、窗口控制按钮和边框，不再叠加宿主窗口。模式切换复用同一个检查器窗口，保留 Console / Inspector 状态，不重载页面。
 
-在 WebView 页面上右键，DevTools 操作与 **Dock in REAPER** / **Undock from REAPER** 位于同一菜单。隐藏时显示 **Open DevTools**，显示时提供 **Hide DevTools**。嵌入模式提供 **Float DevTools**，浮动模式提供 **Embed DevTools**。隐藏或正在打开时禁用模式切换。检查器填满容器，不附加宿主工具栏，Demo 也不再单独提供 DevTools 按钮。
+在 WebView 页面上右键，DevTools 操作与 **Dock <App> in Docker**（停靠时勾选） 位于同一菜单。隐藏时显示 **Open DevTools**，显示时提供 **Hide DevTools**。嵌入模式提供 **Float DevTools**，浮动模式提供 **Embed DevTools**。隐藏或正在打开时禁用模式切换。检查器填满容器，不附加宿主工具栏，Demo 也不再单独提供 DevTools 按钮。
 
 右键菜单、快捷键和 API 共用状态管理。Ctrl+Shift+I 和 **Hide DevTools** 只隐藏检查器并保留会话。浮动窗口的原生关闭按钮会结束检查器会话。浮动窗口跟随当前 REAPER 根窗口，其他 REAPER 窗口激活时不抢焦点地提升层级，不设置全局置顶。焦点移至 DevTools 不会暂停或重载页面。Windows 嵌入式 DevTools 支持多个停靠 WebView 之间的切换，包括 REAPER 与 WebView2 使用不同 DPI 上下文的情况。
 

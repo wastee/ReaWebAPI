@@ -28,8 +28,8 @@ inline HMENU create_window_menu(const WindowOptions& options, DevToolsMenuState 
     InsertMenu(menu, -1, MF_BYPOSITION | flags, id, text.c_str());
 #endif
   };
-  const auto name = options.app_name.empty() ? options.title : options.app_name;
-  append(1, "Dock " + name + " in REAPER", !!options.on_dock_toggle, options.is_docked && options.is_docked());
+  const auto name = options.app_name ? options.app_name() : options.title;
+  append(1, "Dock " + name + " in Docker", !!options.on_dock_toggle, options.is_docked && options.is_docked());
   append(2, "Reload");
   append(3, state.shown ? "Hide DevTools" : "Open DevTools", state.available);
   append(4, state.floating ? "Embed DevTools" : "Float DevTools", state.mode_enabled());

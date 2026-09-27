@@ -164,6 +164,7 @@ public:
       catch (const std::exception& error) { fail(error.what()); }
     }) : std::function<void()>{}, [this](DevToolsAction action) { devtools_->perform(action); },
       [this] { return devtools_->menu_state(); });
+    dock_menu_->set_app_name(request.value("appName", std::string()));
     gtk_widget_realize(plug_);
     webkit_web_view_load_uri(view_, uri_.c_str());
   }
@@ -205,7 +206,10 @@ public:
       devtools_->owner(0);
       channel_.send({{"id", id_}, {"op", "parked"}});
     } else if (op == "geometry") {
-      if (dock_menu_) dock_menu_->set_docked(request.value("docked", false));
+      if (dock_menu_) {
+        dock_menu_->set_docked(request.value("docked", false));
+        dock_menu_->set_app_name(request.value("appName", std::string()));
+      }
       const auto parent = request.at("parent").get<unsigned long>();
       const int x = request.at("x"), y = request.at("y");
       const int width = std::max(1, request.at("width").get<int>()), height = std::max(1, request.at("height").get<int>());

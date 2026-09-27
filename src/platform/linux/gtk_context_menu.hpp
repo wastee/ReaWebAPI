@@ -12,11 +12,11 @@ class GtkDockMenu {
   std::function<void()> toggle_;
   std::function<void(DevToolsAction)> devtools_;
   std::function<DevToolsMenuState()> state_;
-  bool docked_ = false;
+  std::string app_name_;
 public:
   GtkDockMenu(WebKitWebView* view, std::function<void()> toggle,
       std::function<void(DevToolsAction)> devtools = {}, std::function<DevToolsMenuState()> state = {}) : view_(view),
-      action_(g_simple_action_new("reaweb-dock", nullptr)),
+      action_(g_simple_action_new_stateful("reaweb-dock", nullptr, g_variant_new_boolean(false))),
       visibility_(g_simple_action_new("reaweb-devtools", nullptr)), mode_(g_simple_action_new("reaweb-devtools-mode", nullptr)),
       toggle_(std::move(toggle)), devtools_(std::move(devtools)), state_(std::move(state)) {
     g_signal_connect(action_, "activate", G_CALLBACK(+[](GSimpleAction*, GVariant*, gpointer data) {
@@ -38,8 +38,10 @@ public:
       // WebKitGTK can emit an empty proposed menu after DOM preventDefault().
       if (!webkit_context_menu_get_n_items(menu)) return FALSE;
       webkit_context_menu_remove_all(menu);
-      if (self->toggle_) webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->action_),
-        self->docked_ ? "Undock from REAPER" : "Dock in REAPER", nullptr));
+      if (self->toggle_) {
+        const auto label = "Dock " + self->app_name_ + " in Docker";
+        webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->action_), label.c_str(), nullptr));
+      }
       if (self->devtools_ && self->state_) {
         const auto state = self->state_();
         g_simple_action_set_enabled(self->visibility_, state.available);
@@ -59,6 +61,7 @@ public:
     g_signal_handlers_disconnect_by_data(visibility_, this); g_object_unref(visibility_);
     g_signal_handlers_disconnect_by_data(mode_, this); g_object_unref(mode_);
   }
-  void set_docked(bool docked) { docked_ = docked; }
+  void set_docked(bool docked) { g_simple_action_set_state(action_, g_variant_new_boolean(docked)); }
+  void set_app_name(const std::string& name) { app_name_ = name; }
 };
 }

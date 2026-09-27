@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
       int toggles = 0, requested = 0;
       reaweb::GtkDevTools* tools = nullptr;
       std::string error;
+      std::string app_name = "ReaGBA";
     } state;
     g_signal_connect(view, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu* menu, GdkEvent*, WebKitHitTestResult*, gpointer data) -> gboolean {
       auto& state = *static_cast<State*>(data); state.defaults.clear();
@@ -64,6 +65,7 @@ int main(int argc, char** argv) {
       gtk_widget_show_all(window);
       reaweb::GtkDockMenu docking(view, [&] { state.docked = !state.docked; ++state.toggles; },
         [&](reaweb::DevToolsAction action) { tools.perform(action); }, [&] { return tools.menu_state(); });
+      docking.set_app_name(state.app_name);
       g_signal_connect(view, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu* menu, GdkEvent*, WebKitHitTestResult*, gpointer data) -> gboolean {
         auto& state = *static_cast<State*>(data);
         try {
@@ -74,8 +76,10 @@ int main(int argc, char** argv) {
           CHECK(webkit_context_menu_get_n_items(menu) == 3);
           auto item = webkit_context_menu_first(menu);
           G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(item)), state.docked ? "Undock from REAPER" : "Dock in REAPER"));
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(item)), ("Dock " + state.app_name + " in Docker").c_str()));
           G_GNUC_END_IGNORE_DEPRECATIONS
+          auto checked = g_action_get_state(webkit_context_menu_item_get_gaction(item));
+          CHECK(checked && !!g_variant_get_boolean(checked) == state.docked); g_variant_unref(checked);
           const auto current = state.tools->menu_state();
           auto visibility = webkit_context_menu_get_item_at_position(menu, 1);
           auto mode = webkit_context_menu_get_item_at_position(menu, 2);
@@ -93,6 +97,7 @@ int main(int argc, char** argv) {
         <script>window.retained=42;window.events=0;addEventListener('contextmenu',e=>{window.events++;if(window.suppress)e.preventDefault();});</script>)HTML", "http://localhost/");
       until([&] { return !webkit_web_view_is_loading(view); });
       for (int i = 0; i < 2; ++i) {
+        if (i) { state.app_name = "Rea&GBA 音"; docking.set_app_name(state.app_name); }
         docking.set_docked(state.docked); right_click(view, 250);
         until([&] { return state.requested == i + 1; }); CHECK(state.error.empty() && state.toggles == i + 1);
       }

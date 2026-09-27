@@ -31,15 +31,15 @@ void require(bool condition, const char* message) { if (!condition) throw std::r
 #ifdef __APPLE__
 std::function<void(NSMenu*)> inspect_popup;
 void inspect_menu(::id, SEL, NSMenu* menu, NSEvent*, NSView*) { if (inspect_popup) inspect_popup(menu); }
-void check_menus(HWND child, bool docked) {
+void check_menus(HWND child, bool docked, NSString* name) {
   std::string error;
   bool received = false;
   inspect_popup = [&](NSMenu* menu) {
     received = true;
     try {
       require(menu.numberOfItems == 6, "Docker menu item count");
-      NSArray<NSString*>* labels = @[@"Dock Rea&GBA 音 in REAPER", @"Reload", @"Open DevTools",
-        @"Float DevTools", @"Open Rea&GBA 音 Folder", @"Close Rea&GBA 音"];
+      NSArray<NSString*>* labels = @[[NSString stringWithFormat:@"Dock %@ in Docker", name], @"Reload", @"Open DevTools",
+        @"Float DevTools", [NSString stringWithFormat:@"Open %@ Folder", name], [NSString stringWithFormat:@"Close %@", name]];
       for (NSInteger i = 0; i < menu.numberOfItems; ++i)
         require([[menu itemAtIndex:i].title isEqual:labels[i]], "Docker menu label");
       require(([menu itemAtIndex:0].state == NSControlStateValueOn) == docked, "Docker menu checked state");
@@ -67,7 +67,8 @@ void check_menus(HWND child, bool docked) {
     context:nil eventNumber:0 clickCount:1 pressure:1];
   [page_view willOpenMenu:menu withEvent:event];
   require(menu.numberOfItems == 3, "Page menu must contain only host controls");
-  require([[menu itemAtIndex:0].title isEqual:docked ? @"Undock from REAPER" : @"Dock in REAPER"], "Page docking menu state");
+  require([[menu itemAtIndex:0].title isEqual:[NSString stringWithFormat:@"Dock %@ in Docker", name]], "Page docking menu label");
+  require(([menu itemAtIndex:0].state == NSControlStateValueOn) == docked, "Page docking menu checked state");
   require([[menu itemAtIndex:1].title isEqual:@"Open DevTools"] && ![menu itemAtIndex:2].enabled, "Page DevTools menu state");
 }
 #endif
@@ -220,23 +221,32 @@ void tick() {
       case 0:
         if (!ready || !matches(window, id, 0xff0000)) return;
 #ifdef __APPLE__
-        check_menus(window, is_docked(id));
+        check_menus(window, is_docked(id), @"HTML title");
 #endif
         require(set_docked(id, true), "Dock failed"); remove_dock(static_cast<HWND>(sibling->handle())); advance(); break;
       case 1:
         if (!matches(window, id, 0xff0000)) return;
 #ifdef __APPLE__
-        check_menus(window, true);
+        check_menus(window, true, @"HTML title");
 #endif
         title("HTML title"); request("title"); advance(); break;
       case 2:
         if (!acknowledged) return;
+#ifdef __APPLE__
+        check_menus(window, true, @"Dynamic 标题");
+#endif
         title("Dynamic 标题"); unchanged(); request("blank"); advance(); break;
       case 3:
         if (!acknowledged) return;
+#ifdef __APPLE__
+        check_menus(window, true, @"Rea&GBA 音");
+#endif
         title("ReaWebAPI — swell-dock-test"); unchanged(); request("explicit"); advance(); break;
       case 4:
         if (!acknowledged) return;
+#ifdef __APPLE__
+        check_menus(window, true, @"Explicit 标题");
+#endif
         title("Explicit 标题"); unchanged(); add_dock(static_cast<HWND>(sibling->handle()), nullptr, "swell-dock-other", true);
         activate_dock(static_cast<HWND>(sibling->handle()));
         inactive_caption = caption(container); request("inactive"); advance(); break;
