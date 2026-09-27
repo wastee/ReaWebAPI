@@ -6,7 +6,7 @@ ReaWebAPI 的 **Web Runtime v1** 定义浏览器能力、资源加载和存储�
 
 ## WebView 色彩配置
 
-**REAPER Preferences > Plug-ins > ReaWebAPI** 打开 **ReaWebAPI settings** 页面。**Use sRGB for WebView rendering** 默认不勾选，保留 WebView 和系统默认色彩管理。勾选后请求固定 sRGB 显示配置，以减少 UI 颜色与 REAPER、ReaImGui 的差异。**Restore defaults** 取消勾选，通过 Apply/OK 保存。Cancel 丢弃尚未应用的修改，包括恢复默认操作。
+**REAPER Preferences > Plug-ins > ReaWebAPI** 打开 **ReaWebAPI settings** 页面。**Use sRGB for WebView rendering on Windows** 默认不勾选，保留 WebView 和系统默认色彩管理。Windows 上勾选后请求固定 sRGB 显示配置，以减少 UI 颜色与 REAPER、ReaImGui 的差异。**Restore defaults** 取消勾选，通过 Apply/OK 保存。Cancel 丢弃尚未应用的修改，包括恢复默认操作。
 
 | 平台 | 后端 | sRGB 覆盖 |
 | --- | --- | --- |
@@ -17,8 +17,6 @@ ReaWebAPI 的 **Web Runtime v1** 定义浏览器能力、资源加载和存储�
 Windows 上通过 Apply/OK 保存到 REAPER 资源目录中的 `ReaWebAPI.ini`，配置项为 `[ReaWebAPI] WebViewColorProfile=Default|sRGB`。修改后需重启 REAPER，刷新页面或重新打开 App 不会应用待生效的修改。继续使用现有共享浏览器数据目录。
 
 Windows 使用 [WebView2 浏览器开关](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags)，行为与可用性可能随运行时版本变化。宿主环境或注册表覆盖可能优先于该设置。该设置不会修改显示器 ICC 配置、HDR 配置或其他插件，也不能保证所有显示器的物理颜色完全一致。[WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) 和 [WebKitGTK 设置](https://webkitgtk.org/reference/webkit2gtk/stable/class.Settings.html) 没有对应的单个 WebView 显示配置接口，本版未实现这两个后端的覆盖。
-
-macOS 上，[WebKit 会从宿主窗口获取渲染色彩空间](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm)。窗口级 `NSWindow.colorSpace` 覆盖是可研究的接入路径，但对颜色匹配和加速内容的效果仍需验证。将其应用到共享的 REAPER/Docker 窗口可能影响其他内容。CSS 和 Canvas 的 sRGB 设置控制内容色彩空间，无法覆盖整个显示转换过程。
 
 ## 普通 Web App
 

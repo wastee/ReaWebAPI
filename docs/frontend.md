@@ -6,7 +6,7 @@ The **Web Runtime v1** contract defines browser capabilities, resource loading a
 
 ## WebView Color Profile
 
-**REAPER Preferences > Plug-ins > ReaWebAPI** opens **ReaWebAPI settings**. **Use sRGB for WebView rendering** is unchecked by default, preserving WebView and system color management. Checking it requests a fixed sRGB display profile to reduce UI color differences from REAPER and ReaImGui. **Restore defaults** clears the checkbox. Apply/OK saves the change, and Cancel discards unapplied changes, including Restore defaults.
+**REAPER Preferences > Plug-ins > ReaWebAPI** opens **ReaWebAPI settings**. **Use sRGB for WebView rendering on Windows** is unchecked by default, preserving WebView and system color management. On Windows, checking it requests a fixed sRGB display profile to reduce UI color differences from REAPER and ReaImGui. **Restore defaults** clears the checkbox. Apply/OK saves the change, and Cancel discards unapplied changes, including Restore defaults.
 
 | Platform | Backend | sRGB override |
 | --- | --- | --- |
@@ -17,8 +17,6 @@ The **Web Runtime v1** contract defines browser capabilities, resource loading a
 On Windows, Apply/OK saves `[ReaWebAPI] WebViewColorProfile=Default|sRGB` in `ReaWebAPI.ini` in the REAPER resource directory. Restart REAPER after changing it. Reloading a page or reopening an App does not apply a pending change. The existing shared browser data directory is retained.
 
 The Windows override uses a [WebView2 browser flag](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags), whose behavior and availability may change with the runtime. Host environment or registry overrides can take precedence. It does not change the monitor's ICC profile, HDR configuration or other plug-ins. It cannot guarantee identical physical colors on every display. [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) and [WebKitGTK settings](https://webkitgtk.org/reference/webkit2gtk/stable/class.Settings.html) provide no matching per-WebView display-profile setting. This release does not implement an override for those backends.
-
-On macOS, [WebKit derives a rendering color space from the host window](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm). A window-level `NSWindow.colorSpace` override is a potential integration path, but its effect on color matching and accelerated content needs validation. Applying it to a shared REAPER/Docker window can affect other content. CSS and Canvas sRGB settings control content color spaces, not the complete display conversion.
 
 ## Plain Web Apps
 

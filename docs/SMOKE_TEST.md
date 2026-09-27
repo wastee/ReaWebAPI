@@ -89,7 +89,7 @@ build/tests/macos_devtools
 
 ## WebView color profile
 
-- Open Preferences > Plug-ins > ReaWebAPI. Confirm the **ReaWebAPI settings** border fills the page and follows its edges when resizing. Only the **Use sRGB for WebView rendering** checkbox and bottom-right **Restore defaults** button appear inside it. On Windows, check Cancel, Apply/OK, persistence and restoring the unchecked default, including cancellation of a reset. Restart REAPER to apply each change. Open two Apps and a development WebView, close/reopen them, reload and dock/undock. Compare neutral and saturated CSS colors against native UI on standard, wide-gamut and HDR displays where available.
+- Open Preferences > Plug-ins > ReaWebAPI. Confirm the **ReaWebAPI settings** border fills the page and follows its edges when resizing. Only the **Use sRGB for WebView rendering on Windows** checkbox and bottom-right **Restore defaults** button appear inside it. On Windows, check Cancel, Apply/OK, persistence and restoring the unchecked default, including cancellation of a reset. Restart REAPER to apply each change. Open two Apps and a development WebView, close/reopen them, reload and dock/undock. Compare neutral and saturated CSS colors against native UI on standard, wide-gamut and HDR displays where available.
 - On macOS and Linux, confirm the checkbox is disabled and unchecked. Native color management must remain unchanged.
 
 ```sh
