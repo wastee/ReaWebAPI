@@ -53,14 +53,17 @@ Json resolve_references(const Json& args, const Json& results) {
   return resolved;
 }
 }
-void Bridge::validate_managed_call(const std::string& method, const Json& args) {
+void ReaperApiCore::validate_managed_call(const std::string& method, const Json& args) {
   if (!batch_methods().count(method)) throw Error("UNDO_BUSY", "This API is not supported inside a managed Undo gesture");
   const auto entry = std::find_if(native_entries().begin(), native_entries().end(), [&](const NativeEntry& e) { return method == e.name; });
   if (entry == native_entries().end()) throw Error("SCHEMA_MISMATCH", "Unknown managed Undo binding");
   observe_project();
   native_->validate_project(*entry, args, project_);
 }
-Json Bridge::batch(const Json& args) {
+Json ReaperApiCore::batch(const Json& args) {
+  observe_project();
+  if (!args.is_array() || args.empty() || args.size() > 2)
+    throw Error("INVALID_ARGUMENT", "Expected batch calls and optional options");
   const auto& calls = args[0];
   if (!calls.is_array() || calls.empty() || calls.size() > batch_limit)
     throw Error("INVALID_ARGUMENT", "A batch must contain 1 to 128 calls");

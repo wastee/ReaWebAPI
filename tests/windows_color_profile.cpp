@@ -49,7 +49,8 @@ void check_layout(HWND dialog) {
   CHECK(client.right - button.right == checkbox.left && client.bottom - button.bottom == checkbox.left);
   int controls = 0;
   for (auto child = GetWindow(dialog, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) ++controls;
-  CHECK(controls == 3);
+  CHECK(controls == 13);
+  for (const auto id : {1009, 1010, 1011, 1012, 1013, 1014}) CHECK(GetDlgItem(dialog, id));
 }
 
 int main(int argc, char**) {

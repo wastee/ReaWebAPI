@@ -1,5 +1,7 @@
 # Native Streams
 
+[External Clients](external-clients.md) attach to this stream hub with session-bound tickets. Binary packets, acknowledgements, backpressure and existing WebView Origin checks retain their contracts.
+
 `reaper.host` routes to Lua, `reaper.host.service(name)` to native services, `reaper.events` to state notifications, and `reaper.stream` to continuous binary data. Existing APIs retain their contracts.
 
 ## Consumer

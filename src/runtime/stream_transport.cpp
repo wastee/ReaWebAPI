@@ -116,7 +116,8 @@ struct StreamTransport::Impl {
         headers["sec-websocket-key"].size() != 24) return false;
     {
       std::lock_guard<std::mutex> lock(hub.mutex_); auto ticket = hub.tickets_.find(path.substr(1));
-      if (ticket == hub.tickets_.end() || ticket->second.connected || ticket->second.origin != headers["origin"] ||
+      if (ticket == hub.tickets_.end() || ticket->second.connected ||
+          (!ticket->second.external && ticket->second.origin != headers["origin"]) ||
           Time::now() - ticket->second.created > std::chrono::seconds(10)) return false;
       ticket->second.connected = true; client.token = ticket->first; client.stream = ticket->second.buffer;
     }

@@ -39,6 +39,8 @@ public:
   int close(uint64_t handle, int reason = REAWEB_STREAM_CLOSED);
   void close_owner(uint64_t owner);
   Json attach(const std::string& name, int window, uint64_t generation, const std::string& origin);
+  Json attach_external(const std::string& name, uint64_t session);
+  void detach_external(uint64_t session, const std::string& token = {});
   void detach(const std::string& token, int window);
   void detach_window(int window);
   Json info() const;
@@ -62,6 +64,7 @@ private:
     std::shared_ptr<StreamBuffer> buffer;
     bool connected = false;
     std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
+    uint64_t external = 0;
   };
   static constexpr unsigned slot_count = 128;
   std::array<Slot, slot_count> slots_;
@@ -73,5 +76,6 @@ private:
   uint64_t serial_ = 0;
   std::thread::id main_ = std::this_thread::get_id();
   std::unique_ptr<class StreamTransport> transport_;
+  Json attach_consumer(const std::string& name, int window, uint64_t generation, const std::string& origin, uint64_t external);
 };
 }

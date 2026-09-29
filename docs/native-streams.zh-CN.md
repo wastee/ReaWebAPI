@@ -1,5 +1,7 @@
 # Native Stream
 
+[External Client](external-clients.zh-CN.md) 通过绑定 Session 的 Ticket 接入同一 Stream Hub。二进制 packet、确认、背压和原有 WebView Origin 校验保持不变。
+
 `reaper.host` 对应 Lua Backend，`reaper.host.service(name)` 对应原生服务，`reaper.events` 对应状态通知，`reaper.stream` 对应连续二进制数据。现有接口保持原有契约。
 
 ```js

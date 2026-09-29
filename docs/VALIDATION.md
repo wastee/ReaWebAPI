@@ -1,21 +1,17 @@
-# v0.3.6.3 validation — 2026-09-26
+# v0.3.7.3 validation — 2026-09-29
 
 | Check | Result |
 | --- | --- |
-| Windows x64 / MSVC | Release extension and test extension built. All 16 CTest suites passed. |
-| Linux x86_64 / GCC, WSL Ubuntu | Release extension, WebKit helper and test extension built. All 15 available CTest suites passed. Lua CLI is unavailable in this environment. |
-| macOS ARM64 / AppleClang 17 | Release extension and test extension built on Apple M4, macOS 26.0.1. All 16 CTest suites passed. Real REAPER 7.74 checks passed. |
-| macOS Intel / AppleClang 17 | Release extension and test extension cross-compiled successfully for x86_64. Runtime validation remains with the existing Intel CI runner. This Mac has no Rosetta runtime. |
-| Linux ARM64 | Covered by the existing CI target. Not executed locally. |
-| JavaScript / TypeScript / Mirror | 43 bridge tests passed, including both WebView2 and WebKit transport adapters. Strict SDK type checks passed. All 730 Mirror definitions/bindings verified. |
-| Native Service | Invoke/send/events, missing/duplicate registration, worker completion, timeout, repeated disposal/unregister, unregister while pending, re-registration, queue limits and close/reload cleanup passed. |
-| Native Monitor | Full ordered selection comparison, same-first replacements, empty selection, shared subscription counts, stop/restart, incremental scans and track/transport/project/timeline state comparisons passed. |
-| Real REAPER / Windows and macOS ARM64 | `native_communication_smoke.py` passed with an immediately returning Lua launcher and with a Lua defer echo backend. Native states and third-party services remained active. Real checks include play/pause/stop/rate/repeat, project open/close/switch/save path/dirty, marker/region metadata, time/loop selection, pending unload rejection and dock/undock. |
-| Lua Backend regression / Windows and macOS ARM64 | `message_bridge_smoke.py` passed in isolated REAPER processes: real Lua ABI, Unicode, JSON, FIFO, independent windows, reload, closed-window rejection and the existing Lua Backend UI volume update. |
-| SDK / release contracts | 41 Python tests passed. SDK contents, documentation links, checksums, platform metadata and ReaPack ZIP layout/changelog verified. Release assembly tests use synthetic binaries, never distributed. |
+| Windows x64 / MSVC | Release extension built. All 22 CTest suites passed. Native Preferences integration target compiled. Real REAPER 7.78 acceptance passed. |
+| Linux x86_64 / GCC, WSL Ubuntu | Release extension and WebKit helper built. All 21 available CTest suites passed. Real REAPER 7.78 acceptance passed. Lua CLI is unavailable. |
+| macOS ARM64 / AppleClang 17 | Release extension built on Apple M4. All 22 CTest suites passed. Real REAPER 7.74 acceptance passed. |
+| macOS Intel / AppleClang 17 | Release extension cross-compiled for x86_64. Runtime acceptance was not executed. |
+| Linux ARM64 | Existing CI target retained. Not built or executed locally. |
+| External protocol | Authentication, allowlist, argument validation, Batch references/errors, binary and Float64 values, session handles, services/events/streams, disconnect cleanup, token rotation, enable/disable, queue limits and bind failure passed over real loopback sockets. |
+| Existing interfaces | Core, Runtime, native ABI, services, monitors, streams, producers, tasks, JavaScript bridge, Demo and resource contracts passed. All 730 API mappings verified. |
+| Real REAPER / Windows x64, Linux x86_64 and macOS ARM64 | External calls worked before creating a WebView. External Client and legacy WebView then shared API state and native events. Authentication, Batch references, service invocation, binary delivery, disconnect cleanup and cross-session handle rejection passed in isolated profiles. |
+| SDK / release contracts | 41 Python contracts passed, including SDK content and links, platform metadata, ReaPack layout and generated `ReaWebAPI.ext` changelog matching only this version's release notes. Release tests use synthetic binary fixtures that are never distributed. |
 
-The new registry, router and monitor code is shared by all three platforms. Host callbacks publish atomic revisions. REAPER state reads and service callbacks execute on the main thread. Worker completions/events are queued for native dispatch. Ordinary state events are bounded notifications, not a high-frequency stream.
+The full five-target ReaPack archive requires the platform CI builds. GitHub release notes and the packaged `@changelog` are generated from [release notes](release-notes.md). No GitHub release has been published by this validation.
 
-Local artifacts do not constitute a published release. The complete five-platform ReaPack archive is assembled from the CI builds. Its descriptor is generated from this version's [release notes](release-notes.md), excluding earlier changes. No Git commit or release publication is part of this validation.
-
-For remaining platform host acceptance, use the [smoke checklist](SMOKE_TEST.md). Native Stream is outside Part 1.
+See the [host acceptance checklist](SMOKE_TEST.md#external-clients) for the opt-in real REAPER test and remaining UI checks.

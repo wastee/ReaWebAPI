@@ -1,5 +1,7 @@
 # Native events and Host Services
 
+[External Clients](external-clients.md) share this registry and the Native Monitor sources. ABI 1 callbacks receive `window_id == 0` for External requests. Positive Window ID event targets retain their existing meaning.
+
 `reaper.host.send(message)` retains the Lua Backend route and message format. `reaper.host.service(name)` addresses built-in or third-party native services. `reaper.events` carries Runtime and REAPER state events. All three can coexist. WebView lifetime and native communication are maintained by REAPER's native timer, independently of Lua `defer`.
 
 ## JavaScript

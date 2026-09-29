@@ -24,12 +24,15 @@ public:
   int emit(uint64_t handle, int window, const char* event, const char* json);
   uint64_t lookup(const std::string& name) const;
   void call(const std::string& name, const std::string& method, const Json& payload, int window, Reply reply);
+  void call_external(const std::string& name, const std::string& method, const Json& payload, uint64_t session, Reply reply);
+  void cancel_external(uint64_t session);
+  Json info() const;
   void cancel_window(int window);
   void tick(Clock::time_point now = Clock::now(), Clock::time_point deadline = Clock::time_point::max());
   static const char* code(int status);
 private:
   struct Service { std::string name; ReaWeb_ServiceCallbacks callbacks; std::set<std::string> inputs; ReaWeb_ServiceShutdown shutdown = nullptr; };
-  struct Pending { uint64_t service; int window; Reply reply; Clock::time_point deadline; bool completed = false; };
+  struct Pending { uint64_t service; int window; Reply reply; Clock::time_point deadline; bool completed = false; uint64_t external = 0; };
   struct Output { uint64_t service, request; int window; std::string event; Json data; size_t bytes; };
   std::thread::id main_thread_ = std::this_thread::get_id();
   mutable std::mutex mutex_;
@@ -39,6 +42,7 @@ private:
   size_t output_bytes_ = 0;
   uint64_t next_service_ = 0, next_request_ = 0;
   Event event_;
-  void cancel(int window, uint64_t service, int status);
+  void cancel(int window, uint64_t service, int status, uint64_t external = 0);
+  void call_consumer(const std::string& name, const std::string& method, const Json& payload, int window, uint64_t external, Reply reply);
 };
 }

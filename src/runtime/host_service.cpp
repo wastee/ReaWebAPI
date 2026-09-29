@@ -81,13 +81,14 @@ int ServiceRegistry::set_shutdown(uint64_t handle, ReaWeb_ServiceShutdown callba
 void ServiceRegistry::shutdown() {
   while (!services_.empty()) remove(services_.begin()->first);
 }
-void ServiceRegistry::cancel(int window, uint64_t service, int status) {
+void ServiceRegistry::cancel(int window, uint64_t service, int status, uint64_t external) {
   struct Cancelled { uint64_t id; Pending pending; };
   std::vector<Cancelled> cancelled;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = pending_.begin(); it != pending_.end();) {
-      if ((window && it->second.window == window) || (service && it->second.service == service)) {
+      if ((window && it->second.window == window) || (service && it->second.service == service) ||
+          (external && it->second.external == external)) {
         cancelled.push_back({it->first, std::move(it->second)});
         it = pending_.erase(it);
       } else ++it;
@@ -131,6 +132,20 @@ int ServiceRegistry::remove(uint64_t handle) {
   return REAWEB_OK;
 }
 void ServiceRegistry::call(const std::string& name, const std::string& method, const Json& payload, int window, Reply reply) {
+  call_consumer(name, method, payload, window, 0, std::move(reply));
+}
+void ServiceRegistry::call_external(const std::string& name, const std::string& method, const Json& payload, uint64_t session, Reply reply) {
+  if (!session) throw Error("INVALID_ARGUMENT", "External consumer must have a session");
+  call_consumer(name, method, payload, 0, session, std::move(reply));
+}
+void ServiceRegistry::cancel_external(uint64_t session) { cancel(0, 0, 0, session); }
+Json ServiceRegistry::info() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  Json result = Json::array();
+  for (const auto& item : services_) result.push_back({{"name", item.second.name}, {"inputMethods", item.second.inputs}});
+  return result;
+}
+void ServiceRegistry::call_consumer(const std::string& name, const std::string& method, const Json& payload, int window, uint64_t external, Reply reply) {
   if (std::this_thread::get_id() != main_thread_) throw Error("MAIN_THREAD_REQUIRED", "Service dispatch requires the main thread");
   if (!valid_name(name.c_str()) || name.find('\0') != std::string::npos || !valid_name(method.c_str()) || method.find('\0') != std::string::npos)
     throw Error("INVALID_ARGUMENT", "Invalid service or method name");
@@ -157,7 +172,7 @@ void ServiceRegistry::call(const std::string& name, const std::string& method, c
     if (reply) {
       if (pending_.size() >= 1024) throw Error("QUEUE_LIMIT", "Too many pending service calls");
       request = ++next_request_;
-      pending_.emplace(request, Pending{handle, window, std::move(reply), Clock::now() + std::chrono::seconds(30)});
+      pending_.emplace(request, Pending{handle, window, std::move(reply), Clock::now() + std::chrono::seconds(30), false, external});
     }
   }
   int status;

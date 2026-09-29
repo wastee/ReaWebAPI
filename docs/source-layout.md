@@ -8,12 +8,16 @@ v0.1.8 按职责组织原生代码。根目录 `runtime/` 是浏览器 SDK，`sr
 src/
 ├─ core/
 │  ├─ core.cpp / core.hpp
+│  ├─ reaper_api.cpp
 │  ├─ batch.cpp / batch.hpp
 │  ├─ native.cpp / native.hpp / native_call.hpp
 │  ├─ worker.cpp / worker.hpp
 │  └─ file_time.hpp
 ├─ runtime/
 │  ├─ runtime.cpp / runtime.hpp
+│  ├─ external_client.cpp
+│  ├─ external_transport.cpp / external_transport.hpp
+│  ├─ external_settings.cpp / external_settings.hpp
 │  ├─ events.cpp
 │  ├─ native_monitor.cpp / native_monitor.hpp
 │  ├─ host_service.cpp / host_service.hpp
@@ -65,6 +69,10 @@ These are source responsibility groups, not five independent libraries. `reaweb_
 这五层是源码职责划分，不强行对应五个独立库。`reaweb_core` 构建通用桥接和可移植服务，`reaweb_runtime` 构建会话、窗口、事件和生命周期调度，`reawebapi` 加入插件入口与选定的平台后端。Runtime 测试和 Windows 原生拖放测试与扩展共用同一份 `reaweb_runtime`；Linux WebKit helper 仍是独立进程。
 
 ## API boundaries / API 边界
+
+External Clients add an optional localhost protocol inside the same extension. `ReaperApiCore` owns shared native calls, handles and Batch. `Runtime` schedules windows and External Sessions using the same service registry, monitor manager and stream hub. The External transport handles sockets and JSON only. See [External Clients](external-clients.md).
+
+External Client 在同一扩展内增加可选本机协议。`ReaperApiCore` 提供共享原生调用、Handle 和 Batch，`Runtime` 管理窗口与 External Session 的调度，复用同一 Service Registry、Monitor Manager 和 Stream Hub。External Transport 仅处理 socket 与 JSON。参见 [External Client](external-clients.zh-CN.md)。
 
 The public API consists of 730 REAPER Mirror bindings, thirteen Lua `ReaWeb_*` host APIs and fifteen JavaScript Runtime namespaces.
 

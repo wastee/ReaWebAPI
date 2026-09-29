@@ -31,6 +31,10 @@ def payload(root, version, revision):
     for name in ('reawebapi-native-stream.lua', 'index.html', 'app.js', 'style.css', 'README.md'):
         paths[f'ReaWebAPI/SDK/native-stream/{name}'] = root / 'web/native-stream' / name
     paths['ReaWebAPI/SDK/native/test_extension.cpp'] = root / 'tests/native_service_extension.cpp'
+    for name in ('external-clients.md', 'external-clients.zh-CN.md'):
+        paths[f'ReaWebAPI/docs/{name}'] = root / 'docs' / name
+    for name in ('index.html', 'app.js', 'style.css', 'README.md'):
+        paths[f'ReaWebAPI/SDK/external-client/{name}'] = root / 'web/external-client' / name
     paths['ReaWebAPI/docs/native-services.md'] = root / 'docs/native-services.md'
     paths['ReaWebAPI/docs/native-services.zh-CN.md'] = root / 'docs/native-services.zh-CN.md'
     for name in ('reawebapi-native-service.lua', 'Coexist.lua', 'index.html', 'app.js', 'style.css', 'README.md'):
@@ -70,6 +74,7 @@ def payload(root, version, revision):
             for header in ('reaweb_stream.h', 'reaweb_tasks.h'):
                 text = text.replace(f'](../src/public/{header})', f'](../SDK/native/{header})')
             text = text.replace('](../web/native-stream/', '](../SDK/native-stream/').replace('](web/native-stream/', '](SDK/native-stream/')
+            text = text.replace('](../web/external-client/', '](../SDK/external-client/').replace('](web/external-client/', '](SDK/external-client/')
             text = text.replace('](../tests/native_stream_extension.cpp)', '](../SDK/native/stream_extension.cpp)')
             text = text.replace('](../tests/native_service_extension.cpp)', '](../SDK/native/test_extension.cpp)')
             if name == 'ReaWebAPI/docs/release-notes.md':

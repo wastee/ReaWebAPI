@@ -1,5 +1,11 @@
 # REAPER host acceptance
 
+## External Clients
+
+- Confirm the server is disabled by default and existing WebView, Mirror and Lua Backend tools work. Enable **Preferences → Plug-ins → ReaWebAPI → External Clients**, apply, and use the [standalone browser Demo](../web/external-client/README.md) with the copied token.
+- Verify calls, Batch, native events and services with a WebView open. Disable the server and regenerate its token. Existing WebViews must remain usable, old External connections must close, and a new connection must use the current token. Test an occupied port and unchanged color-profile preferences.
+- Build `native_stream_extension`, then run `python tests/external_client_smoke.py --reaper <executable> --extension <binary> --stream-extension <test-binary> --output <new-directory>`. The script creates an isolated REAPER profile and checks native calls before opening a legacy WebView, shared state/events, services, binary stream delivery, disconnect cleanup and handle isolation. It writes `result.json` on success and retains `startup.log` and `process.log` for startup diagnostics. On Windows, the test profile prevents automatic addition of system VST3 paths.
+
 ## Native communication
 
 - Run `web/native-service/Open.lua`. Confirm the Lua action returns, the window stays open, `runtime.getInfo` works and all native state events continue. Repeat dock, undock, close and reopen.

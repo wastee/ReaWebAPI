@@ -21,10 +21,10 @@ struct NativeEntry {
 };
 const std::vector<NativeEntry>& native_entries();
 
-// One context per WebView document. Pointer values never cross the bridge.
+// One context per consumer. Pointer values never cross either transport.
 class NativeContext {
 public:
-  NativeContext(Host& host, std::string session);
+  NativeContext(Host& host, std::string session, bool strict_handles = false);
   ~NativeContext();
   Json invoke(const NativeEntry& entry, const Json& args);
   void validate(const NativeEntry& entry, const Json& args);

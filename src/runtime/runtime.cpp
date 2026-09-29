@@ -46,6 +46,7 @@ Runtime::Runtime(Host host, fs::path resource, std::function<void(const std::str
   services_.add("runtime", &builtin, &handle);
 }
 Runtime::~Runtime() {
+  stop_external();
   services_.shutdown();
   try { finish_undo(); } catch (...) {}
   for (const auto& item : sessions_) {
@@ -392,6 +393,7 @@ void Runtime::tick() {
   ticking_ = true;
   struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
   const auto deadline = Clock::now() + std::chrono::milliseconds(2);
+  sync_external();
   if (auto platform = platform_.lock()) platform->pump();
   for (auto it = apps_.begin(); it != apps_.end();) {
     if (!it->second.expired()) ++it;
@@ -465,16 +467,22 @@ void Runtime::tick() {
     }
   }
   // One request per window per pass. The next tick resumes after the last serviced window.
-  for (int n = 0, idle = 0; n < 64 && !sessions_.empty() && Clock::now() < deadline; ++n) {
+  for (int n = 0, idle = 0; n < 64 && (!sessions_.empty() || !external_sessions_.empty()) && Clock::now() < deadline; ++n) {
+    if (external_turn_ || sessions_.empty()) {
+      external_turn_ = false;
+      if (dispatch_external()) continue;
+    }
+    if (sessions_.empty()) break;
     auto it = sessions_.upper_bound(cursor_);
     if (it == sessions_.end()) it = sessions_.begin();
     cursor_ = it->first;
     auto s = it->second;
     if (s->closing || s->window->closed() || s->queue.empty()) {
-      if (++idle >= static_cast<int>(sessions_.size())) break;
+      if (++idle >= static_cast<int>(sessions_.size()) && !dispatch_external()) break;
       continue;
     }
     idle = 0;
+    external_turn_ = true;
     if (host_.current_project() != project_ || (host_.project_generation && host_.project_generation() != host_generation_))
       observe(deadline);
     auto request = std::move(s->queue.front()); s->queue.pop_front();
@@ -522,6 +530,7 @@ void Runtime::tick() {
     ++s->processed;
     reply(*s, std::move(request), std::move(response));
   }
+  flush_external_events();
   for (auto it = sessions_.begin(); it != sessions_.end();) {
     auto& s = *it->second;
     try {

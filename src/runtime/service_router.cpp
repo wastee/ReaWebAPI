@@ -45,6 +45,7 @@ bool Runtime::service_call(Session& session, const Work& request) {
 }
 void Runtime::service_event(uint64_t handle, const std::string& service, int window, const std::string& name, Json data) {
   if (name == "unloaded") { streams_.close_owner(handle); tasks_.cancel_owner(handle); }
+  external_service_event(handle, service, window, name, data);
   for (auto& item : sessions_) {
     auto& s = *item.second;
     if (!s.ready || s.closing || s.window->closed() || (window && window != s.id)) continue;
@@ -63,9 +64,13 @@ void Runtime::observe_native(Clock::time_point deadline) {
   std::map<std::string, size_t> counts;
   for (const auto& item : sessions_) if (item.second->ready && !item.second->closing && !item.second->window->closed())
     for (const auto& name : item.second->subscriptions) ++counts[name];
+  for (const auto& item : external_sessions_) if (item.second->connection->alive && item.second->connection->authenticated)
+    for (const auto& subscription : item.second->subscriptions)
+      if (subscription.second.service.empty()) ++counts[subscription.second.event];
   monitors_.subscriptions(counts);
   monitors_.tick(project_epoch_, deadline, [this](const auto& name, Json data) {
     for (const auto& item : sessions_) emit(*item.second, name, data);
+    external_event(name, data);
   });
 }
 }

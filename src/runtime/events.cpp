@@ -22,8 +22,10 @@ void Runtime::observe(Clock::time_point deadline) {
     selection_index_ = 0; selection_count_ = -1; last_selection_hash_ = 0;
     selection_event_ = nullptr;
     if (loaded) for (auto& item : sessions_) item.second->bridge->reset_handles();
+    if (loaded) for (auto& item : external_sessions_) item.second->core->reset_handles();
     if (loaded) for (auto& item : sessions_) emit(*item.second, "project-loaded", {{"projectEpoch", project_epoch_}});
     next_observation_ = Clock::now();
+    for (auto& item : external_sessions_) item.second->connection->project_epoch = project_epoch_;
   }
   const bool poll = Clock::now() >= next_observation_;
   const auto changes = host_.change_count ? host_.change_count(project_) : 0;

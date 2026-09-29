@@ -2,7 +2,7 @@ local root = arg[1] or '.'
 local launchers = {
   'web/ReaWebAPI_Demo.lua', 'runtime/starter/Open.lua', 'runtime/runtime-demo/Open.lua',
   'runtime/modern/Open.lua', 'runtime/modern/OpenDev.lua', 'runtime/web-runtime/Open.lua',
-  'web/lua-backend/Open.lua', 'web/native-service/Open.lua'
+  'web/lua-backend/reawebapi-lua-backend.lua', 'web/native-service/reawebapi-native-service.lua'
 }
 for _, path in ipairs(launchers) do
   local ext, windows, deferred, exits, sent, instances = {}, {}, {}, {}, {}, {}
@@ -59,7 +59,7 @@ for _, path in ipairs(launchers) do
   windows[1] = nil -- Native Docker close makes IsOpen false.
   run()
   assert(created == 2 and windows[2], 'Relaunch failed: ' .. path)
-  if path == 'web/lua-backend/Open.lua' then
+  if path == 'web/lua-backend/reawebapi-lua-backend.lua' then
     assert(sent[1] == [=[{"type":"state","track":{"name":"鼓组 \"A\"\u000a\u0009\\","volume":1.0000000000}}]=], sent[1])
     local old = deferred[1]; deferred[1] = nil; current = 1; old()
     assert(not deferred[1], 'Closed Docker must stop the Lua receive loop')

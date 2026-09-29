@@ -7,6 +7,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - 730 standard REAPER 7.80 API bindings with TypeScript declarations.
 - Mirror-aware Batch Builder for 456 reviewed APIs, including transport queries and time conversions, with deferred references, tuple destructuring and typed results.
 - Lua backend + WebView UI through `ReaWeb_Send`, `ReaWeb_Receive`, `reaper.host.send` and `message` events.
+- Optional [External Clients](docs/external-clients.md) over authenticated localhost WebSocket, sharing the Native API, Batch, Service, Event and binary Stream capabilities.
 - [Native Events and Host Services](docs/native-services.md) with subscription-driven state monitoring and a C/C++ extension registry, independent of Lua loops.
 - 15 Runtime namespaces for windows, events, files, native dialogs, drag and drop, audio, Undo and application services.
 - Native WebView support for modules, local resources, Workers and persistent App storage.
@@ -42,6 +43,8 @@ Run `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` from the Action List to open 
 **Preferences > Plug-ins > ReaWebAPI** provides **Use sRGB for WebView rendering on Windows**, unchecked by default. On Windows, checking it requests an sRGB display profile for all ReaWebAPI WebViews after restarting REAPER. **Restore defaults** clears the checkbox. Apply/OK saves changes. The checkbox is disabled on macOS and Linux. See [color profiles](docs/frontend.md#webview-color-profile).
 
 ## Development
+
+External programs can enable **External Clients** in the same Preferences page and connect to `ws://127.0.0.1:9123`. The server is disabled by default. See the [protocol](docs/external-clients.md) and [standalone browser Demo](web/external-client/README.md).
 
 Lua opens an App with `reaper.ReaWeb_Open(path, instanceKey)`. Pass `debug.getinfo(1, "S").source` as `instanceKey` to reuse the launcher's window. Omitting the key creates a new window. In JavaScript, await `reaper.lifecycle.ready`, then call the REAPER Mirror or Runtime namespaces such as `reaper.window` and `reaper.events`. API calls return Promises, with arguments and results following REAPER's Lua signatures.
 

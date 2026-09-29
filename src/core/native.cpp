@@ -98,6 +98,7 @@ struct NativeContext::Impl {
   Host& host;
   std::string session;
   uint64_t sequence = 0;
+  bool strict_handles = false;
   size_t buffer_size = default_buffer;
   std::unordered_map<std::string, Handle> handles;
   std::unordered_map<void*, std::string> reverse;
@@ -105,8 +106,8 @@ struct NativeContext::Impl {
   // Function addresses belong to REAPER for the lifetime of the extension.
   mutable std::unordered_map<std::string, void*> functions;
 };
-NativeContext::NativeContext(Host& host, std::string session)
-  : impl_(std::make_unique<Impl>(host, std::move(session))) {}
+NativeContext::NativeContext(Host& host, std::string session, bool strict_handles)
+  : impl_(std::make_unique<Impl>(host, std::move(session))) { impl_->strict_handles = strict_handles; }
 NativeContext::~NativeContext() { reset(); }
 void* NativeContext::resolve(const char* name) const {
   const auto found = impl_->functions.find(name);
@@ -199,6 +200,18 @@ void* NativeContext::pointer(const Json& v, const std::string& type, bool valida
     throw Error("INVALID_HANDLE", "Expected an opaque " + type + " handle");
   const auto it = impl_->handles.find(v["id"].get<std::string>());
   if (it == impl_->handles.end()) {
+    if (impl_->strict_handles) {
+      const auto& id = v["id"].get_ref<const std::string&>();
+      const auto prefix = impl_->session + ":";
+      uint64_t sequence = 0;
+      bool issued = id.size() > prefix.size() && id.compare(0, prefix.size(), prefix) == 0;
+      if (issued) for (size_t i = prefix.size(); i < id.size(); ++i) {
+        if (id[i] < '0' || id[i] > '9' || sequence > impl_->sequence / 10) { issued = false; break; }
+        sequence = sequence * 10 + unsigned(id[i] - '0');
+      }
+      if (!issued || !sequence || sequence > impl_->sequence || id != prefix + std::to_string(sequence))
+        throw Error("INVALID_HANDLE", "Handle does not belong to this session");
+    }
     if (!validate) return nullptr; // ValidatePtr* can test an already invalidated token.
     throw Error("STALE_HANDLE", "Object handle is no longer live");
   }

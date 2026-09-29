@@ -1,5 +1,7 @@
 # Native Event 与 Host Service
 
+[External Client](external-clients.zh-CN.md) 复用本 Registry 和 Native Monitor source。External 请求在 ABI 1 回调中的 `window_id` 为 `0`，正数 Window ID 定向事件保持原有语义。
+
 `reaper.host.send(message)` 保留现有 Lua Backend 消息格式和路由。`reaper.host.service(name)` 访问内建或第三方原生服务。`reaper.events` 承载 Runtime 与 REAPER 状态事件。三者可同时使用。WebView 和原生通信由 REAPER 原生定时器维持，不依赖 Lua `defer`。
 
 ```js

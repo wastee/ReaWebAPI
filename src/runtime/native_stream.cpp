@@ -152,13 +152,27 @@ void StreamHub::close_owner(uint64_t owner) {
   for (auto& slot : slots_) if (slot.owned && slot.owner == owner) close(slot.handle.load(), REAWEB_EXTENSION_UNLOADED);
 }
 Json StreamHub::attach(const std::string& name, int window, uint64_t generation, const std::string& origin) {
+  return attach_consumer(name, window, generation, origin, 0);
+}
+Json StreamHub::attach_external(const std::string& name, uint64_t session) {
+  if (!session) throw Error("INVALID_ARGUMENT", "External consumer must have a session");
+  return attach_consumer(name, 0, 0, {}, session);
+}
+void StreamHub::detach_external(uint64_t session, const std::string& token) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto it = tickets_.begin(); it != tickets_.end();)
+    if (it->second.external == session && session && (token.empty() || it->first == token)) it = tickets_.erase(it);
+    else ++it;
+}
+Json StreamHub::attach_consumer(const std::string& name, int window, uint64_t generation, const std::string& origin, uint64_t external) {
   if (!transport_) transport_ = std::make_unique<StreamTransport>(*this);
   std::lock_guard<std::mutex> lock(mutex_);
   if (tickets_.size() >= 64) throw Error("QUEUE_LIMIT", "At most 64 stream consumers may be attached");
   for (const auto& slot : slots_) if (slot.owned && slot.name == name) {
     std::random_device random; std::string token;
     for (int i = 0; i < 8; ++i) { char text[9]; std::snprintf(text, sizeof(text), "%08x", random()); token += text; }
-    tickets_.emplace(token, Ticket{window, generation, origin, slot.owned});
+    auto inserted = tickets_.emplace(token, Ticket{window, generation, origin, slot.owned});
+    inserted.first->second.external = external;
     const auto& d = slot.owned->descriptor;
     static const char* kinds[] = {"", "frame", "audio", "spectrum", "meter", "waveform", "binary", "midi"};
     static const char* formats[] = {"", "rgba8", "bgra8", "float32", "bytes"};
@@ -172,11 +186,11 @@ Json StreamHub::attach(const std::string& name, int window, uint64_t generation,
 }
 void StreamHub::detach(const std::string& token, int window) {
   std::lock_guard<std::mutex> lock(mutex_); auto it = tickets_.find(token);
-  if (it != tickets_.end() && it->second.window == window) tickets_.erase(it);
+  if (it != tickets_.end() && !it->second.external && it->second.window == window) tickets_.erase(it);
 }
 void StreamHub::detach_window(int window) {
   std::lock_guard<std::mutex> lock(mutex_);
-  for (auto it = tickets_.begin(); it != tickets_.end();) if (it->second.window == window) it = tickets_.erase(it); else ++it;
+  for (auto it = tickets_.begin(); it != tickets_.end();) if (!it->second.external && it->second.window == window) it = tickets_.erase(it); else ++it;
 }
 Json StreamHub::info() const {
   std::lock_guard<std::mutex> lock(mutex_); Json streams = Json::array();

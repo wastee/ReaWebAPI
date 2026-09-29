@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.7.2 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.7.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -87,10 +87,12 @@ endif()
 find_package(Threads REQUIRED)
 add_library(reaweb_core STATIC
   src/core/core.cpp
+  src/core/reaper_api.cpp
   src/core/batch.cpp
   src/core/native.cpp
   src/core/worker.cpp
   src/runtime/services.cpp
+  src/runtime/external_settings.cpp
   src/runtime/app.cpp
   src/runtime/audio.cpp
   src/runtime/drag_drop.cpp
@@ -110,9 +112,14 @@ endif()
 target_include_directories(reaweb_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(reaweb_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads PRIVATE httplib::httplib lunasvg::lunasvg)
 target_compile_definitions(reaweb_core PUBLIC REAWEB_VERSION="${PROJECT_VERSION}")
+if(WIN32)
+  target_link_libraries(reaweb_core PRIVATE bcrypt)
+endif()
 
 # Share the same session implementation between the plugin and native tests.
 add_library(reaweb_runtime STATIC
+  src/runtime/external_transport.cpp
+  src/runtime/external_client.cpp
   src/runtime/native_stream.cpp
   src/runtime/native_tasks.cpp
   src/runtime/audio_analysis.cpp

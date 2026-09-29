@@ -77,8 +77,7 @@ void validate_external_url(const std::string& url) {
 }
 
 Bridge::Bridge(Host& host, Controls controls, std::string session)
-  : host_(host), controls_(std::move(controls)), session_(std::move(session)) {
-  native_ = std::make_unique<NativeContext>(host_, session_);
+  : ReaperApiCore(host, session), controls_(std::move(controls)), session_(std::move(session)) {
   for (const auto& entry : native_entries()) {
     const auto* binding = &entry;
     add_reaper(entry.name, [this, binding](const Json& args) { return native_->invoke(*binding, args); });
@@ -184,11 +183,6 @@ void Bridge::add_reaper(const std::string& name, std::function<Json(const Json&)
   add(name, definition.at("minArgs").get<size_t>(), definition.at("maxArgs").get<size_t>(), std::move(fn));
 }
 
-void Bridge::observe_project() {
-  auto current = host_.current_project();
-  project_ = current;
-}
-void Bridge::reset_handles() { native_->reset(); project_ = nullptr; }
 
 Json parse_request(const std::string& message) {
     if (message.size() > message_limit) throw Error("MESSAGE_LIMIT", "Bridge message exceeds 64 MiB");

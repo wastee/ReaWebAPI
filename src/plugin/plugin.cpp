@@ -214,7 +214,9 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   try {
     console = load<void (*)(const char*)>(rec, "ShowConsoleMsg");
     auto resource = load<const char* (*)()>(rec, "GetResourcePath");
-    add_registration("prefpage", initialize_preferences(instance, fs::u8path(resource())));
+    add_registration("prefpage", initialize_preferences(instance, fs::u8path(resource()), [](const ExternalSettings& settings) {
+      if (runtime) runtime->configure_external(settings);
+    }));
     auto enum_projects = load<ReaProject* (*)(int, char*, int)>(rec, "EnumProjects");
     auto count_selected = load<int (*)(ReaProject*)>(rec, "CountSelectedTracks");
     auto get_selected = load<MediaTrack* (*)(ReaProject*, int)>(rec, "GetSelectedTrack");
@@ -350,6 +352,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
         if (dock_index(hwnd, &floating) >= 0 && floating && IsWindowVisible(hwnd)) activate_dock(hwnd);
       }};
     runtime = std::make_unique<Runtime>(std::move(host), fs::u8path(resource()), log_error, std::move(dock));
+    try { runtime->configure_external(external_preferences()); }
+    catch (const std::exception& error) { log_error(std::string("External Client: ") + error.what()); }
     register_audio_hook = reinterpret_cast<int (*)(bool, audio_hook_register_t*)>(rec->GetFunc("Audio_RegHardwareHook"));
     if (register_audio_hook && !register_audio_hook(true, &audio_hook)) register_audio_hook = nullptr;
     add_registration("API_ReaWeb_RegisterService", reinterpret_cast<void*>(ReaWeb_RegisterService));

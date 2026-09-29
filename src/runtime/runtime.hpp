@@ -8,6 +8,8 @@
 #include "runtime/native_stream.hpp"
 #include "runtime/native_tasks.hpp"
 #include "runtime/native_producers.hpp"
+#include "runtime/external_transport.hpp"
+#include "runtime/external_settings.hpp"
 #include <deque>
 #include <optional>
 #include <set>
@@ -37,7 +39,31 @@ public:
   StreamHub& streams() { return streams_; }
   NativeTasks& tasks() { return tasks_; }
   NativeProducers& producers() { return producers_; }
+  void configure_external(const ExternalSettings& settings);
+  uint16_t external_port() const;
 private:
+  struct ExternalSession {
+    struct Subscription { std::string event, service; uint64_t handle = 0; };
+    uint64_t id = 0, sequence = 0;
+    std::string identity;
+    std::shared_ptr<ExternalConnection> connection;
+    std::unique_ptr<ReaperApiCore> core;
+    std::map<std::string, Subscription> subscriptions;
+    std::map<std::string, Json> events;
+    std::map<std::string, std::string> consumers;
+  };
+  std::unique_ptr<ExternalTransport> external_transport_;
+  ExternalSettings external_settings_;
+  std::map<uint64_t, std::shared_ptr<ExternalSession>> external_sessions_;
+  uint64_t next_external_ = 0, external_cursor_ = 0;
+  bool external_turn_ = false;
+  void sync_external();
+  void stop_external();
+  bool dispatch_external();
+  void external_event(const std::string& name, const Json& data);
+  void external_service_event(uint64_t handle, const std::string& service, int window, const std::string& name, const Json& data);
+  Json external_event_data(ExternalSession& session, const std::string& name, Json data);
+  void flush_external_events();
   struct App {
     std::string id, origin, mode;
     Json info;
