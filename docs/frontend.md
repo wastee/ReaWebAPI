@@ -20,6 +20,8 @@ The Windows override uses a [WebView2 browser flag](https://learn.microsoft.com/
 
 ## Plain Web Apps
 
+Docked and floating WebViews synchronize their native resize background with an opaque CSS canvas background on `html`, or on `body` when propagated to the canvas. Root/body attribute changes, stylesheet loads and style-node changes, viewport resizing and system color-scheme changes refresh this color. Transparent or translucent canvas backgrounds retain the browser's white fallback. Background images and gradients remain browser-rendered. No App-side resize handler is required.
+
 Use ordinary HTML, CSS and JavaScript directories. No bundler or npm is required:
 
 ```text

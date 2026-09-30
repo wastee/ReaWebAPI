@@ -20,6 +20,8 @@ Windows 使用 [WebView2 浏览器开关](https://learn.microsoft.com/en-us/micr
 
 ## 普通 Web App
 
+停靠和浮动 WebView 的原生缩放背景跟随 `html` 的不透明 CSS 画布背景色，或传播到画布的 `body` 背景色。根节点和 body 属性变化、样式表加载、样式节点变化、视口缩放和系统深浅色切换会刷新该颜色。透明或半透明画布背景保留浏览器的白色默认底色，背景图片和渐变仍由浏览器绘制。App 无需添加缩放处理代码。
+
 支持普通 HTML/CSS/JavaScript 目录，无需打包或 npm：
 
 ```text

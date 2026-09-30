@@ -1,5 +1,6 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
+#include "platform/shared/page_background.hpp"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -13,6 +14,7 @@
 #include <cstring>
 #include "platform/windows/win_devtools.hpp"
 #include "platform/windows/win_icon.hpp"
+#include "platform/windows/win_dock_redraw.hpp"
 #include "platform/windows/win_context_menu.hpp"
 #include "platform/shared/window_menu.hpp"
 
@@ -98,6 +100,31 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   bool visible_ = true;
   bool drop_enabled_ = false, dragging_ = false;
   WinIcon icon_;
+  WinDockRedraw dock_redraw_;
+  COLORREF background_ = RGB(255, 255, 255);
+  void set_background(unsigned color) {
+    const auto next = RGB((color >> 16) & 255, (color >> 8) & 255, color & 255);
+    if (background_ == next) return;
+    background_ = next;
+    ComPtr<ICoreWebView2Controller2> controller;
+    if (controller_ && SUCCEEDED(controller_.As(&controller)))
+      controller->put_DefaultBackgroundColor({255, GetRValue(next), GetGValue(next), GetBValue(next)});
+    InvalidateRect(hwnd_, nullptr, FALSE);
+  }
+  void paint_background(HDC dc) {
+    const auto saved = SaveDC(dc);
+    // Docker style changes and WM_PRINTCLIENT may supply an unclipped DC.
+    for (auto child = GetWindow(hwnd_, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+      if (!IsWindowVisible(child)) continue;
+      RECT rect{}; GetWindowRect(child, &rect);
+      MapWindowPoints(nullptr, hwnd_, reinterpret_cast<POINT*>(&rect), 2);
+      ExcludeClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
+    }
+    RECT rect{}; GetClientRect(hwnd_, &rect);
+    const auto brush = CreateSolidBrush(background_);
+    FillRect(dc, &rect, brush); DeleteObject(brush);
+    if (saved) RestoreDC(dc, saved);
+  }
   static constexpr UINT dock_command = 0x1800;
   std::wstring dock_label() const {
     const auto name = options_.app_name ? options_.app_name() : options_.title;
@@ -122,6 +149,18 @@ public:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (self) {
+      if (msg == WM_WINDOWPOSCHANGED || (msg == WM_STYLECHANGED && wp == static_cast<WPARAM>(GWL_STYLE)))
+        self->dock_redraw_.sync(hwnd);
+      if (msg == WM_STYLECHANGING && wp == static_cast<WPARAM>(GWL_STYLE)) {
+        reinterpret_cast<STYLESTRUCT*>(lp)->styleNew |= WS_CLIPCHILDREN;
+      } else if (msg == WM_ERASEBKGND) {
+        self->paint_background(reinterpret_cast<HDC>(wp)); return 1;
+      } else if (msg == WM_PAINT) {
+        PAINTSTRUCT paint{};
+        auto dc = BeginPaint(hwnd, &paint);
+        self->paint_background(dc);
+        EndPaint(hwnd, &paint); return 0;
+      }
       if (msg == WM_CONTEXTMENU && self->devtools_) {
         auto keep_alive = self->shared_from_this();
         try {
@@ -166,6 +205,7 @@ public:
         if (self->options_.on_close) self->options_.on_close(); else self->closed_ = true;
         return 0;
       } else if (msg == WM_NCDESTROY) {
+        self->dock_redraw_.detach();
         self->closed_ = true; self->hwnd_ = nullptr;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
       }
@@ -189,6 +229,7 @@ public:
   }
   ~WinWindow() override {
     closed_ = true;
+    dock_redraw_.detach();
     if (devtools_) devtools_->detach();
     if (controller_) controller_->Close();
     devtools_.reset();
@@ -260,7 +301,8 @@ public:
           args->get_Source(&source);
           if (same_document(utf8(source), self->uri_) && SUCCEEDED(args->TryGetWebMessageAsString(&message))) {
             const auto text = utf8(message);
-            if (text.rfind("{\"__reawebNativeDrop\":", 0) == 0) self->native_drop(args, text);
+            if (page_background_message(text, [self](unsigned color) { self->set_background(color); })) {}
+            else if (text.rfind("{\"__reawebNativeDrop\":", 0) == 0) self->native_drop(args, text);
             else self->options_.on_message(text);
           }
           CoTaskMemFree(source); CoTaskMemFree(message);
@@ -314,7 +356,8 @@ public:
         }
         return S_OK;
       }).Get(), &token), "add_NavigationCompleted");
-    check(webview_->AddScriptToExecuteOnDocumentCreated(wide(options_.script).c_str(),
+    check(webview_->AddScriptToExecuteOnDocumentCreated(wide(options_.script +
+      page_background_script("chrome.webview.postMessage(message);")).c_str(),
       Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
         [weak](HRESULT result, LPCWSTR) -> HRESULT {
           if (auto self = weak.lock(); self && !self->closed_) {
@@ -345,6 +388,7 @@ public:
     return hwnd_ && (focus == hwnd_ || IsChild(hwnd_, focus));
   }
   void tick() override {
+    if (!closed_) dock_redraw_.sync(hwnd_);
     if (!closed_) icon_.refresh(hwnd_, icon_host());
     if (!closed_ && devtools_) devtools_->tick(webview_.Get());
     const bool next = visible();
@@ -515,7 +559,6 @@ public:
       reinterpret_cast<LPCWSTR>(&WinWindow::proc), &instance_);
     WNDCLASSW cls{}; cls.lpfnWndProc = WinWindow::proc; cls.hInstance = instance_;
     cls.lpszClassName = window_class; cls.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
       OleUninitialize(); com_ = false; throw std::runtime_error("RegisterClass failed");
     }

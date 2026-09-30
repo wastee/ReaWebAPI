@@ -41,6 +41,7 @@ public:
   std::string version;
   std::map<int, WindowOptions> listeners;
   std::map<int, Json> inspectors;
+  std::map<int, unsigned> backgrounds;
   explicit LinuxProcess(const fs::path& data) {
     if (!getenv("DISPLAY")) throw std::runtime_error("ReaWebAPI requires an X11 or XWayland display on Linux");
     auto executable = helper_path().string();
@@ -102,6 +103,7 @@ public:
         if (op == "parked") { parked_.insert(message.at("id").get<int>()); return; }
         auto it = listeners.find(message.at("id").get<int>());
         if (it == listeners.end()) return;
+        if (op == "background") { backgrounds[it->first] = message.at("color").get<unsigned>(); return; }
         if (op == "devtools-state") { inspectors[it->first] = message.at("state"); return; }
         if (op == "message") it->second.on_message(message.at("message").get<std::string>());
         else if (op == "dock-toggle" && it->second.on_dock_toggle) it->second.on_dock_toggle();
@@ -166,6 +168,12 @@ public:
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
       {"appName", options.app_name ? options.app_name() : options.title}});
     process_->listeners.emplace(id_, std::move(options));
+    process_->backgrounds.emplace(id_, 0xffffff);
+    window_->resize = [this] {
+      // Keep the helper parked until the next host tick finishes reparenting.
+      try { if (!geometry_.is_null()) sync(); }
+      catch (const std::exception& error) { process_->listeners.at(id_).on_error(error.what()); }
+    };
     window_->context_menu = [this](LPARAM position) {
       auto keep_alive = shared_from_this();
       try {
@@ -186,6 +194,8 @@ public:
   ~LinuxWindow() override {
     process_->listeners.erase(id_);
     process_->inspectors.erase(id_);
+    process_->backgrounds.erase(id_);
+    window_->resize = {};
     try {
       // Detach before SWELL destroys the X11 parent, preserving other pages.
       process_->park(id_);
@@ -194,6 +204,7 @@ public:
   }
   void sync() {
     if (closed()) return;
+    window_->set_background(process_->backgrounds.at(id_));
     icon_.refresh(icon_target(), docked());
     using GetXid = unsigned long (*)(void*);
     static auto get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
@@ -215,7 +226,12 @@ public:
     GetClientRect(handle, &rect);
     POINT origin{0, 0};
     ClientToScreen(handle, &origin);
-    ScreenToClient(ancestor, &origin);
+    // X11 embedding is relative to the GDK window, including REAPER's menu area.
+    using GetOrigin = int (*)(void*, int*, int*);
+    static auto get_origin = reinterpret_cast<GetOrigin>(dlsym(RTLD_DEFAULT, "gdk_window_get_origin"));
+    int native_x = 0, native_y = 0;
+    if (get_origin && get_origin(native, &native_x, &native_y)) { origin.x -= native_x; origin.y -= native_y; }
+    else ScreenToClient(ancestor, &origin);
     const auto& options = process_->listeners.at(id_);
     Json next = {{"id", id_}, {"op", "geometry"}, {"parent", get_xid(native)}, {"x", origin.x}, {"y", origin.y},
       {"width", rect.right - rect.left}, {"height", std::max(1, int(rect.bottom - rect.top))}, {"visible", visible()}, {"focused", focused()},

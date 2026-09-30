@@ -1,8 +1,10 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
+#include "platform/shared/page_background.hpp"
 #include "platform/shared/window_menu.hpp"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #include "platform/shared/swell_window.hpp"
 #include "platform/macos/mac_devtools.hpp"
@@ -77,6 +79,7 @@ void open_external(const std::string& url) {
 @public
   bool dropEnabled;
   bool sourceClosed;
+  NSColor* resizeBackground;
   NSEvent* lastDragEvent;
   std::function<void(reaweb::Json)> receiveDrop;
   std::function<void(reaweb::Json)> dragReply;
@@ -88,6 +91,11 @@ void open_external(const std::string& url) {
 @end
 
 @implementation ReaWebNativeView
+- (void)updateLayer {
+  [super updateLayer];
+  // Keep newly exposed pixels consistent while WebKit's resized tiles arrive.
+  if (resizeBackground) self.layer.backgroundColor = resizeBackground.CGColor;
+}
 - (void)willOpenMenu:(NSMenu*)menu withEvent:(NSEvent*)event {
   [super willOpenMenu:menu withEvent:event];
   if (sourceClosed || !menu.numberOfItems) return;
@@ -225,7 +233,8 @@ public:
     config.websiteDataStore = data;
     config.processPool = pool;
     [config.userContentController addScriptMessageHandler:delegate_ name:@"reaweb"];
-    auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script)
+    auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script +
+      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);"))
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
     webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
@@ -249,7 +258,19 @@ public:
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close);
+    delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
+      if (!page_background_message(message, [this](unsigned color) {
+        window_->set_background(color);
+        auto background = [NSColor colorWithSRGBRed:((color >> 16) & 255) / 255.0
+          green:((color >> 8) & 255) / 255.0 blue:(color & 255) / 255.0 alpha:1.0];
+        webview_.underPageBackgroundColor = background;
+        webview_->resizeBackground = background;
+        webview_.needsDisplay = YES;
+        webview_.superview.layer.backgroundColor = background.CGColor;
+      })) receive(std::move(message));
+    };
     auto content = (__bridge NSView*)GetDlgItem(static_cast<HWND>(window_->handle()), 0);
+    content.wantsLayer = YES;
     webview_.frame = content.bounds;
     [content addSubview:webview_];
     devtools_ = std::make_unique<MacDevTools>(webview_, [this] { if (!closed()) focus(); });

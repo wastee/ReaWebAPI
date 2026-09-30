@@ -11,6 +11,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - [Native Events and Host Services](docs/native-services.md) with subscription-driven state monitoring and a C/C++ extension registry, independent of Lua loops.
 - 15 Runtime namespaces for windows, events, files, native dialogs, drag and drop, audio, Undo and application services.
 - Native WebView support for modules, local resources, Workers and persistent App storage.
+- Docked and floating WebViews retain browser content during resizing, with the native background following the page's opaque HTML/body background color.
 - Windows/Linux [DevTools](docs/devtools.md) with a resizable right-hand panel, floating mode and saved layout preferences. Ctrl+Shift+I toggles visibility. Windows offers a borderless embedded panel, native floating window and page context-menu controls.
 - macOS [Web Inspector](docs/devtools.md#macos) supports a right-hand embedded panel, native floating window and saved layout preferences. Option+Command+I and the page context menu control the same inspection session.
 - WebView context menus provide docking and DevTools controls. Docker tab menus add reload, App folder and close actions. PNG, ICO and SVG window icons from HTML favicons or `reaper.window.setIcon(path)` survive docking and reloads, with visibility applied immediately by `reaper.window.setIconVisible(boolean)`, including the default startup icon. Floating Docker title bars follow the active WebView's icon settings on Windows, macOS and Linux.

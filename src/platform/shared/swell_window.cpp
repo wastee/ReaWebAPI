@@ -10,6 +10,18 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
   if (message == WM_INITDIALOG) { SetWindowLong(window, GWL_USERDATA, parameter); return TRUE; }
   auto self = reinterpret_cast<SwellWindow*>(GetWindowLong(window, GWL_USERDATA));
   if (!self) return FALSE;
+  if (message == WM_ERASEBKGND) return TRUE;
+  if (message == WM_PAINT) {
+    PAINTSTRUCT paint{};
+    if (auto dc = BeginPaint(window, &paint)) {
+      const auto color = self->background_;
+      auto brush = CreateSolidBrush(RGB((color >> 16) & 255, (color >> 8) & 255, color & 255));
+      FillRect(dc, &paint.rcPaint, brush); DeleteObject(brush);
+      EndPaint(window, &paint);
+    }
+    return TRUE;
+  }
+  if (message == WM_SIZE && self->resize) self->resize();
   if (message == WM_CONTEXTMENU && self->context_menu) {
     auto show = self->context_menu;
     show(parameter); return TRUE;
@@ -36,6 +48,11 @@ SwellWindow::~SwellWindow() {
   }
 }
 bool SwellWindow::closed() const { return closed_ || !window_ || !IsWindow(window_); }
+void SwellWindow::set_background(unsigned color) {
+  if (background_ == color) return;
+  background_ = color;
+  if (window_) InvalidateRect(window_, nullptr, FALSE);
+}
 void SwellWindow::prepare_dock() { GetWindowRect(window_, &floating_); }
 void SwellWindow::restore_floating() {
   SetParent(window_, nullptr);

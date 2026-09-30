@@ -28,6 +28,15 @@ x.XSync.argtypes = [C.c_void_p, C.c_int]
 x.XCloseDisplay.argtypes = [C.c_void_p]
 x.XQueryTree.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(C.c_ulong), C.POINTER(C.c_ulong), C.POINTER(C.POINTER(C.c_ulong)), C.POINTER(C.c_uint)]
 x.XFree.argtypes = [C.c_void_p]
+class WindowAttributes(C.Structure):
+    _fields_ = [(n, C.c_int) for n in ('x', 'y', 'width', 'height', 'border_width', 'depth')] + [
+        ('visual', C.c_void_p), ('root', C.c_ulong), ('window_class', C.c_int),
+        ('bit_gravity', C.c_int), ('win_gravity', C.c_int), ('backing_store', C.c_int),
+        ('backing_planes', C.c_ulong), ('backing_pixel', C.c_ulong), ('save_under', C.c_int),
+        ('colormap', C.c_ulong), ('map_installed', C.c_int), ('map_state', C.c_int),
+        ('all_event_masks', C.c_long), ('your_event_mask', C.c_long), ('do_not_propagate_mask', C.c_long),
+        ('override_redirect', C.c_int), ('screen', C.c_void_p)]
+x.XGetWindowAttributes.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(WindowAttributes)]
 display = x.XOpenDisplay(None)
 assert display, 'X11 display required'
 parents = [x.XCreateSimpleWindow(display, x.XDefaultRootWindow(display), 30 + i*400, 30, 380, 300, 0, 0, 0) for i in range(2)]
@@ -63,7 +72,7 @@ def receive_until(condition, timeout=20):
                 results.append((message['id'], request['method'], request.get('args')))
                 response = {'id': request['id'], 'document': request['document'], 'result': {'protocol': 1, 'projectEpoch': 1, 'methods': list(json.loads((root / 'api/bindings.json').read_text())['functions'])} if request['method'] == '__reawebHello' else '7.smoke'}
                 send({'id': message['id'], 'op': 'eval', 'script': 'window.__reawebReceive(' + json.dumps(response) + ');'})
-            else: results.append((message.get('id', 0), message['op'], None))
+            else: results.append((message.get('id', 0), message['op'], message.get('color')))
     assert condition(), [(row[0], row[1], str(row[2])[:200]) for row in results]
 
 def geometry(id, target, focused=False):
@@ -77,6 +86,11 @@ def children(window):
     if pointer: x.XFree(pointer)
     return result
 
+def mapped(window):
+    attributes = WindowAttributes()
+    assert x.XGetWindowAttributes(display, window, C.byref(attributes))
+    return attributes.map_state == 2
+
 try:
     receive_until(lambda: any(row[1] == 'ready' for row in results))
     bridge = '(() => {\n' + (root / 'runtime/reaper-api.generated.js').read_text() + (root / 'runtime/reaper.js').read_text() + '\n})();'
@@ -84,6 +98,16 @@ try:
     send(dict(id=1, op='open', uri=page.as_uri(), script=script))
     geometry(1, parents[0])
     receive_until(lambda: (1, 'CountTracks', [0]) in results)
+    for background, expected in [('#182838', 0x182838), ('#e8d8c8', 0xe8d8c8), ('rgba(0,0,0,.5)', 0xffffff), ('#182838', 0x182838)]:
+        results[:] = [row for row in results if row[1] != 'background']
+        send(dict(id=1, op='eval', script=f'document.body.style.background={json.dumps(background)};'))
+        receive_until(lambda: (1, 'background', expected) in results)
+    for step in range(40):
+        send(dict(id=1, op='geometry', parent=parents[0], x=0, y=0,
+                  width=220 + step * 3, height=120 + step * 2, visible=True, focused=False))
+    send(dict(id=1, op='eval', script='requestAnimationFrame(()=>requestAnimationFrame(()=>reaper.CountSelectedTracks(innerWidth===337 && innerHeight===198 && window.token==="kept" ? 801 : 999)));'))
+    receive_until(lambda: (1, 'CountSelectedTracks', [801]) in results)
+    geometry(1, parents[0])
     send(dict(id=1, op='eval', script='reaper.fs.writeFile("large.txt", "x".repeat(100000));'))
     receive_until(lambda: any(row[1] == 'ReaWeb_WriteFile' and len(row[2][1]) == 100000 for row in results))
     navigations = sum(row[1] == 'navigating' for row in results)
@@ -97,8 +121,18 @@ try:
     receive_until(lambda: (1, 'CountSelectedTracks', [702]) in results)
     first_children = children(parents[0])
     assert first_children, 'WebKit is not embedded'
+    assert all(mapped(child) for child in first_children), 'WebKit native window is not visible in its foreign parent'
+    send(dict(id=1, op='geometry', parent=parents[0], x=0, y=0, width=350, height=250, visible=False))
+    send(dict(id=1, op='eval', script='reaper.CountSelectedTracks(703);'))
+    receive_until(lambda: (1, 'CountSelectedTracks', [703]) in results)
+    assert all(not mapped(child) for child in first_children), 'Hidden WebKit native window remained mapped'
+    geometry(1, parents[0])
+    send(dict(id=1, op='eval', script='reaper.CountSelectedTracks(704);'))
+    receive_until(lambda: (1, 'CountSelectedTracks', [704]) in results)
+    assert all(mapped(child) for child in first_children), 'WebKit native window did not remap'
     send(dict(id=1, op='park'))
     receive_until(lambda: (1, 'parked', None) in results)
+    assert all(not mapped(child) for child in first_children), 'Parked WebKit native window remained visible'
     x.XDestroyWindow(display, parents[0])
     x.XSync(display, 0)
     parents[0] = x.XCreateSimpleWindow(display, x.XDefaultRootWindow(display), 30, 30, 380, 300, 0, 0, 0)
@@ -126,7 +160,7 @@ try:
         receive_until(lambda: sum(row[1] == '__reawebHello' for row in results) > hellos)
         hellos += 1
     send(dict(id=2, op='close'))
-    print('WebKitGTK: JS round-trip, host focus/blur, two windows, docking after old parent destruction, preserved page state, two host-gated reloads and independent close passed')
+    print('WebKitGTK: resize/background/theme/transparency, JS round-trip, host focus/blur, two windows, docking after old parent destruction, preserved page state, two host-gated reloads and independent close passed')
 finally:
     parent.close()
     deadline = time.monotonic() + 2

@@ -1,5 +1,6 @@
 #include "platform/linux/linux_channel.hpp"
 #include "platform/shared/navigation.hpp"
+#include "platform/shared/page_background.hpp"
 #include <gtk/gtk.h>
 #include <gtk/gtkx.h>
 #include <gdk/gdkx.h>
@@ -37,6 +38,14 @@ class Page {
   std::unique_ptr<GtkDevTools> devtools_;
   std::unique_ptr<GtkDockMenu> dock_menu_;
   bool focused_ = false;
+  GdkRGBA background_{1, 1, 1, 1};
+  void set_background(unsigned color) {
+    background_ = {((color >> 16) & 255) / 255.0, ((color >> 8) & 255) / 255.0, (color & 255) / 255.0, 1};
+    webkit_web_view_set_background_color(view_, &background_);
+    gdk_window_set_background_rgba(gtk_widget_get_window(plug_), &background_);
+    gtk_widget_queue_draw(plug_);
+    channel_.send({{"id", id_}, {"op", "background"}, {"color", color}});
+  }
   void set_host_focus(bool focused) {
     if (focused_ == focused) return;
     focused_ = focused;
@@ -77,7 +86,8 @@ public:
       auto message = jsc_value_to_string(value);
       try {
         if (strlen(message) > message_limit) self->fail("JavaScript message limit exceeded");
-        else self->channel_.send({{"id", self->id_}, {"op", "message"}, {"message", message}});
+        else if (!page_background_message(message, [self](unsigned color) { self->set_background(color); }))
+          self->channel_.send({{"id", self->id_}, {"op", "message"}, {"message", message}});
       } catch (const std::exception& error) { self->fail(error.what()); }
       g_free(message);
     }), this);
@@ -85,7 +95,8 @@ public:
       g_object_unref(manager_);
       throw std::runtime_error("Could not register WebKitGTK bridge");
     }
-    const auto source = request.at("script").get<std::string>();
+    const auto source = request.at("script").get<std::string>() +
+      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);");
     auto script = webkit_user_script_new(source.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(manager_, script);
@@ -154,6 +165,13 @@ public:
     });
     plug_ = gtk_plug_new(0);
     g_object_ref_sink(plug_);
+    gtk_widget_set_app_paintable(plug_, TRUE);
+    gtk_widget_set_redraw_on_allocate(plug_, FALSE);
+    g_signal_connect(plug_, "draw", G_CALLBACK(+[](GtkWidget*, cairo_t* dc, gpointer data) -> gboolean {
+      gdk_cairo_set_source_rgba(dc, &static_cast<Page*>(data)->background_);
+      cairo_paint(dc);
+      return FALSE;
+    }), this);
     // GtkPlug emits delete-event when parked on the X11 root. The native host owns closing.
     g_signal_connect(plug_, "delete-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer) -> gboolean { return TRUE; }), nullptr);
     devtools_ = std::make_unique<GtkDevTools>(view_, plug_, [this](Json state) {
@@ -166,6 +184,11 @@ public:
       [this] { return devtools_->menu_state(); });
     dock_menu_->set_app_name(request.value("appName", std::string()));
     gtk_widget_realize(plug_);
+    // Preserve presented pixels while WebKit prepares the next resized frame.
+    XSetWindowAttributes attributes{};
+    attributes.bit_gravity = NorthWestGravity;
+    XChangeWindowAttributes(gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_)),
+      gdk_x11_window_get_xid(gtk_widget_get_window(plug_)), CWBitGravity, &attributes);
     webkit_web_view_load_uri(view_, uri_.c_str());
   }
   ~Page() {
@@ -200,7 +223,9 @@ public:
       set_host_focus(false);
       gtk_widget_hide(plug_);
       auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
-      XReparentWindow(display, gdk_x11_window_get_xid(gtk_widget_get_window(plug_)), DefaultRootWindow(display), 0, 0);
+      const auto xid = gdk_x11_window_get_xid(gtk_widget_get_window(plug_));
+      XUnmapWindow(display, xid);
+      XReparentWindow(display, xid, DefaultRootWindow(display), 0, 0);
       XSync(display, False);
       parent_ = 0;
       devtools_->owner(0);
@@ -225,8 +250,9 @@ public:
       GtkAllocation allocation{0, 0, width, height};
       gtk_widget_size_allocate(plug_, &allocation);
       XMoveResizeWindow(display, xid, x, y, width, height);
-      if (request.at("visible").get<bool>()) gtk_widget_show_all(plug_);
-      else gtk_widget_hide(plug_);
+      // A foreign parent cannot honor GtkPlug's XEmbed mapping requests.
+      if (request.at("visible").get<bool>()) { gtk_widget_show_all(plug_); XMapWindow(display, xid); }
+      else { gtk_widget_hide(plug_); XUnmapWindow(display, xid); }
       XFlush(display);
       gdk_x11_display_error_trap_pop_ignored(gtk_widget_get_display(plug_));
     } else if (op == "focus" && parent_) {

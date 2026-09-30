@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.7.6 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.7.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -166,7 +166,7 @@ if(REAWEB_BUILD_EXTENSION)
     target_include_directories(reawebapi PRIVATE "${webview2_SOURCE_DIR}/build/native/include")
     target_link_libraries(reawebapi PRIVATE
       "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
-      ole32 oleaut32 user32 gdi32 shlwapi shell32 version advapi32 uuid)
+      ole32 oleaut32 user32 gdi32 shlwapi shell32 version advapi32 uuid comctl32)
     target_compile_definitions(reawebapi PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
     set_target_properties(reawebapi PROPERTIES OUTPUT_NAME reaper_reawebapi-x64)
   elseif(APPLE)

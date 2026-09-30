@@ -12,6 +12,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - 可选 [External Client](docs/external-clients.zh-CN.md)，通过带认证的本机 WebSocket 复用 Native API、Batch、Service、Event 和二进制 Stream。服务默认关闭，可在 ReaWebAPI Preferences 中启用，默认地址为 `ws://127.0.0.1:9123`。
 - 15 个 Runtime 命名空间，涵盖窗口、事件、文件、原生对话框、拖放、音频、Undo 和应用服务。
 - 原生 WebView，支持模块、本地资源、Worker 和应用存储持久化。
+- 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。
 - WebView 右键菜单提供停靠和 DevTools 控制。Docker 页签菜单另提供刷新、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
