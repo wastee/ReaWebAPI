@@ -41,7 +41,8 @@ async function detach() { if (current) await current.close(); current = null; el
 el('open').onclick = action(async () => {
   await detach();
   const kind = el('kind').value;
-  current = kind === 'named stream' ? await reaper.stream.open(el('name').value) : kind === 'midi' ? await reaper.system.openMIDIInput(Number(el('midi').value)) : await reaper.audio.openStream(kind, { source: el('source').value, fftSize: 2048, updateRate: 30 });
+  const routed = el('source').value === 'selected-track-post-fx';
+  current = kind === 'named stream' ? await reaper.stream.open(el('name').value) : kind === 'midi' ? await reaper.system.openMIDIInput(Number(el('midi').value)) : await reaper.audio.openStream(kind, { source: routed ? 'selected-track' : el('source').value, ...(routed ? {tap: 'post-fx'} : {}), fftSize: 2048, updateRate: 30 });
   el('info').textContent = show(current.info); el('close').disabled = false;
   current.on('data', () => { if (!queued) { queued = true; requestAnimationFrame(draw); } });
   current.on('error', report); current.on('close', error => { el('status').textContent = error.code; el('close').disabled = true; });

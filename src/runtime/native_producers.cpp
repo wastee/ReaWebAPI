@@ -1,9 +1,11 @@
 #include "runtime/native_producers.hpp"
 #include "runtime/audio_analysis.hpp"
+#include "runtime/track_audio.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <random>
 
 namespace reaweb {
 namespace {
@@ -34,6 +36,7 @@ struct NativeProducers::Impl {
     std::string name, identity;
     void* accessor = nullptr;
     void* track = nullptr;
+    std::shared_ptr<TrackAudio> tap;
     std::unique_ptr<StreamBuffer> input;
     std::unique_ptr<AudioAnalysis> analysis;
     std::atomic<bool> stopping{false};
@@ -47,6 +50,8 @@ struct NativeProducers::Impl {
   const Host& host;
   StreamHub& streams;
   Capture capture[2];
+  std::array<std::weak_ptr<TrackAudio>, 8> track_taps;
+  uint64_t tap_token = std::random_device{}() % 1000000000 + 1;
   std::mutex mutex;
   std::vector<std::shared_ptr<Entry>> entries;
   std::atomic<bool> stopping{false};
@@ -66,6 +71,7 @@ struct NativeProducers::Impl {
     if (entry->accessor) {
       auto destroy = function<void (*)(void*)>(host, "DestroyAudioAccessor"); if (destroy) destroy(entry->accessor); entry->accessor = nullptr;
     }
+    entry->tap.reset();
     streams.close(entry->handle, entry->error ? entry->error.load() : REAWEB_STREAM_CLOSED);
   }
   void run() noexcept {
@@ -112,11 +118,16 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   const auto destroy = function<void (*)(void*)>(p.host, "DestroyAudioAccessor");
   std::unique_ptr<void, void (*)(void*)> accessor_guard(nullptr, destroy);
   if (!options.is_object()) throw Error("INVALID_ARGUMENT", "Expected audio stream options");
-  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate")
+  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate" && value.key() != "tap")
     throw Error("INVALID_ARGUMENT", "Unknown audio stream option: " + value.key());
   if (!options.value("source", Json("master")).is_string() || !options.value("fftSize", Json(2048)).is_number_integer() ||
-      !options.value("updateRate", Json(30)).is_number()) throw Error("INVALID_ARGUMENT", "Invalid audio stream options");
+      !options.value("updateRate", Json(30)).is_number() || !options.value("tap", Json("pre-fx")).is_string())
+    throw Error("INVALID_ARGUMENT", "Invalid audio stream options");
   const auto source = options.value("source", std::string("master"));
+  const auto tap = options.value("tap", std::string("pre-fx"));
+  if (tap != "pre-fx" && tap != "post-fx") throw Error("INVALID_ARGUMENT", "Track tap must be pre-fx or post-fx");
+  if (options.contains("tap") && (source == "master" || source == "input"))
+    throw Error("INVALID_ARGUMENT", "tap is only supported for track sources");
   const auto fft = options.value("fftSize", 2048);
   const auto update = options.value("updateRate", 30.0);
   if (fft < 32 || fft > 32768 || (fft & (fft - 1)) || !std::isfinite(update) || update < 1 || update > 120)
@@ -143,13 +154,28 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
       for (int i = 0; get && p.host.track_count && i < p.host.track_count(); ++i)
         if (get(nullptr, i) == entry->track) { entry->identity = "track:" + p.host.track_identity(i); break; }
     }
-    auto create = function<void* (*)(void*)>(p.host, "CreateTrackAudioAccessor");
-    if (!create || !function<void (*)(void*)>(p.host, "DestroyAudioAccessor") ||
-        !function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples"))
-      throw Error("API_UNAVAILABLE", "Track audio accessors unavailable");
-    entry->accessor = create(entry->track); if (!entry->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
-    accessor_guard.reset(entry->accessor);
-    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate)); entry->identity += ":pre-fx";
+    if (tap == "post-fx") {
+      if (!device || !device("SRATE", rate, sizeof(rate))) throw Error("AUDIO_UNAVAILABLE", "No active hardware audio device");
+      entry->source = 3;
+      for (const auto& other : p.entries) if (other->track == entry->track && other->tap) { entry->tap = other->tap; break; }
+      if (!entry->tap) {
+        for (unsigned slot = 0; slot < p.track_taps.size(); ++slot) if (p.track_taps[slot].expired()) {
+          entry->tap = std::make_shared<TrackAudio>(p.host, entry->track, slot, ++p.tap_token);
+          p.track_taps[slot] = entry->tap; break;
+        }
+        if (!entry->tap) throw Error("QUEUE_LIMIT", "Track capture slot limit exceeded");
+      }
+      entry->identity += ":post-fx";
+    } else {
+      auto create = function<void* (*)(void*)>(p.host, "CreateTrackAudioAccessor");
+      if (!create || !function<void (*)(void*)>(p.host, "DestroyAudioAccessor") ||
+          !function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples"))
+        throw Error("API_UNAVAILABLE", "Track audio accessors unavailable");
+      entry->accessor = create(entry->track); if (!entry->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
+      accessor_guard.reset(entry->accessor);
+      entry->identity += ":pre-fx";
+    }
+    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate));
   }
   auto desc = audio_desc(entry->rate); desc.fft_size = fft; desc.update_rate = update; desc.source = entry->identity.c_str();
   if (entry->kind == REAWEB_SPECTRUM) desc.max_bytes = (fft / 2 + 1) * 2 * 4;
@@ -196,9 +222,36 @@ void NativeProducers::attached(const std::string& name) {
 void NativeProducers::tick() {
   auto& p = *impl_; std::lock_guard<std::mutex> lock(p.mutex);
   const auto now = std::chrono::steady_clock::now();
+  std::vector<float> routed_samples;
+  for (const auto& weak : p.track_taps) if (auto tap = weak.lock()) {
+    if (!tap->valid()) {
+      for (const auto& entry : p.entries) if (entry->tap == tap) entry->error = REAWEB_STREAM_CLOSED;
+      continue;
+    }
+    try {
+      unsigned rate = 0; uint64_t sequence = 0; double position = 0;
+      for (int i = 0; i < 16 && tap->read(routed_samples, rate, sequence, position); ++i)
+        for (const auto& entry : p.entries) if (entry->tap == tap) {
+          if (rate != entry->rate) entry->error = REAWEB_UNSUPPORTED_FORMAT;
+          else {
+            entry->input->publish(routed_samples.data(), static_cast<uint32_t>(routed_samples.size() * 4), sequence, position);
+            entry->next_sample = now + std::chrono::milliseconds(250);
+          }
+        }
+    } catch (...) {
+      for (const auto& entry : p.entries) if (entry->tap == tap) entry->error = REAWEB_SERVICE_ERROR;
+    }
+  }
   for (auto it = p.entries.begin(); it != p.entries.end();) {
     auto& entry = **it; const auto users = p.streams.consumers(entry.handle); entry.attached = entry.attached || users > 0;
     if (entry.error || (!users && (entry.attached || now - entry.created > std::chrono::seconds(10)))) { p.close(*it); it = p.entries.erase(it); continue; }
+    if (entry.tap && now >= entry.next_sample) {
+      // A stopped or suspended FX chain has no callbacks. Clear stale readings.
+      std::fill(entry.floats.begin(), entry.floats.end(), 0.0f);
+      const auto frames = std::min(8192u, std::max(1u, static_cast<unsigned>(entry.rate / entry.update_rate)));
+      entry.input->publish(entry.floats.data(), frames * 8, 0, 0);
+      entry.next_sample = now + std::chrono::microseconds(static_cast<int64_t>(1000000 / entry.update_rate));
+    }
     if (entry.accessor && now >= entry.next_sample) {
       auto valid = function<bool (*)(void*, void*, const char*)>(p.host, "ValidatePtr2");
       if (valid && !valid(nullptr, entry.track, "MediaTrack*")) { entry.error = REAWEB_STREAM_CLOSED; ++it; continue; }

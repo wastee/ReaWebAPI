@@ -28,3 +28,15 @@ MIDI 通过 `system.openMIDIInput(device)` 消费原始事件，`-1` 表示所�
 完整字段、布局、线程规则、容量、溢出策略和平台坐标差异见 [English contract](native-streams.md)。[Native Stream Demo](../web/native-stream/README.md) 可消费内建分析和第三方 Stream。ReaGBA 的 Service、输入与 `reagba.video` 接入代码保留在独立 ReaGBA 仓库，模拟器按自身约 59.73 Hz 节奏发布画面。
 
 页面如设置 Content Security Policy，需要允许 `connect-src ws://127.0.0.1:*`。连接仍受页面来源及一次性原生连接凭据约束。
+
+
+v0.3.7.8 新增轨道选项 `tap: 'post-fx'`，实时采集轨道 FX 后、推子与声像之前的声道 1–2，包含文件夹汇总、接收路由、乐器与监听输入。上游路由、发送位置、声道映射与增益由 REAPER 处理。仅路由到其他声道的音频不在该立体声采样范围内。需要播放或启用输入监听，不读取停止位置的媒体，也不代表选中轨道的推子后输出。
+
+```js
+const meter = await reaper.audio.openStream('meter', {
+  source: 'selected-track', tap: 'post-fx', updateRate: 30,
+});
+await meter.close();
+```
+
+首次使用时会在 REAPER 资源目录安装 `Effects/ReaWebAPI/track_audio_v1.jsfx`，每条轨道共用一个临时直通采样 FX。最后一个 consumer 释放后移除该 FX。运行时会保持采样 FX 位于链末端。移除、旁通或离线采样 FX、旁通整条 FX 链、删除轨道或切换工程会关闭流，恢复 FX 链或修改设备采样率后需重新打开分析。PCM 通过 REAPER 的 EEL 共享内存以有界块传递，分析在原生工作线程执行。FX 链暂停时输出静音，避免保留旧读数。采样 FX 在订阅期间属于普通工程 FX，此时保存工程或创建撤销状态可能保留其停用副本。副本保持音频直通，没有有效运行时 token 时不会采集信号。后续订阅会替换该轨道上的停用副本。省略 `tap` 或设置为 `pre-fx` 保留原有媒体访问器行为。

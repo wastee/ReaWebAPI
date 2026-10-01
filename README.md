@@ -80,4 +80,4 @@ Licensed under [LGPL-3.0-or-later](LICENSE.md).
 
 Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned project logic, use the [Lua backend + WebView example](web/lua-backend/README.md). Platform packages install it under `Scripts/ReaWebAPI/Example/lua-backend`, and the SDK includes `lua-backend/`.
 
-Native Streams, binary consumers, audio analysis and platform additions: [contract](docs/native-streams.md) · [Demo](web/native-stream/README.md).
+Native Streams, binary consumers, audio analysis and platform additions: [contract](docs/native-streams.md) · [Demo](web/native-stream/README.md). Track streams support opt-in post-FX capture of folder sums and receives through a temporary pass-through JSFX.
