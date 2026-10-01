@@ -242,6 +242,8 @@ if(MSVC)
 else()
   target_compile_options(reaweb_core PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(reaweb_runtime PRIVATE -Wall -Wextra -Wpedantic)
+  # EEL requires signed char, including on ARM Linux.
+  set_source_files_properties(src/runtime/track_audio.cpp PROPERTIES COMPILE_OPTIONS -fsigned-char)
   if(TARGET reawebapi)
     target_compile_options(reawebapi PRIVATE -Wall -Wextra)
   endif()
