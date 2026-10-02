@@ -219,6 +219,8 @@ async function streamContract() {
   stream.on('data', packet => { const bytes: Uint8Array = packet.bytes; });
   await stream.close();
   const meter = await reaper.audio.openStream('meter', {source: 'master', updateRate: 30});
+  const aggregate = await reaper.audio.openStream('spectrum', {source: 'selected-track', aggregate: true});
+  await aggregate.close();
   const stop = await reaper.system.schedule(() => {}, {delay: 10, interval: 100});
   const watch = await reaper.fs.watch('.', event => console.log(event.type), {recursive: true});
   await reaper.clipboard.writeBinary('application/octet-stream', new Uint8Array([1]));

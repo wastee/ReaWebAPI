@@ -321,6 +321,8 @@ interface ReaWebAPI {
   readonly audio: {
     openStream(kind: 'audio' | 'spectrum' | 'meter' | 'waveform', options?: {
       source?: 'master' | 'input' | 'selected-track' | `track:${string}`; fftSize?: number; updateRate?: number;
+      /** Sum routed pre-FX track source PCM. Track sources only, defaults to false. */
+      aggregate?: boolean;
     }): Promise<ReaWebStream>;
     /** Explicit coalescing: one in-flight write and the latest waiting value per track/key.
      * Superseded values settle without being sent. Does not create an Undo gesture.

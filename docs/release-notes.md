@@ -2,12 +2,10 @@
 
 ## English
 
-- Fix WebView flashing while dragging REAPER Docker dividers on Windows, macOS and Linux, including Windows host redraw batching.
-- Fix transient white edges when resizing floating WebViews.
-- Fix native WebView visibility and alignment in Linux Docker hosts.
+- Add `aggregate: true` to track audio streams for recursive folder/receive pre-FX PCM aggregation, with Mute/Solo filtering and cycle deduplication on Windows, macOS and Linux.
+- Analyze summed PCM without normalization or clipping across audio, spectrum, meter and waveform streams. Add SDK types and an aggregate source option to the Native Stream Demo.
 
 ## 简体中文
 
-- 修复 Windows、macOS 和 Linux 上拖动 REAPER 泊坞窗分隔条时 WebView 闪烁的问题，包括 Windows 宿主批量重绘造成的闪烁。
-- 修复浮动 WebView 缩放时短暂出现白边的问题。
-- 修复 Linux 泊坞窗中 WebView 原生窗口的显示与位置对齐。
+- 轨道音频流新增 `aggregate: true`，在 Windows、macOS 和 Linux 上递归聚合 Folder/Receive 的 pre-FX PCM，支持 Mute/Solo 筛选与循环路由去重。
+- audio、spectrum、meter 和 waveform 均基于求和后的 PCM 分析，不归一化或限幅。同步更新 SDK 类型及 Native Stream Demo 聚合选项。

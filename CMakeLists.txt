@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.7.9 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -123,6 +123,7 @@ add_library(reaweb_runtime STATIC
   src/runtime/native_stream.cpp
   src/runtime/native_tasks.cpp
   src/runtime/audio_analysis.cpp
+  src/runtime/aggregate_source.cpp
   src/runtime/native_producers.cpp
   src/runtime/stream_transport.cpp
   "${wdl_SOURCE_DIR}/WDL/sha.cpp"

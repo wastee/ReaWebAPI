@@ -39,6 +39,13 @@ int main() {
       return nullptr;
     };
     StreamHub streams; NativeProducers producers(host, streams);
+    for (const auto& options : {Json{{"source", "master"}, {"aggregate", true}},
+                               Json{{"source", "input"}, {"aggregate", true}},
+                               Json{{"source", "selected-track"}, {"aggregate", 1}}}) {
+      bool rejected = false;
+      try { producers.audio("audio", options, 1); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
+      CHECK(rejected && streams.info()["streams"].empty());
+    }
     std::vector<std::string> names;
     for (const auto* kind : {"audio", "spectrum", "meter", "waveform"}) {
       names.push_back(producers.audio(kind, Json::object(), 1));
@@ -64,7 +71,7 @@ int main() {
     streams.detach_window(1); producers.close_window(1);
     CHECK(streams.info()["streams"].size() == 1);
     streams.detach_window(2); producers.tick(); CHECK(streams.info()["streams"].empty());
-    const auto brief = producers.audio("meter", Json::object(), 3);
+    const auto brief = producers.audio("meter", Json{{"aggregate", false}}, 3);
     const auto attachment = streams.attach(brief, 3, 0, "http://127.0.0.1:1234");
     producers.attached(brief); streams.detach(attachment["token"], 3);
     producers.tick(); CHECK(streams.info()["streams"].empty());

@@ -21,6 +21,21 @@ await stream.close();
 
 内建 `audio.openStream` 提供 PCM、FFT、Peak/RMS/LUFS 和实时 min/max 波形。`master` 采集硬件输出 0/1，`input` 采集硬件输入 0/1。`selected-track` 或 `track:<GUID>` 使用绑定轨道的 **pre-FX Audio Accessor**，不代表轨道 FX 后或实时输入电平。Accessor 在主线程采样，分析和传输在原生线程执行。已有 `audio.getTrackMeter` 保留 REAPER 瞬时 Peak 语义。文件概览、缓存峰值与缩放查询继续使用 `audio.getWaveform`。
 
+轨道 Source 支持 `aggregate: true`，适用于 `audio`、`spectrum`、`meter` 和 `waveform`：
+
+```js
+const stream = await reaper.audio.openStream('spectrum', {
+  source: 'selected-track', // 也支持 'track:<GUID>'。
+  aggregate: true, fftSize: 2048, updateRate: 30
+});
+```
+
+聚合递归包含根轨、启用 Parent Send 的 Folder 子轨和音频 Receive 上游。静音 Receive 和仅 MIDI 路由不参与。同一源轨只计算一次，循环路由不会重复累加。每个采样块重新检查路由与 Mute/Solo 状态，排除静音轨道、经静音 Folder 路由的分支及 Solo 排除的源内容，支持 Solo Defeat 和 Solo In Place。根轨静音时返回静音。
+
+所有 Accessor 使用相同工程时间、采样率、双声道布局和块大小读取。Native 层先逐 sample 求和 PCM，再执行现有分析，仅创建一个对外 Stream。保留超过 `1.0` 的浮点结果，不归一化、限幅、按轨平均或补偿增益。Item/Take/Lane 播放状态由 REAPER Accessor 返回的 PCM 决定。
+
+该模式表示 **pre-FX 源 PCM 的同步聚合**，不代表 post-FX、pre-fader、post-fader 或实际轨道输出。不应用轨道或 Send 的增益、声像、相位和通道映射，不创建 FX、Send、Track 或 Undo。`aggregate` 默认为 `false`，省略或显式关闭时保持现有行为。对 `master` 或 `input` 启用聚合会返回 `INVALID_ARGUMENT`。Stream 的 `source` 标识为 `track:<GUID>:pre-fx:aggregate-source`。删除绑定根轨或切换工程会关闭聚合 Stream。
+
 MIDI 通过 `system.openMIDIInput(device)` 消费原始事件，`-1` 表示所有输入。`system.getDevices` 与 `devicesChanged` 提供设备信息。显示器几何、工作区和有效 DPI 通过 `system.getDisplays` 获取，CPU 和 Stream 统计通过 `debug.getDiagnostics` 获取。
 
 `fs.watch` 在原生 worker 每 250 ms 比较文件状态，报告创建、修改、重命名、删除和溢出。短时变化可能合并，页面无需扫描目录。`clipboard.readBinary/writeBinary` 使用自定义 MIME 格式，不自动转换系统图片格式。`system.schedule` 提供一次性和重复原生定时器，适合后台刷新与延时任务，不充当帧时钟。页面关闭或导航后自动释放 consumer、监听和定时器。

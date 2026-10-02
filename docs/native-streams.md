@@ -57,11 +57,28 @@ const spectrum = await reaper.audio.openStream('spectrum', {
 const midi = await reaper.system.openMIDIInput(-1);
 ```
 
-`audio.openStream` accepts `audio`, `spectrum`, `meter`, or `waveform`. Options are `source`, `fftSize` (power of two, 32–32768), and `updateRate` (1–120 Hz). Eight built-in producers may be active. They stop after the last consumer detaches. A consumer in another window keeps its producer alive.
+`audio.openStream` accepts `audio`, `spectrum`, `meter`, or `waveform`. Options are `source`, `aggregate` (boolean, default `false`), `fftSize` (power of two, 32–32768), and `updateRate` (1–120 Hz). Eight built-in producers may be active. They stop after the last consumer detaches. A consumer in another window keeps its producer alive.
 
 `master` captures hardware output channels 0/1 after REAPER processing, including any other signals routed directly to those outputs. `input` captures hardware input 0/1. A mono device is duplicated to stereo. Capture uses a 16-slot PCM ring, maximum 8192 frames per block. Audio-thread work is limited to conversion and bounded copies. No WebView stall can block capture. Analysis runs on one native worker. Device sample-rate changes close affected streams with `UNSUPPORTED_FORMAT`; query devices and reopen.
 
 `selected-track` captures the track selected at open, and `track:<GUID>` selects a specific track. Both use REAPER's **pre-FX audio accessor**, sampled on the main thread at playback position or edit cursor. Their `source` identifies the bound track and pre-FX tap. This is source-content analysis, not post-FX/live-input track metering. Use the existing `audio.getTrackMeter(track)` for REAPER's instantaneous track peak reading. Accessor sample acquisition follows native host scheduling, while processing and delivery use the independent worker/transport.
+
+### Aggregate source
+
+```js
+const stream = await reaper.audio.openStream('spectrum', {
+  source: 'selected-track', // Or 'track:<GUID>'.
+  aggregate: true, fftSize: 2048, updateRate: 30
+});
+```
+
+For track sources, `aggregate: true` recursively includes the bound track, folder children with enabled parent sends, and audio receive sources. Muted receives and MIDI-only routes are excluded. Each source track contributes once, including in cyclic routing. Routing and mute/solo changes are checked at each sample block. Muted tracks and branches routed through muted folders are excluded. Solo selects the contributing source branches, including solo defeat and solo-in-place send paths. A muted root returns silence.
+
+All accessors read at the same project time, sample rate, stereo layout and block size. Native code sums their PCM before the existing FFT, Peak/RMS/LUFS and waveform analysis. The single stream retains floating-point sums above `1.0`, without normalization, limiting, averaging or gain compensation. Item/take/lane playback is determined by REAPER's accessor PCM.
+
+This is synchronized **pre-FX source PCM aggregation**, not post-FX, pre-fader, post-fader or track output capture. Track/send gain, pan, phase and channel remapping are not applied. It creates no FX, sends, tracks or Undo entries. `aggregate: true` rejects `master` and `input` with `INVALID_ARGUMENT`. Omitted or `false` preserves the existing source behavior. The stream descriptor identifies this mode as `track:<GUID>:pre-fx:aggregate-source`. Deleting the bound track or switching projects closes the aggregate stream.
+
+### Analysis payloads
 
 Spectrum contains `fftSize / 2 + 1` linear-amplitude bins per channel, using a Hann window. Meter contains channel peaks, channel RMS, momentary LUFS, short-term LUFS, integrated LUFS, then processed seconds. Silence is negative infinity for LUFS. [libebur128](https://github.com/jiixyj/libebur128) performs native EBU R128 analysis with bounded histogram storage. Capture discontinuities reset analysis history. Realtime waveform contains `[min, max]` for each channel of each of `min(256, fftSize)` buckets, oldest first. Overview and zoom queries reuse `audio.getWaveform(path, {start, duration, points})` and REAPER's native peak cache.
 

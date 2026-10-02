@@ -117,6 +117,8 @@ On macOS/Linux, build `swell_preferences`. In a separate REAPER test resource di
 
 ## Runtime and audio acceptance
 
+Run `python tests/aggregate_source_smoke.py --reaper <executable> --extension <binary> --output <new-directory>` on Windows, macOS and Linux. It uses an isolated REAPER profile and checks all four aggregate stream kinds, default/false equivalence, nested folders, receives, Mute/Solo, muted items, PCM overflow and cancellation, routing changes/cycles, playback time, track deletion and consumer cleanup. It also checks that stream operations preserve project state and Undo. Results are written to `result.json`.
+
 Optional navigation tests use real WebViews with a simulated system URL handler:
 
 ```sh

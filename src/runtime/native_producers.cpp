@@ -1,5 +1,6 @@
 #include "runtime/native_producers.hpp"
 #include "runtime/audio_analysis.hpp"
+#include "runtime/aggregate_source.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -34,6 +35,7 @@ struct NativeProducers::Impl {
     std::string name, identity;
     void* accessor = nullptr;
     void* track = nullptr;
+    std::unique_ptr<AggregateSource> aggregate;
     std::unique_ptr<StreamBuffer> input;
     std::unique_ptr<AudioAnalysis> analysis;
     std::atomic<bool> stopping{false};
@@ -58,10 +60,11 @@ struct NativeProducers::Impl {
   ~Impl() {
     stopping = true; worker.join();
     auto destroy = function<void (*)(void*)>(host, "DestroyAudioAccessor");
-    for (auto& entry : entries) { if (entry->accessor && destroy) destroy(entry->accessor); streams.close(entry->handle); }
+    for (auto& entry : entries) { if (entry->accessor && destroy) destroy(entry->accessor); entry->aggregate.reset(); streams.close(entry->handle); }
   }
   void close(const std::shared_ptr<Entry>& entry) {
     entry->stopping = true;
+    entry->aggregate.reset();
     if (entry->kind != REAWEB_MIDI && entry->source < 2) --capture[entry->source].users;
     if (entry->accessor) {
       auto destroy = function<void (*)(void*)>(host, "DestroyAudioAccessor"); if (destroy) destroy(entry->accessor); entry->accessor = nullptr;
@@ -112,11 +115,15 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   const auto destroy = function<void (*)(void*)>(p.host, "DestroyAudioAccessor");
   std::unique_ptr<void, void (*)(void*)> accessor_guard(nullptr, destroy);
   if (!options.is_object()) throw Error("INVALID_ARGUMENT", "Expected audio stream options");
-  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate")
+  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate" && value.key() != "aggregate")
     throw Error("INVALID_ARGUMENT", "Unknown audio stream option: " + value.key());
   if (!options.value("source", Json("master")).is_string() || !options.value("fftSize", Json(2048)).is_number_integer() ||
-      !options.value("updateRate", Json(30)).is_number()) throw Error("INVALID_ARGUMENT", "Invalid audio stream options");
+      !options.value("updateRate", Json(30)).is_number() || !options.value("aggregate", Json(false)).is_boolean())
+    throw Error("INVALID_ARGUMENT", "Invalid audio stream options");
   const auto source = options.value("source", std::string("master"));
+  const bool aggregate = options.value("aggregate", false);
+  if (aggregate && source != "selected-track" && source.rfind("track:", 0) != 0)
+    throw Error("INVALID_ARGUMENT", "aggregate requires selected-track or track:<GUID>");
   const auto fft = options.value("fftSize", 2048);
   const auto update = options.value("updateRate", 30.0);
   if (fft < 32 || fft > 32768 || (fft & (fft - 1)) || !std::isfinite(update) || update < 1 || update > 120)
@@ -147,9 +154,13 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
     if (!create || !function<void (*)(void*)>(p.host, "DestroyAudioAccessor") ||
         !function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples"))
       throw Error("API_UNAVAILABLE", "Track audio accessors unavailable");
-    entry->accessor = create(entry->track); if (!entry->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
-    accessor_guard.reset(entry->accessor);
+    if (aggregate) entry->aggregate = std::make_unique<AggregateSource>(p.host, entry->track);
+    else {
+      entry->accessor = create(entry->track); if (!entry->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
+      accessor_guard.reset(entry->accessor);
+    }
     entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate)); entry->identity += ":pre-fx";
+    if (aggregate) entry->identity += ":aggregate-source";
   }
   auto desc = audio_desc(entry->rate); desc.fft_size = fft; desc.update_rate = update; desc.source = entry->identity.c_str();
   if (entry->kind == REAWEB_SPECTRUM) desc.max_bytes = (fft / 2 + 1) * 2 * 4;
@@ -199,17 +210,18 @@ void NativeProducers::tick() {
   for (auto it = p.entries.begin(); it != p.entries.end();) {
     auto& entry = **it; const auto users = p.streams.consumers(entry.handle); entry.attached = entry.attached || users > 0;
     if (entry.error || (!users && (entry.attached || now - entry.created > std::chrono::seconds(10)))) { p.close(*it); it = p.entries.erase(it); continue; }
-    if (entry.accessor && now >= entry.next_sample) {
+    if ((entry.accessor || entry.aggregate) && now >= entry.next_sample) {
       auto valid = function<bool (*)(void*, void*, const char*)>(p.host, "ValidatePtr2");
       if (valid && !valid(nullptr, entry.track, "MediaTrack*")) { entry.error = REAWEB_STREAM_CLOSED; ++it; continue; }
-      auto refresh = function<bool (*)(void*)>(p.host, "AudioAccessorValidateState"); if (refresh) refresh(entry.accessor);
+      auto refresh = function<bool (*)(void*)>(p.host, "AudioAccessorValidateState"); if (entry.accessor && refresh) refresh(entry.accessor);
       auto position = function<double (*)()>(p.host, "GetPlayPosition"); auto state = function<int (*)()>(p.host, "GetPlayState");
       if (!state || !(state() & 1)) position = function<double (*)()>(p.host, "GetCursorPosition");
       const auto frames = std::min(8192, std::max(1, static_cast<int>(entry.rate / entry.update_rate)));
       const double at = position ? position() : 0;
       std::fill(entry.track_samples.begin(), entry.track_samples.end(), 0);
       auto read = function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples");
-      const auto result = read(entry.accessor, entry.rate, 2, at, frames, entry.track_samples.data());
+      const auto result = entry.aggregate ? entry.aggregate->read(entry.rate, 2, at, frames, entry.track_samples.data()) :
+        read(entry.accessor, entry.rate, 2, at, frames, entry.track_samples.data());
       if (result < 0) entry.error = REAWEB_STREAM_CLOSED;
       else { for (int i = 0; i < frames * 2; ++i) entry.floats[i] = static_cast<float>(entry.track_samples[i]);
         entry.input->publish(entry.floats.data(), frames * 8, ++entry.source_sequence, at); }
