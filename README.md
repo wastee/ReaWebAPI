@@ -80,4 +80,4 @@ Licensed under [LGPL-3.0-or-later](LICENSE.md).
 
 Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned project logic, use the [Lua backend + WebView example](web/lua-backend/README.md). Platform packages install it under `Scripts/ReaWebAPI/Example/lua-backend`, and the SDK includes `lua-backend/`.
 
-Native Streams support `aggregate: true` for synchronized pre-FX source analysis of folders and receive buses: [contract](docs/native-streams.md) · [Demo](web/native-stream/README.md).
+Native Streams share track sampling across analysis views and support `aggregate: true` for synchronized pre-FX source analysis of folders and receive buses: [contract](docs/native-streams.md) · [Demo](web/native-stream/README.md).

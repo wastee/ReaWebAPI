@@ -18,6 +18,51 @@ ReaWeb_StreamDesc audio_desc(unsigned rate = 48000) {
 }
 }
 struct NativeProducers::Impl {
+  struct TrackSource {
+    const Host& host;
+    void* track;
+    void* project;
+    std::string identity;
+    unsigned rate;
+    double update_rate;
+    void* accessor = nullptr;
+    std::unique_ptr<AggregateSource> aggregate;
+    uint64_t tick = 0, sequence = 0;
+    int error = 0;
+    bool pending = false;
+    double position = 0, timestamp = 0;
+    std::chrono::steady_clock::time_point next_sample{};
+    std::array<double, 8192 * 2> samples{};
+    std::array<float, 8192 * 2> floats{};
+    TrackSource(const Host& h, void* t, std::string id, unsigned r, double update)
+      : host(h), track(t), project(h.current_project ? h.current_project() : nullptr), identity(std::move(id)), rate(r), update_rate(update) {}
+    ~TrackSource() { if (accessor) function<void (*)(void*)>(host, "DestroyAudioAccessor")(accessor); }
+    int frames() const { return std::min(8192, std::max(1, static_cast<int>(rate / update_rate))); }
+    void sample(uint64_t cycle, std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point deadline) {
+      if (tick == cycle || now < next_sample || error) return;
+      tick = cycle;
+      auto valid = function<bool (*)(void*, void*, const char*)>(host, "ValidatePtr2");
+      if ((host.current_project && host.current_project() != project) || (valid && !valid(project, track, "MediaTrack*"))) {
+        error = REAWEB_STREAM_CLOSED; return;
+      }
+      if (aggregate && std::chrono::steady_clock::now() >= deadline) return;
+      auto refresh = function<bool (*)(void*)>(host, "AudioAccessorValidateState"); if (accessor && refresh) refresh(accessor);
+      auto at = function<double (*)()>(host, "GetPlayPosition"); auto state = function<int (*)()>(host, "GetPlayState");
+      if (!state || !(state() & 1)) at = function<double (*)()>(host, "GetCursorPosition");
+      if (!pending) position = at ? at() : 0;
+      std::fill(samples.begin(), samples.end(), 0);
+      auto read = function<int (*)(void*, int, int, double, int, double*)>(host, "GetAudioAccessorSamples");
+      const auto result = aggregate ? aggregate->read(rate, 2, position, frames(), samples.data(), deadline) :
+        read(accessor, rate, 2, position, frames(), samples.data());
+      pending = aggregate && result == 2;
+      if (result < 0) error = REAWEB_STREAM_CLOSED;
+      else if (!pending) {
+        for (int i = 0; i < frames() * 2; ++i) floats[i] = static_cast<float>(samples[i]);
+        ++sequence; timestamp = position;
+        next_sample = std::chrono::steady_clock::now() + std::chrono::microseconds(static_cast<int64_t>(1000000 / update_rate));
+      }
+    }
+  };
   struct Capture {
     StreamBuffer ring{REAWEB_AUDIO, audio_desc()};
     std::array<float, 8192 * 2> samples{};
@@ -33,43 +78,51 @@ struct NativeProducers::Impl {
     unsigned rate = 48000, fft_size = 2048;
     double update_rate = 30;
     std::string name, identity;
-    void* accessor = nullptr;
     void* track = nullptr;
-    std::unique_ptr<AggregateSource> aggregate;
+    std::shared_ptr<TrackSource> track_source;
     std::unique_ptr<StreamBuffer> input;
     std::unique_ptr<AudioAnalysis> analysis;
     std::atomic<bool> stopping{false};
     std::atomic<int> error{0};
     bool attached = false;
     uint64_t sequence = 0, source_sequence = 0, capture_sequence = 0;
-    std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now(), next_sample{}, next_output{};
-    std::array<double, 8192 * 2> track_samples{};
-    std::array<float, 8192 * 2> floats{};
+    std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now(), next_output{};
   };
   const Host& host;
   StreamHub& streams;
   Capture capture[2];
   std::mutex mutex;
   std::vector<std::shared_ptr<Entry>> entries;
-  std::atomic<bool> stopping{false};
+  std::atomic<bool> stopping{false}, worker_failed{false};
   std::thread worker;
-  uint64_t counter = 0;
+  uint64_t counter = 0, tick_sequence = 0;
   int last_midi = 0;
   bool midi_initialized = false;
   explicit Impl(const Host& h, StreamHub& s) : host(h), streams(s), worker([this] { run(); }) {}
   ~Impl() {
     stopping = true; worker.join();
-    auto destroy = function<void (*)(void*)>(host, "DestroyAudioAccessor");
-    for (auto& entry : entries) { if (entry->accessor && destroy) destroy(entry->accessor); entry->aggregate.reset(); streams.close(entry->handle); }
+    for (auto& entry : entries) { entry->track_source.reset(); streams.close(entry->handle); }
   }
   void close(const std::shared_ptr<Entry>& entry) {
     entry->stopping = true;
-    entry->aggregate.reset();
+    entry->track_source.reset();
     if (entry->kind != REAWEB_MIDI && entry->source < 2) --capture[entry->source].users;
-    if (entry->accessor) {
-      auto destroy = function<void (*)(void*)>(host, "DestroyAudioAccessor"); if (destroy) destroy(entry->accessor); entry->accessor = nullptr;
-    }
     streams.close(entry->handle, entry->error ? entry->error.load() : REAWEB_STREAM_CLOSED);
+  }
+  void reap() {
+    std::vector<std::shared_ptr<Entry>> retired;
+    const auto now = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      for (auto it = entries.begin(); it != entries.end();) {
+        auto& entry = **it; const auto users = streams.consumers(entry.handle);
+        entry.attached = entry.attached || users > 0;
+        if (entry.error || (!users && (entry.attached || now - entry.created > std::chrono::seconds(10)))) {
+          entry.stopping = true; retired.push_back(*it); it = entries.erase(it);
+        } else ++it;
+      }
+    }
+    for (const auto& entry : retired) close(entry);
   }
   void run() noexcept {
     try {
@@ -88,10 +141,16 @@ struct NativeProducers::Impl {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     } catch (...) {
-      std::lock_guard<std::mutex> lock(mutex); for (const auto& entry : entries) entry->error = REAWEB_SERVICE_ERROR;
+      std::lock_guard<std::mutex> lock(mutex); worker_failed = true;
+      for (const auto& entry : entries) if (entry->kind != REAWEB_MIDI) entry->error = REAWEB_SERVICE_ERROR;
     }
   }
-  void analyze(Entry& entry, const StreamBuffer::Packet& packet) {
+  void analyze(Entry& entry, const StreamBuffer::Packet& packet) noexcept {
+    if (entry.error) return;
+    try { analyze_packet(entry, packet); }
+    catch (...) { entry.error = REAWEB_SERVICE_ERROR; }
+  }
+  void analyze_packet(Entry& entry, const StreamBuffer::Packet& packet) {
     if (entry.source < 2 && capture[entry.source].rate.load() != entry.rate) { entry.error = REAWEB_UNSUPPORTED_FORMAT; return; }
     if (entry.kind == REAWEB_AUDIO) {
       streams.publish(REAWEB_AUDIO, entry.handle, packet.data.data(), static_cast<uint32_t>(packet.data.size()), packet.sequence, packet.timestamp); return;
@@ -111,9 +170,9 @@ NativeProducers::NativeProducers(const Host& host, StreamHub& streams) : impl_(s
 NativeProducers::~NativeProducers() = default;
 std::string NativeProducers::audio(const std::string& kind, const Json& options, int window) {
   auto& p = *impl_; auto entry = std::make_shared<Impl::Entry>();
+  if (p.worker_failed) throw Error("NATIVE_ERROR", "Audio analysis worker unavailable");
+  p.reap();
   { std::lock_guard<std::mutex> lock(p.mutex); if (p.entries.size() >= 8) throw Error("QUEUE_LIMIT", "At most eight built-in producers may be active"); }
-  const auto destroy = function<void (*)(void*)>(p.host, "DestroyAudioAccessor");
-  std::unique_ptr<void, void (*)(void*)> accessor_guard(nullptr, destroy);
   if (!options.is_object()) throw Error("INVALID_ARGUMENT", "Expected audio stream options");
   for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate" && value.key() != "aggregate")
     throw Error("INVALID_ARGUMENT", "Unknown audio stream option: " + value.key());
@@ -154,13 +213,25 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
     if (!create || !function<void (*)(void*)>(p.host, "DestroyAudioAccessor") ||
         !function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples"))
       throw Error("API_UNAVAILABLE", "Track audio accessors unavailable");
-    if (aggregate) entry->aggregate = std::make_unique<AggregateSource>(p.host, entry->track);
-    else {
-      entry->accessor = create(entry->track); if (!entry->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
-      accessor_guard.reset(entry->accessor);
-    }
-    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate)); entry->identity += ":pre-fx";
+    entry->identity += ":pre-fx";
     if (aggregate) entry->identity += ":aggregate-source";
+    const auto project = p.host.current_project ? p.host.current_project() : nullptr;
+    for (const auto& other : p.entries) {
+      const auto& shared = other->track_source;
+      if (shared && !shared->error && shared->track == entry->track && shared->project == project &&
+          shared->identity == entry->identity && shared->rate == entry->rate && shared->update_rate == update) {
+        entry->track_source = shared; break;
+      }
+    }
+    if (!entry->track_source) {
+      entry->track_source = std::make_shared<Impl::TrackSource>(p.host, entry->track, entry->identity, entry->rate, update);
+      if (aggregate) entry->track_source->aggregate = std::make_unique<AggregateSource>(p.host, entry->track);
+      else {
+        entry->track_source->accessor = create(entry->track);
+        if (!entry->track_source->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
+      }
+    }
+    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate));
   }
   auto desc = audio_desc(entry->rate); desc.fft_size = fft; desc.update_rate = update; desc.source = entry->identity.c_str();
   if (entry->kind == REAWEB_SPECTRUM) desc.max_bytes = (fft / 2 + 1) * 2 * 4;
@@ -170,9 +241,10 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   entry->name = "runtime.audio." + std::to_string(++p.counter);
   int status;
   { std::lock_guard<std::mutex> lock(p.mutex); status = p.entries.size() < 8 ? p.streams.create(entry->kind, entry->name.c_str(), &desc, &entry->handle) : REAWEB_QUEUE_LIMIT;
-    if (!status) { if (entry->source < 2) ++p.capture[entry->source].users; p.entries.push_back(entry); } }
+    if (!status) { if (entry->source < 2) ++p.capture[entry->source].users;
+      if (p.worker_failed) entry->error = REAWEB_SERVICE_ERROR;
+      p.entries.push_back(entry); } }
   if (status) throw Error(StreamHub::code(status), "Cannot create audio analysis stream");
-  accessor_guard.release();
   return entry->name;
 }
 std::string NativeProducers::midi(int device, int window) {
@@ -205,29 +277,22 @@ void NativeProducers::attached(const std::string& name) {
   for (const auto& entry : p.entries) if (entry->name == name) entry->attached = true;
 }
 void NativeProducers::tick() {
-  auto& p = *impl_; std::lock_guard<std::mutex> lock(p.mutex);
+  auto& p = *impl_; p.reap();
+  std::vector<std::shared_ptr<Impl::Entry>> active;
+  { std::lock_guard<std::mutex> lock(p.mutex); active = p.entries; }
   const auto now = std::chrono::steady_clock::now();
-  for (auto it = p.entries.begin(); it != p.entries.end();) {
-    auto& entry = **it; const auto users = p.streams.consumers(entry.handle); entry.attached = entry.attached || users > 0;
-    if (entry.error || (!users && (entry.attached || now - entry.created > std::chrono::seconds(10)))) { p.close(*it); it = p.entries.erase(it); continue; }
-    if ((entry.accessor || entry.aggregate) && now >= entry.next_sample) {
-      auto valid = function<bool (*)(void*, void*, const char*)>(p.host, "ValidatePtr2");
-      if (valid && !valid(nullptr, entry.track, "MediaTrack*")) { entry.error = REAWEB_STREAM_CLOSED; ++it; continue; }
-      auto refresh = function<bool (*)(void*)>(p.host, "AudioAccessorValidateState"); if (entry.accessor && refresh) refresh(entry.accessor);
-      auto position = function<double (*)()>(p.host, "GetPlayPosition"); auto state = function<int (*)()>(p.host, "GetPlayState");
-      if (!state || !(state() & 1)) position = function<double (*)()>(p.host, "GetCursorPosition");
-      const auto frames = std::min(8192, std::max(1, static_cast<int>(entry.rate / entry.update_rate)));
-      const double at = position ? position() : 0;
-      std::fill(entry.track_samples.begin(), entry.track_samples.end(), 0);
-      auto read = function<int (*)(void*, int, int, double, int, double*)>(p.host, "GetAudioAccessorSamples");
-      const auto result = entry.aggregate ? entry.aggregate->read(entry.rate, 2, at, frames, entry.track_samples.data()) :
-        read(entry.accessor, entry.rate, 2, at, frames, entry.track_samples.data());
-      if (result < 0) entry.error = REAWEB_STREAM_CLOSED;
-      else { for (int i = 0; i < frames * 2; ++i) entry.floats[i] = static_cast<float>(entry.track_samples[i]);
-        entry.input->publish(entry.floats.data(), frames * 8, ++entry.source_sequence, at); }
-      entry.next_sample = now + std::chrono::microseconds(static_cast<int64_t>(1000000 / entry.update_rate));
+  const auto deadline = now + std::chrono::milliseconds(2);
+  ++p.tick_sequence;
+  for (size_t i = 0; i < active.size(); ++i) {
+    auto& entry = *active[(i + p.tick_sequence - 1) % active.size()];
+    if (!entry.attached || !entry.track_source) continue;
+    auto& source = *entry.track_source;
+    source.sample(p.tick_sequence, now, deadline);
+    if (source.error) entry.error = source.error;
+    else if (entry.source_sequence != source.sequence) {
+      entry.source_sequence = source.sequence;
+      entry.input->publish(source.floats.data(), source.frames() * 8, entry.source_sequence, source.timestamp);
     }
-    ++it;
   }
   if (std::none_of(p.entries.begin(), p.entries.end(), [](const auto& e) { return e->kind == REAWEB_MIDI; })) { p.midi_initialized = false; return; }
   auto recent = function<int (*)(int, char*, int*, int*, int*, double*, int*)>(p.host, "MIDI_GetRecentInputEvent");

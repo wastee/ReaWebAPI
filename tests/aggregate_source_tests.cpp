@@ -1,5 +1,6 @@
 #include "runtime/aggregate_source.hpp"
 #include "runtime/audio_analysis.hpp"
+#include "runtime/native_producers.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -25,6 +26,7 @@ const auto main_thread = std::this_thread::get_id();
 int creates = 0, destroys = 0, rate_expected = 48000, channels_expected = 2, frames_expected = 2048;
 double at_expected = 1.25;
 bool fail_create = false, fail_read = false, no_audio = false;
+int sample_delay = 0;
 void* project = reinterpret_cast<void*>(1);
 Guid guid(void* track) { Guid result{}; result[0] = static_cast<Track*>(track)->id; return result; }
 double value(void* pointer, const char* key) {
@@ -67,6 +69,7 @@ Host host() {
       CHECK(std::this_thread::get_id() == main_thread && accessors.count(a));
       CHECK(rate == rate_expected && channels == channels_expected && at == at_expected && frames == frames_expected);
       auto& t = **static_cast<Track**>(a); ++t.reads;
+      if (sample_delay) std::this_thread::sleep_for(std::chrono::milliseconds(sample_delay));
       if (fail_read) return -1;
       if (no_audio) { output[0] = 99; return 0; }
       for (int i = 0; i < frames; ++i) for (int ch = 0; ch < channels; ++ch)
@@ -149,6 +152,64 @@ int main() {
       double output[128]; CHECK(source.read(44100, 1, 7, 128, output) < 0); fail_create = false;
     }
     CHECK(accessors.empty() && creates == destroys);
+    {
+      root.id = 1; root.mute = false; root.receives.clear();
+      child.parent = &root; tracks = {&root, &child};
+      int revision = 0; h.change_count = [&](void*) { return revision; };
+      AggregateSource source(h, &root);
+      double output[128]; std::fill(std::begin(output), std::end(output), 123);
+      sample_delay = 10;
+      auto step = [&] { return source.read(44100, 1, 7, 128, output, std::chrono::steady_clock::now() + std::chrono::milliseconds(2)); };
+      CHECK(step() == 2 && output[0] == 123);
+      CHECK(step() == 1);
+      CHECK(std::abs(output[8] - 1.5) < 1e-12);
+      CHECK(step() == 2);
+      child.mute = true; ++revision;
+      CHECK(step() == 1 && std::abs(output[8] - .75) < 1e-12);
+      child.mute = false; ++revision;
+      CHECK(step() == 2);
+      tracks = {&child}; ++revision;
+      CHECK(step() == -1);
+      sample_delay = 0;
+    }
+    CHECK(accessors.empty() && creates == destroys);
+    {
+      h.change_count = [](void*) { return 0; };
+      const auto native = h.native_function;
+      h.native_function = [native](const char* name) -> void* {
+        if (!std::strcmp(name, "GetAudioDeviceInfo")) return reinterpret_cast<void*>(+[](const char*, char* out, int size) { std::snprintf(out, size, "48000"); return true; });
+        if (!std::strcmp(name, "GetSelectedTrack")) return reinterpret_cast<void*>(+[](void*, int) -> void* { return tracks.front(); });
+        if (!std::strcmp(name, "ValidatePtr2")) return reinterpret_cast<void*>(+[](void*, void* t, const char*) { return std::find(tracks.begin(), tracks.end(), t) != tracks.end(); });
+        if (!std::strcmp(name, "GetPlayState")) return reinterpret_cast<void*>(+[] { return 0; });
+        if (!std::strcmp(name, "GetPlayPosition") || !std::strcmp(name, "GetCursorPosition")) return reinterpret_cast<void*>(+[] { return at_expected; });
+        return native(name);
+      };
+      rate_expected = 48000; channels_expected = 2; frames_expected = 1600;
+      tracks = {&root, &child}; child.parent = &root;
+      StreamHub hub; NativeProducers producers(h, hub);
+      for (const bool aggregate : {false, true}) {
+        const int before = creates, reads = root.reads;
+        std::vector<std::string> names;
+        for (const auto* kind : {"meter", "spectrum", "waveform"}) {
+          names.push_back(producers.audio(kind, Json{{"source", "selected-track"}, {"aggregate", aggregate}}, 1));
+          hub.attach(names.back(), 1, 0, "http://127.0.0.1:1234"); producers.attached(names.back());
+        }
+        sample_delay = aggregate ? 10 : 0;
+        for (int i = 0; i < 200; ++i) {
+          producers.tick(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+          const auto state = hub.info(); bool complete = true;
+          for (const auto& stream : state["streams"]) complete = complete && stream["published"].get<int>() > 0;
+          if (complete) break;
+        }
+        const auto final_state = hub.info();
+        for (const auto& stream : final_state["streams"]) CHECK(stream["published"].get<int>() > 0);
+        CHECK(creates == before + (aggregate ? 2 : 1));
+        CHECK(root.reads == reads + 1);
+        sample_delay = 0;
+        hub.detach_window(1); producers.tick(); CHECK(hub.info()["streams"].empty());
+        CHECK(accessors.empty() && creates == destroys);
+      }
+    }
     std::cout << "Aggregate PCM, folders, receives, mute/solo, cycles, identity, analysis and accessor lifetime passed\n";
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

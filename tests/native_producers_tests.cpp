@@ -3,9 +3,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <stdexcept>
-#define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
+#define CHECK(value) do { if (!(value)) throw std::runtime_error(std::to_string(__LINE__) + ": " + #value); } while (0)
 thread_local bool realtime = false;
 thread_local unsigned allocations = 0;
 void* operator new(std::size_t size) { if (realtime) ++allocations; if (auto* p = std::malloc(size ? size : 1)) return p; throw std::bad_alloc(); }
@@ -15,9 +16,10 @@ using namespace reaweb;
 using Clock = std::chrono::steady_clock;
 namespace {
 double samples[512]{};
+double input_samples[512]{};
 int midi_count = 0;
 bool device(const char*, char* buffer, int size) { std::snprintf(buffer, size, "%s", "48000"); return true; }
-double* audio_buffer(bool, int) { return samples; }
+double* audio_buffer(bool output, int) { return output ? samples : input_samples; }
 int recent(int index, char* buffer, int* size, int* stamp, int* device, double* position, int* loop) {
   const auto sequence = midi_count - index; if (sequence <= 0) return 0;
   if (*size < 3) return 0;
@@ -75,6 +77,28 @@ int main() {
     const auto attachment = streams.attach(brief, 3, 0, "http://127.0.0.1:1234");
     producers.attached(brief); streams.detach(attachment["token"], 3);
     producers.tick(); CHECK(streams.info()["streams"].empty());
+    const auto healthy = producers.audio("meter", Json{{"source", "input"}}, 6);
+    streams.attach(healthy, 6, 0, "http://127.0.0.1:1234"); producers.attached(healthy);
+    const auto invalid = producers.audio("meter", Json::object(), 4);
+    streams.attach(invalid, 4, 0, "http://127.0.0.1:1234");
+    samples[0] = std::numeric_limits<double>::quiet_NaN();
+    producers.capture(true, 512, 48000, 2, audio_buffer);
+    for (int i = 0; i < 200 && (streams.info()["streams"].size() > 1 || !published(streams, healthy)); ++i) {
+      producers.capture(true, 512, 48000, 2, audio_buffer);
+      producers.capture(false, 512, 48000, 2, audio_buffer);
+      std::this_thread::sleep_for(std::chrono::milliseconds(5)); producers.tick();
+    }
+    CHECK(streams.info()["streams"].size() == 1 && published(streams, healthy) > 0);
+    samples[0] = 0;
+    const auto recovered = producers.audio("meter", Json::object(), 5);
+    streams.attach(recovered, 5, 0, "http://127.0.0.1:1234");
+    producers.attached(recovered);
+    for (int i = 0; i < 200 && !published(streams, recovered); ++i) {
+      producers.capture(true, 512, 48000, 2, audio_buffer);
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(published(streams, recovered) > 0);
+    streams.detach_window(5); streams.detach_window(6); producers.tick(); CHECK(streams.info()["streams"].empty());
     std::cout << "PCM capture has zero allocations, worker analysis, MIDI note/CC/filtering and consumer ownership passed\n";
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

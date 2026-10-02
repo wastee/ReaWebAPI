@@ -44,6 +44,13 @@ struct AggregateSource::Impl {
   struct Source { Guid guid; void* accessor; };
   std::unordered_map<void*, Source> sources;
   std::vector<double> scratch;
+  std::vector<Node> block_nodes;
+  std::vector<bool> block_included;
+  std::vector<double> sum;
+  size_t next = 0;
+  bool reading = false;
+  int revision = 0, rate = 0, channels = 0, frames = 0;
+  double position = 0;
 
   Impl(const Host& h, void* r) : host(h), root(r) {
     if (!host.current_project || !host.track_count || !host.track_guid)
@@ -145,34 +152,42 @@ struct AggregateSource::Impl {
 };
 AggregateSource::AggregateSource(const Host& host, void* root) : impl_(std::make_unique<Impl>(host, root)) {}
 AggregateSource::~AggregateSource() = default;
-int AggregateSource::read(int rate, int channels, double position, int frames, double* output) {
+int AggregateSource::read(int rate, int channels, double position, int frames, double* output,
+                          std::chrono::steady_clock::time_point deadline) {
   auto& p = *impl_;
-  std::vector<Node> nodes; std::vector<bool> included;
-  if (!p.collect(nodes, included)) return -1;
-  std::unordered_map<void*, Guid> wanted;
-  for (size_t i = 0; i < nodes.size(); ++i) if (included[i]) wanted.emplace(nodes[i].track, nodes[i].guid);
-  for (auto it = p.sources.begin(); it != p.sources.end();) {
-    const auto found = wanted.find(it->first);
-    if (found == wanted.end() || found->second != it->second.guid) { p.destroy(it->second.accessor); it = p.sources.erase(it); }
-    else ++it;
-  }
+  if (p.host.current_project() != p.project) return -1;
+  const int revision = p.host.change_count ? p.host.change_count(p.project) : 0;
   const size_t size = static_cast<size_t>(frames) * channels;
-  std::fill(output, output + size, 0); p.scratch.resize(size);
-  for (size_t i = 0; i < nodes.size(); ++i) if (included[i]) {
-    const auto& node = nodes[i];
+  if (!p.reading || p.revision != revision || p.rate != rate || p.channels != channels || p.frames != frames || p.position != position) {
+    p.reading = false; p.block_nodes.clear();
+    if (!p.collect(p.block_nodes, p.block_included)) return -1;
+    std::unordered_map<void*, Guid> wanted;
+    for (size_t i = 0; i < p.block_nodes.size(); ++i) if (p.block_included[i]) wanted.emplace(p.block_nodes[i].track, p.block_nodes[i].guid);
+    for (auto it = p.sources.begin(); it != p.sources.end();) {
+      const auto found = wanted.find(it->first);
+      if (found == wanted.end() || found->second != it->second.guid) { p.destroy(it->second.accessor); it = p.sources.erase(it); }
+      else ++it;
+    }
+    p.sum.assign(size, 0); p.scratch.resize(size); p.next = 0; p.reading = true;
+    p.revision = revision; p.rate = rate; p.channels = channels; p.frames = frames; p.position = position;
+  }
+  for (; p.next < p.block_nodes.size(); ++p.next) if (p.block_included[p.next]) {
+    if (std::chrono::steady_clock::now() >= deadline) return 2;
+    const auto& node = p.block_nodes[p.next];
     auto found = p.sources.find(node.track);
     if (found == p.sources.end()) {
       std::unique_ptr<void, void (*)(void*)> accessor(p.create(node.track), p.destroy);
-      if (!accessor) return -1;
+      if (!accessor) { p.reading = false; return -1; }
       found = p.sources.emplace(node.track, Impl::Source{node.guid, accessor.get()}).first;
       accessor.release();
     }
     p.refresh(found->second.accessor);
     std::fill(p.scratch.begin(), p.scratch.end(), 0);
     const int result = p.samples(found->second.accessor, rate, channels, position, frames, p.scratch.data());
-    if (result < 0) return -1;
-    if (result > 0) for (size_t sample = 0; sample < size; ++sample) output[sample] += p.scratch[sample];
+    if (result < 0) { p.reading = false; return -1; }
+    if (result > 0) for (size_t sample = 0; sample < size; ++sample) p.sum[sample] += p.scratch[sample];
   }
+  std::copy(p.sum.begin(), p.sum.end(), output); p.reading = false;
   return 1;
 }
 }

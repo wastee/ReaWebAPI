@@ -1,5 +1,6 @@
 """Verify aggregate-source PCM and stream lifecycle in an isolated real REAPER."""
 import argparse
+import configparser
 import json
 import math
 from pathlib import Path
@@ -14,13 +15,20 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--reaper', type=Path, required=True)
 parser.add_argument('--extension', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--audio-config', type=Path)
 args = parser.parse_args()
 root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=False)
 (root / 'UserPlugins').mkdir()
 config = '[REAPER]\nerrnowarn=5\nloadlastproj=0\nshowlastproj=0\nsplash=0\nverchk=0\naudioclosestop=0\naudiocloseinactive=0\n'
 if sys.platform == 'darwin':
-    config += 'hasrecentlyopened=1\n[audioconfig]\nmode=4\n'
+    config = config.replace('[REAPER]', '[reaper]')
+    if args.audio_config:
+        audio = configparser.ConfigParser(strict=False, interpolation=None)
+        audio.read(args.audio_config, encoding='utf-8-sig')
+        section = next(name for name in audio.sections() if name.lower() == 'reaper')
+        config += ''.join(f'{key}={value}\n' for key, value in audio[section].items() if key.startswith('coreaudio'))
+    config += 'hasrecentlyopened=1\n[audioconfig]\nmode=0\n'
 elif sys.platform == 'win32':
     effects = args.reaper.resolve().parent / 'Plugins' / 'FX'
     config += f'vst_scan=0\nvstpath={effects}\nvstpath64={effects}\nvstfullstate=49989\n'
@@ -81,10 +89,22 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
  try {
   await reaper.lifecycle.ready;
   metrics.extensionVersion=(await reaper.debug.getDiagnostics()).version;
-  check(metrics.extensionVersion==='0.3.8.0','extension version');
+  check(metrics.extensionVersion==='0.3.8.1','extension version');
   const t=[]; for(let i=0;i<8;i++)t.push(await reaper.GetTrack(0,i));
   const source=async i=>'track:'+await reaper.GetTrackGUID(t[i]);
   const opts=async i=>({source:await source(i),aggregate:true,fftSize:2048,updateRate:30});
+  metrics.switchMs=[];
+  for(let i=0;i<20;i++){
+   const options=await opts(i%2?4:0),started=performance.now();
+   const streams=await Promise.all(['meter','spectrum','waveform'].map(kind=>reaper.audio.openStream(kind,options)));
+   try{
+    await until(()=>streams.every(stream=>stream.latest()));
+    metrics.switchMs.push(Math.round(performance.now()-started));
+    check(streams.every(stream=>!stream.closed),'parallel analysis switch '+i);
+   }finally{await Promise.all(streams.map(stream=>stream.close()));}
+  }
+  await sleep(100);
+  check((await reaper.stream.getDiagnostics()).streams.length===0,'rapid switches release all producers');
   const take=async(kind,options)=>{
    const before=await reaper.GetProjectStateChangeCount(0),undo=await reaper.Undo_CanUndo2(0);
    const stream=await reaper.audio.openStream(kind,options); active=stream;

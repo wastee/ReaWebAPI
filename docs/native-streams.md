@@ -76,6 +76,8 @@ For track sources, `aggregate: true` recursively includes the bound track, folde
 
 All accessors read at the same project time, sample rate, stereo layout and block size. Native code sums their PCM before the existing FFT, Peak/RMS/LUFS and waveform analysis. The single stream retains floating-point sums above `1.0`, without normalization, limiting, averaging or gain compensation. Item/take/lane playback is determined by REAPER's accessor PCM.
 
+Streams with the same track, aggregation mode, sample rate and update rate share source sampling. Aggregate reads yield between source tracks when the host tick budget is exhausted and publish only complete sums at one captured project position. A single REAPER accessor call cannot be interrupted. Analysis failures close the affected stream with `NATIVE_ERROR` without stopping other producers or later streams.
+
 This is synchronized **pre-FX source PCM aggregation**, not post-FX, pre-fader, post-fader or track output capture. Track/send gain, pan, phase and channel remapping are not applied. It creates no FX, sends, tracks or Undo entries. `aggregate: true` rejects `master` and `input` with `INVALID_ARGUMENT`. Omitted or `false` preserves the existing source behavior. The stream descriptor identifies this mode as `track:<GUID>:pre-fx:aggregate-source`. Deleting the bound track or switching projects closes the aggregate stream.
 
 ### Analysis payloads
