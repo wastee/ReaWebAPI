@@ -39,12 +39,6 @@ int main() {
       return nullptr;
     };
     StreamHub streams; NativeProducers producers(host, streams);
-    for (const Json options : {Json{{"tap", "post-fx"}}, Json{{"source", "input"}, {"tap", "pre-fx"}},
-        Json{{"source", "selected-track"}, {"tap", "post-fader"}}, Json{{"tap", 3}}}) {
-      bool rejected = false;
-      try { producers.audio("meter", options, 1); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
-      CHECK(rejected);
-    }
     std::vector<std::string> names;
     for (const auto* kind : {"audio", "spectrum", "meter", "waveform"}) {
       names.push_back(producers.audio(kind, Json::object(), 1));

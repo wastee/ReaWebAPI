@@ -219,10 +219,6 @@ async function streamContract() {
   stream.on('data', packet => { const bytes: Uint8Array = packet.bytes; });
   await stream.close();
   const meter = await reaper.audio.openStream('meter', {source: 'master', updateRate: 30});
-  const routed = await reaper.audio.openStream('spectrum', {source: 'selected-track', tap: 'post-fx'});
-  await routed.close();
-  // @ts-expect-error Only the documented track taps are supported.
-  await reaper.audio.openStream('meter', {source: 'selected-track', tap: 'post-fader'});
   const stop = await reaper.system.schedule(() => {}, {delay: 10, interval: 100});
   const watch = await reaper.fs.watch('.', event => console.log(event.type), {recursive: true});
   await reaper.clipboard.writeBinary('application/octet-stream', new Uint8Array([1]));

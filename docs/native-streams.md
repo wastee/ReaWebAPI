@@ -57,24 +57,11 @@ const spectrum = await reaper.audio.openStream('spectrum', {
 const midi = await reaper.system.openMIDIInput(-1);
 ```
 
-`audio.openStream` accepts `audio`, `spectrum`, `meter`, or `waveform`. Options are `source`, `tap` (track sources only), `fftSize` (power of two, 32–32768), and `updateRate` (1–120 Hz). Eight built-in producers may be active. They stop after the last consumer detaches. A consumer in another window keeps its producer alive.
+`audio.openStream` accepts `audio`, `spectrum`, `meter`, or `waveform`. Options are `source`, `fftSize` (power of two, 32–32768), and `updateRate` (1–120 Hz). Eight built-in producers may be active. They stop after the last consumer detaches. A consumer in another window keeps its producer alive.
 
 `master` captures hardware output channels 0/1 after REAPER processing, including any other signals routed directly to those outputs. `input` captures hardware input 0/1. A mono device is duplicated to stereo. Capture uses a 16-slot PCM ring, maximum 8192 frames per block. Audio-thread work is limited to conversion and bounded copies. No WebView stall can block capture. Analysis runs on one native worker. Device sample-rate changes close affected streams with `UNSUPPORTED_FORMAT`; query devices and reopen.
 
 `selected-track` captures the track selected at open, and `track:<GUID>` selects a specific track. Both use REAPER's **pre-FX audio accessor**, sampled on the main thread at playback position or edit cursor. Their `source` identifies the bound track and pre-FX tap. This is source-content analysis, not post-FX/live-input track metering. Use the existing `audio.getTrackMeter(track)` for REAPER's instantaneous track peak reading. Accessor sample acquisition follows native host scheduling, while processing and delivery use the independent worker/transport.
-
-With v0.3.7.8, `tap: 'post-fx'` captures real-time track channels 1–2 after the track FX chain and before its fader/pan, including folder sums, receives, instruments and monitored input. REAPER applies upstream routing, send mode, channel mapping and gain. This is not the selected track's post-fader output or an offline render. Playback or active monitoring is required. Channels routed only to other track channels are outside this stereo tap.
-
-```js
-const meter = await reaper.audio.openStream('meter', {
-  source: 'selected-track', tap: 'post-fx', updateRate: 30,
-});
-// Release the consumer when the analysis view closes.
-await meter.close();
-```
-
-The runtime installs `Effects/ReaWebAPI/track_audio_v1.jsfx` in the REAPER resource directory on first use and inserts one shared pass-through capture FX per track. The last consumer removes it. The runtime keeps the capture FX at the end of the chain. Removing, bypassing or offlining it, bypassing the track FX chain, deleting its track or changing project closes the stream. Reopen after restoring the FX chain or changing the audio sample rate. Capture copies bounded blocks through REAPER's EEL shared memory, with analysis on the native worker. A suspended FX chain produces silence instead of retaining stale readings. The capture FX is an ordinary project FX while attached, so saving or creating an undo state during analysis can retain an inactive copy. It passes audio through and does not capture without its live runtime token. A later subscription replaces inactive copies on that track.
-
 
 Spectrum contains `fftSize / 2 + 1` linear-amplitude bins per channel, using a Hann window. Meter contains channel peaks, channel RMS, momentary LUFS, short-term LUFS, integrated LUFS, then processed seconds. Silence is negative infinity for LUFS. [libebur128](https://github.com/jiixyj/libebur128) performs native EBU R128 analysis with bounded histogram storage. Capture discontinuities reset analysis history. Realtime waveform contains `[min, max]` for each channel of each of `min(256, fftSize)` buckets, oldest first. Overview and zoom queries reuse `audio.getWaveform(path, {start, duration, points})` and REAPER's native peak cache.
 

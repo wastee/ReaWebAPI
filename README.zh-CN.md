@@ -79,4 +79,4 @@ Windows 使用 MSVC x64，并添加 `-A x64`。macOS 使用 `-DCMAKE_OSX_ARCHITE
 
 纯 JavaScript 应用使用 REAPER Mirror 和 Runtime API。需要由 Lua 管理工程逻辑时，参见 [Lua 后端 + WebView 示例](web/lua-backend/README.md)。平台安装包将其放在 `Scripts/ReaWebAPI/Example/lua-backend`，SDK 提供 `lua-backend/`。
 
-Native Stream、二进制 consumer、音频分析与平台新增能力见 [接口契约](docs/native-streams.zh-CN.md) 和 [Demo](web/native-stream/README.md)。轨道流可通过临时直通 JSFX 启用 FX 后采样，包含文件夹汇总与接收路由。
+Native Stream、二进制 consumer、音频分析与平台新增能力见 [接口契约](docs/native-streams.zh-CN.md) 和 [Demo](web/native-stream/README.md)。
