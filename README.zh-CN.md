@@ -80,3 +80,5 @@ Windows 使用 MSVC x64，并添加 `-A x64`。macOS 使用 `-DCMAKE_OSX_ARCHITE
 纯 JavaScript 应用使用 REAPER Mirror 和 Runtime API。需要由 Lua 管理工程逻辑时，参见 [Lua 后端 + WebView 示例](web/lua-backend/README.md)。平台安装包将其放在 `Scripts/ReaWebAPI/Example/lua-backend`，SDK 提供 `lua-backend/`。
 
 Native Stream 在多路分析间复用轨道采样，支持 `aggregate: true`，用于 Folder 和 Receive Bus 的 pre-FX 源内容同步聚合分析。见 [接口契约](docs/native-streams.zh-CN.md) 和 [Demo](web/native-stream/README.md)。
+
+内置 Meter 提供 Sample/True Peak、独立的 Sample/True Peak 削波计数、每通道及全局峰值最大值、RMS-M/I、LUFS-M/S/I 和 LRA 上下界，支持复位及 Mono 标定，支持 1–32 源通道、精确整数削波计数和可选历史累计策略，分析独立于发布频率。

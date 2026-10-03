@@ -84,7 +84,7 @@ with wave.open(str(root / 'tone.wav'), 'wb') as wav:
    check(source.latest().data instanceof Float32Array,kind+' Float32 payload');
    if(kind==='audio'){await sleep(600);check(source.dropped>0,'audio consumer FIFO overrun');while(source.read()){}check(source.read()===null,'audio FIFO underrun');}
    else if(kind==='spectrum'){const bins=source.latest().data;check(bins.length===2050,'FFT bins');}
-   else if(kind==='meter'){await sleep(500);check(source.latest().data.length===8,'Peak RMS LUFS layout');check(source.latest().data[0]>0,'master meter signal');}
+   else if(kind==='meter'){await sleep(500);check(source.latest().data.length===13*source.info.channels+14,'Built-in loudness layout');check(source.latest().data[0]>0,'master meter signal');}
    else check(source.latest().data.length===1024,'realtime min/max waveform');
    await source.close();await sleep(60);
   }

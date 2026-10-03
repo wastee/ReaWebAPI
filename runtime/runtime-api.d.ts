@@ -319,11 +319,41 @@ interface ReaWebAPI {
 
   };
   readonly audio: {
+    /** Built-in meter Float32 prefix (7*C+14): samplePeak[C], truePeak[C], channelRms[C], sampleClipCount[C],
+     * truePeakClipCount[C], channelMaxSamplePeak[C], channelMaxTruePeak[C],
+     * rmsMomentary, rmsIntegrated, maxRmsMomentary, lufsMomentary, lufsShortTerm, lufsIntegrated,
+     * loudnessRange, maxLufsMomentary, maxLufsShortTerm, maxSamplePeak, maxTruePeak, processedSeconds,
+     * loudnessRangeLow, loudnessRangeHigh. Global peak maxima reduce the channel maxima.
+     * A 6*C Float32 suffix preserves uint64 counters as 24/24/16-bit limbs.
+     * Use decodeMeter for exact bigint counts. Prefix counter slots are approximate compatibility values.
+     * True Peak, RMS-I, LUFS-M/S/I and LRA follow Cockos loudness_meter.
+     * Peaks/channel RMS are linear amplitude. Global RMS is dBFS, loudness is LUFS, LRA is LU.
+     * Clip counts and maxima accumulate until reset. Channel RMS covers the publication interval.
+     * All meter history shares one reset lifecycle. processedSeconds counts processed PCM frames / sample rate. */
     openStream(kind: 'audio' | 'spectrum' | 'meter' | 'waveform', options?: {
       source?: 'master' | 'input' | 'selected-track' | `track:${string}`; fftSize?: number; updateRate?: number;
       /** Sum routed pre-FX track source PCM. Track sources only, defaults to false. */
       aggregate?: boolean;
+      /** Meter only. Cockos mono calibration: subtract 3 dB from global RMS/LUFS, without downmixing PCM. */
+      forceMono?: boolean;
+      /** Meter only. Defaults to playback-only. Controls RMS-I, LUFS-I and LRA history only. */
+      integratedMode?: 'continuous' | 'playback-only';
+      /** Meter only, defaults to true. Hardware sources still analyze while stopped. */
+      resetOnPlaybackStart?: boolean;
     }): Promise<ReaWebStream>;
+    /** Reset a built-in meter opened by this window. Resolves when the worker reset is queued. */
+    resetMeter(name: string): Promise<boolean>;
+    /** Decode the built-in Meter's 13*C+14 Float32 payload without modifying it. */
+    decodeMeter(data: Float32Array, channels: number): {
+      samplePeak: Float32Array; truePeak: Float32Array; channelRms: Float32Array;
+      sampleClipCount: bigint[]; truePeakClipCount: bigint[];
+      channelMaxSamplePeak: Float32Array; channelMaxTruePeak: Float32Array;
+      rmsMomentary: number; rmsIntegrated: number; maxRmsMomentary: number;
+      lufsMomentary: number; lufsShortTerm: number; lufsIntegrated: number;
+      loudnessRange: number; loudnessRangeLow: number; loudnessRangeHigh: number;
+      maxLufsMomentary: number; maxLufsShortTerm: number;
+      maxSamplePeak: number; maxTruePeak: number; processedSeconds: number;
+    };
     /** Explicit coalescing: one in-flight write and the latest waiting value per track/key.
      * Superseded values settle without being sent. Does not create an Undo gesture.
      */

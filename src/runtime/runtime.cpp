@@ -73,6 +73,10 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
     if (!args[0].is_string()) throw Error("INVALID_ARGUMENT", "Expected analysis stream kind");
     return producers_.audio(args[0].get<std::string>(), args[1], id);
   }
+  if (method == "ReaWeb_MeterReset") {
+    if (!args[0].is_string()) throw Error("INVALID_ARGUMENT", "Expected a built-in meter stream name");
+    producers_.reset_meter(args[0].get<std::string>(), id); return true;
+  }
   if (method == "ReaWeb_MIDIOpen") {
     if (!args[0].is_number_integer() || args[0].get<double>() < -1 || args[0].get<double>() > 65535) throw Error("INVALID_ARGUMENT", "Expected MIDI device index");
     return producers_.midi(args[0].get<int>(), id);

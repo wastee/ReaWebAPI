@@ -20,6 +20,7 @@ struct Track {
   bool main = true, mute = false, defeat = false, item_muted = false;
   int solo = 0, reads = 0;
   std::vector<Receive> receives;
+  unsigned channels = 2;
 };
 std::vector<Track*> tracks;
 std::set<void*> accessors;
@@ -33,6 +34,7 @@ void* project = reinterpret_cast<void*>(1);
 Guid guid(void* track) { Guid result{}; result[0] = static_cast<Track*>(track)->id; return result; }
 double value(void* pointer, const char* key) {
   const auto& t = *static_cast<Track*>(pointer);
+  if (!std::strcmp(key, "I_NCHAN")) return t.channels;
   if (!std::strcmp(key, "B_MAINSEND")) return t.main;
   if (!std::strcmp(key, "B_MUTE")) return t.mute;
   if (!std::strcmp(key, "I_SOLO")) return t.solo;
@@ -103,12 +105,18 @@ int main() {
       read(source, .75); const int initial = creates;
       read(source, .75); CHECK(creates == initial);
       child.parent = &root; nested.parent = &root; leaf.parent = &nested;
+      leaf.channels = 6; CHECK(source.channels() == 6);
+      leaf.mute = true; other.solo = 2; CHECK(source.channels() == 6);
+      leaf.mute = false; other.solo = 0;
+      leaf.channels = 64; CHECK(source.channels() == 32);
+      leaf.main = false; CHECK(source.channels() == 2);
+      leaf.main = true; leaf.channels = 2;
       auto pcm = read(source, 2.25); CHECK(root.reads == 3 && child.reads == 1 && leaf.reads == 1);
       AudioAnalysis analysis(48000, 2, 2048);
       for (int i = 0; i < 100; ++i) analysis.process(pcm.data(), 2048);
       CHECK(std::abs(analysis.spectrum()[64 * 2] - 2.25f) < .001f);
-      const auto meter = analysis.meter(); CHECK(meter[0] > 2.24 && std::abs(meter[2] - 2.25 / std::sqrt(2.)) < .001);
-      CHECK(std::isfinite(meter[4]) && std::isfinite(meter[5]) && std::isfinite(meter[6]));
+      const auto meter = analysis.meter(); CHECK(meter[0] > 2.24 && std::abs(meter[4] - 2.25 / std::sqrt(2.)) < .001);
+      CHECK(std::isfinite(meter[17]) && std::isfinite(meter[18]) && std::isfinite(meter[19]));
       const auto wave = analysis.waveform(256); CHECK(*std::max_element(wave.begin(), wave.end()) > 2.24);
       root.receives = {{&child}, {&leaf}, {&bus}}; bus.receives = {{&root}};
       const int before = child.reads; read(source, 2.25); CHECK(child.reads == before + 1);
@@ -193,7 +201,7 @@ int main() {
       for (const bool aggregate : {false, true}) {
         const int before = creates, reads = root.reads;
         std::vector<std::string> names;
-        for (const auto* kind : {"meter", "spectrum", "waveform"}) {
+        for (const auto* kind : {"audio", "spectrum", "waveform"}) {
           names.push_back(producers.audio(kind, Json{{"source", "selected-track"}, {"aggregate", aggregate}}, 1));
           hub.attach(names.back(), 1, 0, "http://127.0.0.1:1234"); producers.attached(names.back());
         }

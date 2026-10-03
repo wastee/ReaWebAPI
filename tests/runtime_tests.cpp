@@ -901,7 +901,10 @@ int main() {
       audio_host.get_track = [&](void*, int) -> void* { return &track; };
       audio_host.get_selected_track = [&](void*, int) -> void* { return &track; };
       audio_host.valid_track = [&](void*, void* t) { return t == &track; };
-      audio_host.play_state = [] { return 0; };
+      audio_host.play_state = [] { return 1; };
+      audio_host.get_track_value = [](void*, const std::string& key) { return key == "I_NCHAN" ? 2.0 : 0.0; };
+      const auto playback_start = std::chrono::steady_clock::now();
+      audio_host.play_position = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - playback_start).count(); };
       audio_host.cursor_position = [] { return 0.0; };
       int reads = 0;
       static int* sample_reads;
@@ -925,6 +928,7 @@ int main() {
       const auto name = runtime.producers().audio("meter", Json{{"source", "selected-track"}, {"updateRate", 120}}, id);
       const auto first_ticket = runtime.streams().attach(name, id, 0, "http://127.0.0.1:1234");
       runtime.producers().attached(name);
+      runtime.producers().tick();
       const auto request = window->send("ReaWeb_StreamOpen", Json::array({name}));
       // Normal host cadence exceeds the sample interval, so every attached tick samples.
       auto advance = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(15)); runtime.tick(); };

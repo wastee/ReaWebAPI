@@ -8,7 +8,7 @@ JavaScript Runtime fixes fifteen namespace boundaries: `reaper.window`, `reaper.
 
 Use `await reaper.lifecycle.ready` for the handshake. Batches and managed Undo belong to `reaper.transaction`; coalesced mixer controls belong to `reaper.audio`. `reaper.system.getCapabilities()` reports capabilities and `reaper.debug.setBufferSize(bytes)` configures fixed native output buffers. The [host services reference](host-api.md) details their existing argument, error and cleanup contracts.
 
-All fifteen namespaces provide implemented members: 76 methods and one Promise property, plus `invoke/send/on/off` on Host Service proxies. `capabilities.runtime.reservedNamespaces` is empty. See the [API inventory](runtime-api-inventory.md).
+All fifteen namespaces provide implemented members: 77 methods and one Promise property, plus `invoke/send/on/off` on Host Service proxies. `capabilities.runtime.reservedNamespaces` is empty. See the [API inventory](runtime-api-inventory.md).
 
 `reaper.host` retains the Lua Backend route. `reaper.host.service(name)` routes to named native services. `reaper.events` adds native selection, track, transport, project and timeline sources. See [Native Services](native-services.md) for payloads, thread boundaries and lifecycle rules. Existing Clipboard, Drag & Drop, Window/Dock/Focus and System interfaces remain unchanged.
 
@@ -131,7 +131,7 @@ Waveform options are points (1–8192, default 1024), start and duration in seco
 
 Jobs own independent PCM sources without adding tracks/items. REAPER calls stay on the main thread; peak building advances one native step per tick, with JSON encoding on the existing worker. There are at most 8 queued jobs and a 120-second waveform deadline. Close/reload releases sources and finishes active peak builders. Individual host decoder calls cannot be preempted and may still block on slow storage. REAPER may create its own `.reapeaks` data; ReaWebAPI adds no waveform cache.
 
-Track meters return per-channel peak and peakDb; silence is null in dB. They are snapshots, not RMS/LUFS or an audio stream. Deleted/foreign-document handles are rejected. Errors include `AUDIO_UNSUPPORTED`, `AUDIO_PEAKS_UNAVAILABLE`, `AUDIO_INVALID_DATA`, `AUDIO_TIMEOUT`, `FILE_NOT_FOUND` and `QUEUE_LIMIT`. Unavailable peaks never become fabricated silence. Advanced analysis, DSP, real-time streaming and batch analysis are deferred.
+Track meters return per-channel peak and peakDb; silence is null in dB. They are snapshots, not RMS/LUFS or an audio stream. Deleted/foreign-document handles are rejected. Errors include `AUDIO_UNSUPPORTED`, `AUDIO_PEAKS_UNAVAILABLE`, `AUDIO_INVALID_DATA`, `AUDIO_TIMEOUT`, `FILE_NOT_FOUND` and `QUEUE_LIMIT`. Unavailable peaks never become fabricated silence. For continuous Peak/True Peak, RMS, LUFS and LRA, use the [built-in Meter](native-streams.md#built-in-meter--loudness-analyzer).
 
 ## App identity, data and system
 

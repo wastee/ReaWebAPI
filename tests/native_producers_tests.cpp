@@ -43,15 +43,25 @@ int main() {
     StreamHub streams; NativeProducers producers(host, streams);
     for (const auto& options : {Json{{"source", "master"}, {"aggregate", true}},
                                Json{{"source", "input"}, {"aggregate", true}},
-                               Json{{"source", "selected-track"}, {"aggregate", 1}}}) {
+                               Json{{"source", "selected-track"}, {"aggregate", 1}}, Json{{"forceMono", true}}, Json{{"resetOnPlaybackStart", true}}, Json{{"integratedMode", "continuous"}}}) {
       bool rejected = false;
       try { producers.audio("audio", options, 1); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
+      CHECK(rejected && streams.info()["streams"].empty());
+    }
+    for (const auto& options : {Json{{"forceMono", 1}}, Json{{"resetOnPlaybackStart", "yes"}}, Json{{"integratedMode", "bad"}}, Json{{"integratedMode", 1}}}) {
+      bool rejected = false;
+      try { producers.audio("meter", options, 1); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
       CHECK(rejected && streams.info()["streams"].empty());
     }
     std::vector<std::string> names;
     for (const auto* kind : {"audio", "spectrum", "meter", "waveform"}) {
       names.push_back(producers.audio(kind, Json::object(), 1));
       streams.attach(names.back(), 1, 0, "http://127.0.0.1:1234");
+    }
+    for (const auto& name : {names.front(), names[2], std::string("third.party")}) {
+      bool rejected = false;
+      try { producers.reset_meter(name, name == names[2] ? 2 : 1); } catch (const Error& error) { rejected = error.code == "INVALID_HANDLE"; }
+      CHECK(rejected);
     }
     for (int i = 0; i < 512; ++i) samples[i] = .5 * std::sin(2 * 3.141592653589793 * i / 64);
     realtime = true;

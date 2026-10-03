@@ -61,7 +61,7 @@ const midi = await reaper.system.openMIDIInput(-1);
 
 `audio.openStream` accepts `audio`, `spectrum`, `meter`, or `waveform`. Options are `source`, `aggregate` (boolean, default `false`), `fftSize` (power of two, 32–32768), and `updateRate` (1–120 Hz). Eight built-in producers may be active. They stop after the last consumer detaches. A consumer in another window keeps its producer alive.
 
-`master` captures hardware output channels 0/1 after REAPER processing, including any other signals routed directly to those outputs. `input` captures hardware input 0/1. A mono device is duplicated to stereo. Capture uses a 16-slot PCM ring, maximum 8192 frames per block. Audio-thread work is limited to conversion and bounded copies. No WebView stall can block capture. Analysis runs on one native worker. Device sample-rate changes close affected streams with `UNSUPPORTED_FORMAT`; query devices and reopen.
+`master` captures hardware output after REAPER processing, including signals routed directly to those outputs. `input` captures hardware input. Meter preserves the available channel layout up to 32 channels. Other analysis kinds retain channels 0/1 and duplicate mono input to stereo. Capture uses a 16-slot PCM ring, maximum 8192 frames per block. Audio-thread work is limited to conversion and bounded copies. No WebView stall can block capture. Analysis runs on one native worker. Device sample-rate changes close affected streams with `UNSUPPORTED_FORMAT`; query devices and reopen.
 
 `selected-track` captures the track selected at open, and `track:<GUID>` selects a specific track. Both use REAPER's **pre-FX audio accessor**, sampled on the main thread at playback position or edit cursor. Their `source` identifies the bound track and pre-FX tap. This is source-content analysis, not post-FX/live-input track metering. Use the existing `audio.getTrackMeter(track)` for REAPER's instantaneous track peak reading. Accessor sample acquisition follows native host scheduling, while processing and delivery use the independent worker/transport.
 
@@ -76,15 +76,75 @@ const stream = await reaper.audio.openStream('spectrum', {
 
 For track sources, `aggregate: true` recursively includes the bound track, folder children with enabled parent sends, and audio receive sources. Muted receives and MIDI-only routes are excluded. Each source track contributes once, including in cyclic routing. Routing and mute/solo changes are checked at each sample block. Muted tracks and branches routed through muted folders are excluded. Solo selects the contributing source branches, including solo defeat and solo-in-place send paths. A muted root returns silence.
 
-All accessors read at the same project time, sample rate, stereo layout and block size. Native code sums their PCM before the existing FFT, Peak/RMS/LUFS and waveform analysis. The single stream retains floating-point sums above `1.0`, without normalization, limiting, averaging or gain compensation. Item/take/lane playback is determined by REAPER's accessor PCM.
+All accessors read at the same project time, sample rate, channel layout and block size (stereo for non-Meter streams). Native code sums their PCM before the existing FFT, Peak/RMS/LUFS and waveform analysis. The single stream retains floating-point sums above `1.0`, without normalization, limiting, averaging or gain compensation. Item/take/lane playback is determined by REAPER's accessor PCM.
 
-Streams with the same track, aggregation mode, sample rate and update rate share source sampling. Aggregate reads yield between source tracks when the host tick budget is exhausted and publish only complete sums at one captured project position. Bridge dispatch has a separate time budget so slow source reads cannot starve connection and detach requests. A single REAPER accessor call cannot be interrupted. Track accessors discard isolated non-finite or Float32-overflow PCM blocks, then resume with a raw PCM sequence gap and reset analysis history. Eight consecutive invalid blocks close the source with `NATIVE_ERROR`. Other analysis failures close the affected stream without stopping other producers or later streams.
+Audio, spectrum and waveform streams with the same track, aggregation mode, sample rate and update rate share source sampling. Meter streams share a separate continuous source for the same track, aggregation mode, sample rate and playback-reset policy, independently of update rate. Aggregate reads yield between source tracks when the host tick budget is exhausted and publish only complete sums at one captured project position. Bridge dispatch has a separate time budget so slow source reads cannot starve connection and detach requests. A single REAPER accessor call cannot be interrupted. Track accessors discard isolated non-finite or Float32-overflow PCM blocks, then resume with a raw PCM sequence gap and reset analysis history. Eight consecutive invalid blocks close the source with `NATIVE_ERROR`. Other analysis failures close the affected stream without stopping other producers or later streams.
 
 This is synchronized **pre-FX source PCM aggregation**, not post-FX, pre-fader, post-fader or track output capture. Track/send gain, pan, phase and channel remapping are not applied. It creates no FX, sends, tracks or Undo entries. `aggregate: true` rejects `master` and `input` with `INVALID_ARGUMENT`. Omitted or `false` preserves the existing source behavior. The stream descriptor identifies this mode as `track:<GUID>:pre-fx:aggregate-source`. Deleting the bound track or switching projects closes the aggregate stream.
 
 ### Analysis payloads
 
-Spectrum contains `fftSize / 2 + 1` linear-amplitude bins per channel, using a Hann window. Meter contains channel peaks, channel RMS, momentary LUFS, short-term LUFS, integrated LUFS, then processed seconds. Silence is negative infinity for LUFS. [libebur128](https://github.com/jiixyj/libebur128) performs native EBU R128 analysis with bounded histogram storage. Capture discontinuities reset analysis history. Realtime waveform contains `[min, max]` for each channel of each of `min(256, fftSize)` buckets, oldest first. Overview and zoom queries reuse `audio.getWaveform(path, {start, duration, points})` and REAPER's native peak cache.
+Spectrum contains `fftSize / 2 + 1` linear-amplitude bins per channel, using a Hann window. Realtime waveform contains `[min, max]` for each channel of each of `min(256, fftSize)` buckets, oldest first. Overview and zoom queries reuse `audio.getWaveform(path, {start, duration, points})` and REAPER's native peak cache.
+
+#### Built-in Meter / Loudness Analyzer
+
+```js
+const meter = await reaper.audio.openStream('meter', {
+  source: 'selected-track', updateRate: 30,
+  forceMono: false, resetOnPlaybackStart: true, integratedMode: 'playback-only'
+});
+meter.on('data', ({ data }) => {
+  const values = reaper.audio.decodeMeter(data, meter.info.channels);
+  console.log(values.lufsIntegrated, values.sampleClipCount[0].toString());
+});
+await reaper.audio.resetMeter(meter.info.name);
+```
+
+`forceMono` (default `false`), `resetOnPlaybackStart` (default `true`) and `integratedMode` are Meter-only options. `integratedMode` defaults to `playback-only`: RMS-I, LUFS-I and LRA accumulate only during transport playback. `continuous` accumulates those histories whenever valid PCM arrives. Both modes leave realtime measurements and peak/clip histories unchanged. Playback-start reset remains independent, so use `resetOnPlaybackStart: false` to retain continuous history across starts.
+
+The built-in payload is `Float32Array(13 * C + 14)`, where `C = stream.info.channels` is 1–32. The first `7*C+14` values keep the previous offsets. The following table describes this compatible prefix. ABI 1, `CreateMeterStream`, `PublishMeter` and third-party producer-defined layouts are unchanged.
+
+| Offset | Field | Function / unit |
+| --- | --- | --- |
+| `0 … C-1` | `samplePeak[C]` | Maximum absolute sample per channel in the publication interval, linear amplitude |
+| `C … 2*C-1` | `truePeak[C]` | Cockos interpolated peak per channel in the publication interval, linear amplitude |
+| `2*C … 3*C-1` | `channelRms[C]` | Per-channel RMS in the publication interval, linear amplitude |
+| `3*C … 4*C-1` | `sampleClipCount[C]` | Approximate compatibility count of samples with absolute amplitude strictly greater than 1 |
+| `4*C … 5*C-1` | `truePeakClipCount[C]` | Approximate compatibility count of True Peak above 1, at most once per input sample |
+| `5*C … 6*C-1` | `channelMaxSamplePeak[C]` | Per-channel historical Sample Peak, linear amplitude |
+| `6*C … 7*C-1` | `channelMaxTruePeak[C]` | Per-channel historical True Peak, linear amplitude |
+| `7*C + 0` | `rmsMomentary` | 400 ms summed-channel RMS, dBFS |
+| `7*C + 1` | `rmsIntegrated` | Cockos RMS-I: mean energy of overlapping 400 ms RMS windows sampled every 100 ms, dBFS |
+| `7*C + 2` | `maxRmsMomentary` | Maximum RMS-M since reset, dBFS |
+| `7*C + 3` | `lufsMomentary` | K-weighted 400 ms loudness, LUFS |
+| `7*C + 4` | `lufsShortTerm` | K-weighted 3 s loudness, LUFS |
+| `7*C + 5` | `lufsIntegrated` | Cockos gated integrated loudness since reset, LUFS |
+| `7*C + 6` | `loudnessRange` | `loudnessRangeHigh - loudnessRangeLow`, LU |
+| `7*C + 7` | `maxLufsMomentary` | Maximum LUFS-M since reset, LUFS |
+| `7*C + 8` | `maxLufsShortTerm` | Maximum LUFS-S since reset, LUFS |
+| `7*C + 9` | `maxSamplePeak` | Maximum of `channelMaxSamplePeak`, linear amplitude |
+| `7*C + 10` | `maxTruePeak` | Maximum of `channelMaxTruePeak`, linear amplitude |
+| `7*C + 11` | `processedSeconds` | Processed PCM frames divided by sample rate since reset, seconds |
+| `7*C + 12` | `loudnessRangeLow` | Gated short-term loudness 10th percentile, LUFS |
+| `7*C + 13` | `loudnessRangeHigh` | Gated short-term loudness 95th percentile, LUFS |
+
+RMS-M and LUFS-M use 400 ms windows, LUFS-S uses 3 s. Windows and maxima advance every 100 ms of PCM, independently of publication. RMS-I accumulates linear window energy, including startup zero padding, and becomes available after four integrated steps. Global RMS sums channel energy without averaging or K-weighting. Silent RMS/LUFS and incomplete M/S windows are negative infinity. LRA, peaks, clips and duration start at zero. LRA bounds start at -100 LUFS before mono calibration. The prefix clip counts remain Float32 compatibility views. Use the exact suffix through `audio.decodeMeter` for cumulative counts.
+
+True Peak uses the Cockos 32-tap windowed-sinc interpolation, with three fractional phases below 96 kHz and one phase at higher rates. Its filter delay is 16 samples. `truePeakClipCount` counts the maximum across the delayed sample and interpolation phases once per input sample. Sample clipping and True Peak clipping remain independent. Sample Peak and its channel history reuse libebur128. Global peak maxima are derived from the channel histories.
+
+LUFS-M/S/I share Cockos K-weighting, with 400 ms/3 s windows stepped every 100 ms. LUFS-I retains exact energy sums in 0.1 LU bins with absolute and relative gating. LRA collects LUFS-S every 100 ms after the 3 s window fills, uses Cockos absolute/-20 LU relative gates, and updates its bounds after at least 20 gated observations. Its 10th/95th percentile selection and bin-edge values follow the official JSFX.
+
+Loudness channels follow REAPER order L/R/C/LFE/surrounds. Below six channels every channel has unit weight. From six channels onward LFE is excluded and surrounds use sqrt(2) amplitude weighting for all LUFS measurements. `forceMono` subtracts 3 dB from global RMS/LUFS, their maxima and LRA bounds, without downmixing PCM.
+
+Track Meter uses the track channel count. Aggregate Meter uses the largest channel count among the root and its audio-connected upstream tracks, independent of mute/solo, and sums corresponding channel indices. Routing channel remapping remains outside this pre-FX source aggregation contract. Hardware Meter uses the capture channel count, including mono. Sources wider than 32 channels expose their first 32. Channel-layout changes close Meter streams with `UNSUPPORTED_FORMAT`, requiring reopen with fresh metadata.
+
+The exact counter suffix starts at `T = 7*C+14`. It contains six channel arrays: Sample Clip low/middle/high, then True Peak Clip low/middle/high. Each count is encoded as `low + middle*2^24 + high*2^48`, using 24/24/16-bit nonnegative integers that Float32 represents exactly. Native counters saturate at `2^64-1` rather than wrapping. `audio.decodeMeter(data, C)` returns named measurements and `sampleClipCount`/`truePeakClipCount` as `bigint[]`. Convert a count to a decimal string for JSON. It is a synchronous SDK decoder for this built-in layout, with no RPC or changes to generic stream decoding. Third-party Meter payloads remain producer-defined.
+
+Track and aggregate meters analyze contiguous forward PCM during playback and retain history while stopped without rereading the edit cursor. Seek, loop wrap, source-content changes and accessor refresh reset history. Playback start resets by default. Disabling `resetOnPlaybackStart` retains history across ordinary stop/resume, but never across detected discontinuities. Hardware master/input meters continue analyzing captured PCM while stopped. `integratedMode` controls only RMS-I/LUFS-I/LRA accumulation. Track/aggregate sources do not produce new PCM while stopped, including in continuous mode. Capture gaps and dropped PCM reset history. Sample-rate or channel-layout changes close Meter streams with `UNSUPPORTED_FORMAT`, requiring reopen with fresh metadata and history.
+
+`samplePeak` is the existing Channel Peak measurement. LUFS-M/S/I use the single `lufsMomentary`/`lufsShortTerm`/`lufsIntegrated` path. Historical peak maxima are `maxSamplePeak` and `maxTruePeak`. All meter reset triggers share one analyzer lifecycle, clearing filters, windows, maxima and accumulated duration together. `processedSeconds` is the analyzer's processed PCM frame count divided by its sample rate. Reading or publishing does not advance it.
+
+`audio.resetMeter(name)` queues a reset for a built-in meter opened by this window. A stopped meter publishes its cleared state. Already delivered packets remain immutable. Reopening starts fresh. `updateRate` controls only meter publication, never PCM ingestion or historical results. `samplePeak`, `truePeak` and Channel RMS retain their publication-interval semantics. Other analysis kinds and source tap/routing semantics retain their existing behavior.
 
 MIDI selects an input index or `-1` for all inputs. Each packet starts with 16 little-endian bytes: `uint32 device`, `int32 sampleOffset`, `uint32 length`, reserved `uint32`, followed by MIDI bytes. The low 16 device bits are the input index; other bits retain REAPER's control-input flags. Sequence is REAPER's event sequence and timestamp is its project position. Note on/off and CC use their ordinary MIDI bytes. REAPER's recent-input history is sampled in bounded main-thread batches. Events larger than its 1024-byte read limit are omitted. This observer does not open disabled devices or change routing. `devicesChanged` supplies low-frequency device snapshots.
 

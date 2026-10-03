@@ -4,6 +4,7 @@
 - [WDL / SWELL](https://github.com/justinfrankel/WDL), Cockos Incorporated: zlib-style license. Used for native dockable containers on macOS and Linux.
 - [nlohmann/json 3.11.3](https://github.com/nlohmann/json), Niels Lohmann and contributors: MIT.
 - [libebur128 1.2.6](https://github.com/jiixyj/libebur128/tree/v1.2.6), Jan Kokemüller and contributors: MIT. Used for worker-thread EBU R128 loudness analysis. Its bundled queue header retains the BSD notice.
+- REAPER `analysis/loudness_meter`, Copyright (C) 2021 and later Cockos Incorporated: LGPL. The built-in Meter adapts its True Peak, RMS-I, K-weighted loudness and LRA algorithms. See `src/runtime/licenses/loudness_meter.txt`, `COPYING.LESSER` and `COPYING`.
 - [Microsoft.Web.WebView2 1.0.2903.40](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40): Microsoft WebView2 SDK license. The Windows module links its static loader; the Evergreen browser runtime is installed separately.
 - [cpp-httplib 0.56.0](https://github.com/yhirose/cpp-httplib/tree/v0.56.0), Yuji Hirose and contributors: MIT. Used only for read-only loopback App resources; no HTTP bridge or replacement browser fetch implementation.
 - macOS links the system Cocoa/WebKit frameworks. The Linux helper dynamically links system GTK 3, WebKitGTK 4.1 and Xlib. These libraries are not bundled.

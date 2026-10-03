@@ -76,6 +76,8 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
   ],
   "audio": [
     "openStream",
+    "resetMeter",
+    "decodeMeter",
     "getFileInfo",
     "getWaveform",
     "getTrackMeter",
@@ -737,6 +739,13 @@ test('Debug captures JS errors and bounded circular object previews', async () =
   t.reply(t.messages.length-1,{result:true}); await flush();
 });
 const streamDescriptor = (kind = 'frame', name = 'test.frames') => ({ name, kind, format: kind === 'audio' ? 'float32' : 'rgba8', capacity: 3, maxBytes: 16, width: 2, height: 2, stride: 8, token: 'ticket', url: 'ws://127.0.0.1:9000/ticket' });
+test('Built-in meter reset forwards its owned stream name and preserves host errors', async () => {
+  const t = await connected();
+  assert.equal(await answer(t, 'ReaWeb_MeterReset', ['runtime.audio.1'], true, t.window.reaper.audio.resetMeter('runtime.audio.1')), true);
+  const rejected = assert.rejects(t.window.reaper.audio.resetMeter('third.party'), { code: 'INVALID_HANDLE' });
+  await flush(); t.reply(t.messages.length - 1, { error: { code: 'INVALID_HANDLE', message: 'Expected owned built-in meter' } });
+  await rejected;
+});
 function streamSockets(t) {
   const sockets = [];
   t.context.WebSocket = class {
@@ -799,4 +808,25 @@ test('Stream format mismatch and connection failure expose typed errors', async 
   const unavailable = t.window.reaper.stream.open('missing'); await flush();
   t.reply(t.messages.length - 1, { error: { code: 'STREAM_NOT_FOUND', message: 'missing' } });
   await assert.rejects(unavailable, { code: 'STREAM_NOT_FOUND' });
+});
+
+
+test('Built-in Meter decodes exact uint64 counts without changing Float32 measurements or third-party streams', async () => {
+  const t = await connected(), decode = t.window.reaper.audio.decodeMeter;
+  const counts = [0n, (1n << 24n) + 1n, (1n << 53n) + 1n, (1n << 64n) - 1n];
+  const channels = counts.length, data = new Float32Array(13 * channels + 14), base = 7 * channels;
+  data[0] = .5; data[base + 3] = -12.5;
+  for (let group = 0; group < 2; ++group) counts.forEach((count, ch) => {
+    const at = base + 14 + group * 3 * channels + ch;
+    data[at] = Number(count & 0xffffffn);
+    data[at + channels] = Number((count >> 24n) & 0xffffffn);
+    data[at + 2 * channels] = Number(count >> 48n);
+  });
+  const original = data.slice(), values = decode(data, channels);
+  assert.deepEqual(Array.from(values.sampleClipCount), counts);
+  assert.deepEqual(Array.from(values.truePeakClipCount), counts);
+  assert.equal(values.samplePeak[0], .5); assert.equal(values.lufsMomentary, -12.5);
+  assert.deepEqual(data, original);
+  assert.throws(() => decode(new Float32Array(5), channels), /built-in meter/);
+  data[base + 14] = NaN; assert.throws(() => decode(data, channels), /counter/);
 });

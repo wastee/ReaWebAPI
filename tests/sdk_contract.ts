@@ -39,7 +39,7 @@ type lifecycleSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['lifecycle'],
 type lifecycleEvents = RuntimeAssert<RuntimeEqual<Parameters<ReaWebAPI['lifecycle']['on']>[0], 'before-close' | 'before-reload' | 'cleanup'>>;
 type debugSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['debug'], 'log' | 'warn' | 'error' | 'inspect' | 'getLogs' | 'getDiagnostics' | 'openDevTools' | 'setBufferSize'>>;
 type fsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['fs'], 'readText' | 'writeText' | 'readBinary' | 'writeBinary' | 'readFile' | 'writeFile' | 'stat' | 'readDirectory' | 'makeDirectory' | 'watch'>>;
-type audioSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['audio'], 'getFileInfo' | 'getWaveform' | 'getTrackMeter' | 'setTrackValueLatest' | 'openStream'>>;
+type audioSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['audio'], 'getFileInfo' | 'getWaveform' | 'getTrackMeter' | 'setTrackValueLatest' | 'openStream' | 'resetMeter' | 'decodeMeter'>>;
 type clipboardSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['clipboard'], 'readText' | 'writeText' | 'readBinary' | 'writeBinary'>>;
 type dragDropSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['dragDrop'], 'startFiles' | 'startText'>>;
 type appSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['app'], 'getId' | 'getName' | 'getVersion' | 'getRootPath' | 'getDataPath'>>;
@@ -218,7 +218,8 @@ async function streamContract() {
   const sequence: bigint | undefined = stream.latest()?.sequence;
   stream.on('data', packet => { const bytes: Uint8Array = packet.bytes; });
   await stream.close();
-  const meter = await reaper.audio.openStream('meter', {source: 'master', updateRate: 30});
+  const meter = await reaper.audio.openStream('meter', {source: 'master', updateRate: 30, forceMono: true, resetOnPlaybackStart: false});
+  const reset: boolean = await reaper.audio.resetMeter(meter.info.name);
   const aggregate = await reaper.audio.openStream('spectrum', {source: 'selected-track', aggregate: true});
   await aggregate.close();
   const stop = await reaper.system.schedule(() => {}, {delay: 10, interval: 100});
@@ -229,3 +230,8 @@ async function streamContract() {
   // @ts-expect-error Native timers use delay and interval in milliseconds.
   await reaper.system.schedule(() => {}, {delayMs: 10});
 }
+
+const meterSnapshot = reaper.audio.decodeMeter(new Float32Array(40), 2);
+const exactSampleClips: bigint = meterSnapshot.sampleClipCount[0];
+const exactTrueClips: bigint = meterSnapshot.truePeakClipCount[0];
+void exactSampleClips; void exactTrueClips;

@@ -730,6 +730,25 @@
   });
   api.audio = Object.freeze({
     openStream: async (kind, options = {}) => openStream(await call('ReaWeb_AnalysisOpen', [kind, options])),
+    resetMeter: name => call('ReaWeb_MeterReset', [name]),
+    decodeMeter: (data, channels) => {
+      if (!(data instanceof Float32Array) || !Number.isInteger(channels) || channels < 1 || channels > 32 || data.length !== 13 * channels + 14)
+        throw new TypeError('Expected a built-in meter payload and its channel count');
+      const values = {}, base = 7 * channels, tail = base + 14;
+      ['samplePeak', 'truePeak', 'channelRms'].forEach((name, group) => { values[name] = data.slice(group * channels, (group + 1) * channels); });
+      ['channelMaxSamplePeak', 'channelMaxTruePeak'].forEach((name, group) => { values[name] = data.slice((5 + group) * channels, (6 + group) * channels); });
+      ['sampleClipCount', 'truePeakClipCount'].forEach((name, group) => {
+        values[name] = Array.from({ length: channels }, (_, channel) => {
+          const at = tail + group * 3 * channels + channel;
+          const low = data[at], middle = data[at + channels], high = data[at + 2 * channels];
+          if (![low, middle, high].every(Number.isInteger) || low < 0 || low > 0xffffff || middle < 0 || middle > 0xffffff || high < 0 || high > 0xffff)
+            throw new TypeError('Invalid built-in meter counter');
+          return BigInt(low) | (BigInt(middle) << 24n) | (BigInt(high) << 48n);
+        });
+      });
+      ['rmsMomentary', 'rmsIntegrated', 'maxRmsMomentary', 'lufsMomentary', 'lufsShortTerm', 'lufsIntegrated', 'loudnessRange', 'maxLufsMomentary', 'maxLufsShortTerm', 'maxSamplePeak', 'maxTruePeak', 'processedSeconds', 'loudnessRangeLow', 'loudnessRangeHigh'].forEach((name, i) => { values[name] = data[base + i]; });
+      return values;
+    },
     getFileInfo: path => call('ReaWeb_AudioFileInfo', [path]),
     getWaveform: (path, options = {}) => call('ReaWeb_AudioWaveform', [path, options]),
     getTrackMeter: track => call('ReaWeb_GetTrackMeter', [track]),

@@ -11,9 +11,9 @@ namespace {
 template<class F> F function(const Host& host, const char* name) {
   return reinterpret_cast<F>(host.native_function ? host.native_function(name) : nullptr);
 }
-ReaWeb_StreamDesc audio_desc(unsigned rate = 48000) {
+ReaWeb_StreamDesc audio_desc(unsigned rate = 48000, unsigned channels = 2) {
   ReaWeb_StreamDesc desc{}; desc.size = sizeof(desc); desc.abi_version = 1; desc.format = REAWEB_FLOAT32;
-  desc.channels = 2; desc.sample_rate = rate; desc.block_frames = 8192; desc.max_bytes = 8192 * 2 * 4; desc.capacity = 16;
+  desc.channels = channels; desc.sample_rate = rate; desc.block_frames = 8192; desc.max_bytes = 8192 * channels * 4; desc.capacity = 16;
   return desc;
 }
 }
@@ -23,21 +23,89 @@ struct NativeProducers::Impl {
     void* track;
     void* project;
     std::string identity;
-    unsigned rate;
+    unsigned rate, channels = 2;
     double update_rate;
     void* accessor = nullptr;
     std::unique_ptr<AggregateSource> aggregate;
     uint64_t tick = 0, sequence = 0;
     int error = 0, invalid_blocks = 0;
     bool pending = false, discontinuity = false;
+    bool meter = false, playing = false, clock_valid = false, reset_on_start = true;
+    uint64_t reset_generation = 0, aggregate_generation = 0;
+    int meter_frames = 0, revision = 0, layout_revision = 0;
+    unsigned layout_channels = 0;
+    double last_position = 0;
+    std::chrono::steady_clock::time_point last_clock{};
     double position = 0, timestamp = 0;
-    std::chrono::steady_clock::time_point next_sample{};
-    std::array<double, 8192 * 2> samples{};
-    std::array<float, 8192 * 2> floats{};
+    std::chrono::steady_clock::time_point next_sample{}, layout_check{};
+    std::vector<double> samples = std::vector<double>(8192 * 2);
+    std::vector<float> floats = std::vector<float>(8192 * 2);
     TrackSource(const Host& h, void* t, std::string id, unsigned r, double update)
       : host(h), track(t), project(h.current_project ? h.current_project() : nullptr), identity(std::move(id)), rate(r), update_rate(update) {}
     ~TrackSource() { if (accessor) function<void (*)(void*)>(host, "DestroyAudioAccessor")(accessor); }
-    int frames() const { return std::min(8192, std::max(1, static_cast<int>(rate / update_rate))); }
+    int frames() const { return meter ? meter_frames : std::min(8192, std::max(1, static_cast<int>(rate / update_rate))); }
+    void meter_sample(std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point deadline) {
+      char device_rate[64]{};
+      auto device = function<bool (*)(const char*, char*, int)>(host, "GetAudioDeviceInfo");
+      if (device && device("SRATE", device_rate, sizeof(device_rate)) && std::strtod(device_rate, nullptr) != rate) {
+        error = REAWEB_UNSUPPORTED_FORMAT; return;
+      }
+      auto state = function<int (*)()>(host, "GetPlayState");
+      const bool active = state && (state() & 1);
+      auto at = function<double (*)()>(host, active ? "GetPlayPosition" : "GetCursorPosition");
+      const double current = at ? at() : 0;
+      if (!std::isfinite(current)) return;
+      const int changed = host.change_count ? host.change_count(project) : 0;
+      auto playback_rate = function<double (*)(void*)>(host, "Master_GetPlayRate");
+      const double speed = playback_rate ? playback_rate(project) : 1;
+      auto refresh = function<bool (*)(void*)>(host, "AudioAccessorValidateState");
+      const bool refreshed = accessor && refresh && refresh(accessor);
+      const bool jump = clock_valid && (active && playing ?
+        current < last_position - 1.0 / rate || std::abs(current - last_position - std::chrono::duration<double>(now - last_clock).count() * speed) > .1 :
+        active == playing ? std::abs(current - last_position) > 1.0 / rate :
+        active && std::abs(current - last_position) > .1);
+      const bool reset = jump || (clock_valid && changed != revision) || refreshed || (active && !playing && reset_on_start);
+      if (!clock_valid || reset || active != playing) { position = current; pending = false; }
+      if (reset) { ++reset_generation; discontinuity = true; }
+      clock_valid = true; playing = active; last_position = current; last_clock = now; revision = changed;
+      auto track_value = function<double (*)(void*, const char*)>(host, "GetMediaTrackInfo_Value");
+      if (aggregate && (!layout_channels || changed != layout_revision || now >= layout_check)) {
+        layout_channels = aggregate->channels(); layout_revision = changed;
+        layout_check = now + std::chrono::milliseconds(250);
+      }
+      const double count = aggregate ? layout_channels : track_value ? track_value(track, "I_NCHAN") : channels;
+      if ((count >= 1 ? static_cast<unsigned>(std::min(32., count)) : 2u) != channels) {
+        error = REAWEB_UNSUPPORTED_FORMAT; return;
+      }
+      if (!active || std::chrono::steady_clock::now() >= deadline) return;
+      if (!pending) {
+        const double available = std::floor((current - position) * rate + 1e-6);
+        if (available < 1) return;
+        meter_frames = static_cast<int>(std::min(8192.0, available));
+      }
+      std::fill(samples.begin(), samples.end(), 0);
+      auto read = function<int (*)(void*, int, int, double, int, double*)>(host, "GetAudioAccessorSamples");
+      const int result = aggregate ? aggregate->read(rate, channels, position, frames(), samples.data(), deadline) :
+        read(accessor, rate, channels, position, frames(), samples.data());
+      if (aggregate && aggregate_generation != aggregate->generation()) {
+        aggregate_generation = aggregate->generation(); ++reset_generation; discontinuity = true;
+      }
+      pending = aggregate && result == 2;
+      if (result < 0) { error = REAWEB_STREAM_CLOSED; return; }
+      if (pending) return;
+      const auto start = position; position += double(frames()) / rate;
+      if (!result) std::fill(samples.begin(), samples.end(), 0);
+      if (std::any_of(samples.begin(), samples.begin() + frames() * channels, [](double sample) {
+        return !std::isfinite(sample) || std::abs(sample) > std::numeric_limits<float>::max();
+      })) {
+        discontinuity = true; ++reset_generation;
+        if (++invalid_blocks >= 8) error = REAWEB_SERVICE_ERROR;
+        return;
+      }
+      invalid_blocks = 0;
+      for (size_t i = 0; i < size_t(frames()) * channels; ++i) floats[i] = static_cast<float>(samples[i]);
+      sequence += discontinuity ? 2 : 1; discontinuity = false; timestamp = start;
+    }
     void sample(uint64_t cycle, std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point deadline) {
       if (tick == cycle || now < next_sample || error) return;
       tick = cycle;
@@ -45,6 +113,7 @@ struct NativeProducers::Impl {
       if ((host.current_project && host.current_project() != project) || (valid && !valid(project, track, "MediaTrack*"))) {
         error = REAWEB_STREAM_CLOSED; return;
       }
+      if (meter) { meter_sample(now, deadline); return; }
       if (aggregate && std::chrono::steady_clock::now() >= deadline) return;
       auto refresh = function<bool (*)(void*)>(host, "AudioAccessorValidateState"); if (accessor && refresh) refresh(accessor);
       auto at = function<double (*)()>(host, "GetPlayPosition"); auto state = function<int (*)()>(host, "GetPlayState");
@@ -74,18 +143,23 @@ struct NativeProducers::Impl {
     }
   };
   struct Capture {
-    StreamBuffer ring{REAWEB_AUDIO, audio_desc()};
-    std::array<float, 8192 * 2> samples{};
+    // Private PCM envelope: format epochs travel with queued samples, outside the public stream ABI.
+    struct Header { unsigned rate, channels; uint64_t generation; uint64_t playing; unsigned stored_channels, reserved; };
+    struct Block { Header header{}; std::array<float, 8192 * 32> samples{}; } block;
+    StreamBuffer ring{REAWEB_AUDIO, [] { auto desc = audio_desc(48000, 32); desc.format = REAWEB_BYTES; desc.max_bytes += sizeof(Header); return desc; }()};
     std::atomic<unsigned> users{0}, rate{0};
     std::atomic<uint64_t> callbacks{0}, unavailable{0};
     std::atomic<int> callback_frames{0}, callback_channels{0};
     std::atomic<bool> has_buffer{false};
-    uint64_t sequence = 0, frames = 0;
+    std::atomic<uint64_t> sequence{0};
+    uint64_t frames = 0, generation = 0;
+    std::chrono::steady_clock::time_point last_capture{};
+    double last_duration = 0;
   };
   struct Entry {
     uint64_t handle = 0;
     int window = 0, kind = 0, source = 0, device = -1;
-    unsigned rate = 48000, fft_size = 2048;
+    unsigned rate = 48000, fft_size = 2048, channels = 2;
     double update_rate = 30;
     std::string name, identity;
     void* track = nullptr;
@@ -95,8 +169,26 @@ struct NativeProducers::Impl {
     std::atomic<bool> stopping{false};
     std::atomic<int> error{0};
     bool attached = false;
+    bool force_mono = false, reset_on_start = true;
+    std::string integrated_mode;
+    std::vector<float> stereo;
+    std::atomic<uint64_t> reset_request{1}, reset_after{0};
+    uint64_t reset_applied = 0, skip_through = 0, source_reset = 0, format_generation = 0;
+    double expected_time = 0;
+    bool meter_dirty = true;
     uint64_t sequence = 0, source_sequence = 0, capture_sequence = 0;
     std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now(), next_output{};
+    AudioAnalysis& analyzer() {
+      if (!analysis) analysis = std::make_unique<AudioAnalysis>(rate, channels, fft_size, force_mono, kind == REAWEB_METER);
+      return *analysis;
+    }
+    void request_meter_reset(uint64_t after) {
+      reset_after = after; ++reset_request;
+    }
+    void reset_meter_history() {
+      if (analysis) analysis->reset();
+      capture_sequence = 0; expected_time = 0; next_output = {}; meter_dirty = true;
+    }
   };
   const Host& host;
   StreamHub& streams;
@@ -108,6 +200,8 @@ struct NativeProducers::Impl {
   uint64_t counter = 0, tick_sequence = 0;
   int last_midi = 0;
   bool midi_initialized = false;
+  bool was_playing = false;
+  std::atomic<bool> meter_playing{false};
   explicit Impl(const Host& h, StreamHub& s) : host(h), streams(s), worker([this] { run(); }) {}
   ~Impl() {
     stopping = true; worker.join();
@@ -139,6 +233,9 @@ struct NativeProducers::Impl {
       while (!stopping) {
         std::vector<std::shared_ptr<Entry>> active;
         { std::lock_guard<std::mutex> lock(mutex); active = entries; }
+        for (const auto& entry : active) if (!entry->stopping && !entry->error && entry->kind == REAWEB_METER) {
+          try { apply_reset(*entry); } catch (...) { entry->error = REAWEB_SERVICE_ERROR; }
+        }
         for (int source = 0; source < 2; ++source) {
           StreamBuffer::Packet packet;
           for (int i = 0; i < 16 && capture[source].ring.consume(packet); ++i)
@@ -147,6 +244,9 @@ struct NativeProducers::Impl {
         }
         for (const auto& entry : active) if (!entry->stopping && entry->input) {
           StreamBuffer::Packet packet; for (int i = 0; i < 16 && entry->input->consume(packet); ++i) analyze(*entry, packet);
+        }
+        for (const auto& entry : active) if (!entry->stopping && !entry->error && entry->kind == REAWEB_METER && entry->meter_dirty) {
+          try { publish_meter(*entry); } catch (...) { entry->error = REAWEB_SERVICE_ERROR; }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
@@ -162,18 +262,60 @@ struct NativeProducers::Impl {
   }
   void analyze_packet(Entry& entry, const StreamBuffer::Packet& packet) {
     if (entry.source < 2 && capture[entry.source].rate.load() != entry.rate) { entry.error = REAWEB_UNSUPPORTED_FORMAT; return; }
-    if (entry.kind == REAWEB_AUDIO) {
-      streams.publish(REAWEB_AUDIO, entry.handle, packet.data.data(), static_cast<uint32_t>(packet.data.size()), packet.sequence, packet.timestamp); return;
+    if (entry.kind == REAWEB_METER) { apply_reset(entry); if (packet.sequence <= entry.skip_through) return; }
+    const auto* data = packet.data.data(); size_t bytes = packet.data.size();
+    bool reset_meter = false, integrate = true;
+    unsigned pcm_channels = entry.channels;
+    if (entry.source < 2) {
+      Capture::Header header; std::memcpy(&header, data, sizeof(header)); data += sizeof(header); bytes -= sizeof(header);
+      pcm_channels = header.stored_channels;
+      if (entry.kind == REAWEB_METER) {
+        if (pcm_channels != entry.channels) { entry.error = REAWEB_UNSUPPORTED_FORMAT; return; }
+        if (header.rate != entry.rate) { entry.error = REAWEB_UNSUPPORTED_FORMAT; return; }
+        reset_meter = entry.format_generation != header.generation;
+        entry.format_generation = header.generation;
+        integrate = entry.integrated_mode == "continuous" || header.playing != 0;
+      }
     }
-    if (entry.capture_sequence && packet.sequence != entry.capture_sequence + 1) entry.analysis.reset();
+    if (entry.kind != REAWEB_METER && pcm_channels != 2) {
+      const size_t frames = bytes / (pcm_channels * sizeof(float));
+      entry.stereo.resize(frames * 2);
+      const auto* pcm = reinterpret_cast<const float*>(data);
+      for (size_t i = 0; i < frames; ++i) {
+        entry.stereo[i * 2] = pcm[i * pcm_channels];
+        entry.stereo[i * 2 + 1] = pcm[i * pcm_channels + (pcm_channels > 1 ? 1 : 0)];
+      }
+      data = reinterpret_cast<const unsigned char*>(entry.stereo.data()); bytes = frames * 8;
+    }
+    if (entry.kind == REAWEB_AUDIO) {
+      streams.publish(REAWEB_AUDIO, entry.handle, data, static_cast<uint32_t>(bytes), packet.sequence, packet.timestamp); return;
+    }
+    const bool sequence_gap = entry.capture_sequence && packet.sequence != entry.capture_sequence + 1;
+    if (entry.kind == REAWEB_METER) {
+      reset_meter = reset_meter || sequence_gap || (entry.capture_sequence && std::abs(packet.timestamp - entry.expected_time) > 1.5 / entry.rate);
+      if (reset_meter) entry.reset_meter_history();
+    } else if (sequence_gap) entry.analysis.reset();
     entry.capture_sequence = packet.sequence;
-    if (!entry.analysis) entry.analysis = std::make_unique<AudioAnalysis>(entry.rate, 2, entry.fft_size);
-    entry.analysis->process(reinterpret_cast<const float*>(packet.data.data()), packet.data.size() / 8);
+    entry.analyzer().process(reinterpret_cast<const float*>(data), bytes / (entry.channels * sizeof(float)), integrate);
+    entry.expected_time = packet.timestamp + double(bytes / (entry.channels * sizeof(float))) / entry.rate;
+    if (entry.kind == REAWEB_METER) { entry.meter_dirty = true; return; }
     const auto now = std::chrono::steady_clock::now(); if (now < entry.next_output) return;
     entry.next_output = now + std::chrono::microseconds(static_cast<int64_t>(1000000 / entry.update_rate));
-    auto result = entry.kind == REAWEB_SPECTRUM ? entry.analysis->spectrum() :
-                  entry.kind == REAWEB_METER ? entry.analysis->meter() : entry.analysis->waveform(256);
+    auto result = entry.kind == REAWEB_SPECTRUM ? entry.analysis->spectrum() : entry.analysis->waveform(256);
     streams.publish(entry.kind, entry.handle, result.data(), static_cast<uint32_t>(result.size() * 4), ++entry.sequence, packet.timestamp);
+  }
+  void apply_reset(Entry& entry) {
+    const auto request = entry.reset_request.load();
+    if (request == entry.reset_applied) return;
+    entry.reset_meter_history();
+    entry.skip_through = entry.reset_after.load(); entry.reset_applied = request;
+  }
+  void publish_meter(Entry& entry) {
+    const auto now = std::chrono::steady_clock::now(); if (now < entry.next_output) return;
+    const auto result = entry.analyzer().meter();
+    streams.publish(entry.kind, entry.handle, result.data(), static_cast<uint32_t>(result.size() * 4), ++entry.sequence, entry.expected_time);
+    entry.next_output = now + std::chrono::microseconds(static_cast<int64_t>(1000000 / entry.update_rate));
+    entry.meter_dirty = false;
   }
 };
 NativeProducers::NativeProducers(const Host& host, StreamHub& streams) : impl_(std::make_unique<Impl>(host, streams)) {}
@@ -184,11 +326,17 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   p.reap();
   { std::lock_guard<std::mutex> lock(p.mutex); if (p.entries.size() >= 8) throw Error("QUEUE_LIMIT", "At most eight built-in producers may be active"); }
   if (!options.is_object()) throw Error("INVALID_ARGUMENT", "Expected audio stream options");
-  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate" && value.key() != "aggregate")
+  for (const auto& value : options.items()) if (value.key() != "source" && value.key() != "fftSize" && value.key() != "updateRate" && value.key() != "aggregate" &&
+      !(kind == "meter" && (value.key() == "forceMono" || value.key() == "resetOnPlaybackStart" || value.key() == "integratedMode")))
     throw Error("INVALID_ARGUMENT", "Unknown audio stream option: " + value.key());
   if (!options.value("source", Json("master")).is_string() || !options.value("fftSize", Json(2048)).is_number_integer() ||
-      !options.value("updateRate", Json(30)).is_number() || !options.value("aggregate", Json(false)).is_boolean())
+      !options.value("updateRate", Json(30)).is_number() || !options.value("aggregate", Json(false)).is_boolean() ||
+      !options.value("forceMono", Json(false)).is_boolean() || !options.value("resetOnPlaybackStart", Json(true)).is_boolean())
     throw Error("INVALID_ARGUMENT", "Invalid audio stream options");
+  if (options.contains("integratedMode") && (!options["integratedMode"].is_string() ||
+      (options["integratedMode"] != "continuous" && options["integratedMode"] != "playback-only")))
+    throw Error("INVALID_ARGUMENT", "integratedMode must be continuous or playback-only");
+  entry->integrated_mode = options.value("integratedMode", std::string("playback-only"));
   const auto source = options.value("source", std::string("master"));
   const bool aggregate = options.value("aggregate", false);
   if (aggregate && source != "selected-track" && source.rfind("track:", 0) != 0)
@@ -200,12 +348,29 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   entry->kind = kind == "audio" ? REAWEB_AUDIO : kind == "spectrum" ? REAWEB_SPECTRUM : kind == "meter" ? REAWEB_METER : kind == "waveform" ? REAWEB_WAVEFORM : 0;
   if (!entry->kind) throw Error("UNSUPPORTED_FORMAT", "Expected audio, spectrum, meter or waveform");
   entry->source = source == "master" ? 1 : source == "input" ? 0 : 2; entry->window = window; entry->fft_size = fft; entry->update_rate = update;
+  entry->force_mono = options.value("forceMono", false); entry->reset_on_start = options.value("resetOnPlaybackStart", true);
+  if (entry->source < 2) {
+    entry->reset_after = p.capture[entry->source].sequence.load();
+    if (entry->kind == REAWEB_METER) {
+      auto playing = function<int (*)()>(p.host, "GetPlayState");
+      p.meter_playing = playing && (playing() & 1);
+      auto count = function<int (*)()>(p.host, entry->source ? "GetNumAudioOutputs" : "GetNumAudioInputs");
+      const int observed = p.capture[entry->source].callback_channels.load();
+      const int channels = observed > 0 ? observed : count ? count() : 2;
+      if (channels < 1) throw Error("AUDIO_UNAVAILABLE", "No active source channels");
+      entry->channels = std::min(32, channels);
+    }
+  }
   const auto device = function<bool (*)(const char*, char*, int)>(p.host, "GetAudioDeviceInfo");
   char rate[64]{};
   if (device && device("SRATE", rate, sizeof(rate))) {
     const double value = std::strtod(rate, nullptr); if (value >= 8000 && value <= 768000) entry->rate = static_cast<unsigned>(value);
   } else if (entry->source < 2) throw Error("AUDIO_UNAVAILABLE", "No active hardware audio device");
   entry->identity = source == "master" ? "hardware-output:0,1" : source == "input" ? "hardware-input:0,1" : source;
+  if (entry->source < 2 && entry->kind == REAWEB_METER && entry->channels != 2) {
+    entry->identity = entry->source ? "hardware-output:" : "hardware-input:";
+    for (unsigned ch = 0; ch < entry->channels; ++ch) entry->identity += (ch ? "," : "") + std::to_string(ch);
+  }
   if (entry->source == 2) {
     if (source == "selected-track") {
       auto selected = function<void* (*)(void*, int)>(p.host, "GetSelectedTrack"); if (selected) entry->track = selected(nullptr, 0);
@@ -225,27 +390,47 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
       throw Error("API_UNAVAILABLE", "Track audio accessors unavailable");
     entry->identity += ":pre-fx";
     if (aggregate) entry->identity += ":aggregate-source";
+    std::unique_ptr<AggregateSource> meter_aggregate;
+    if (entry->kind == REAWEB_METER) {
+      if (aggregate) { meter_aggregate = std::make_unique<AggregateSource>(p.host, entry->track); entry->channels = meter_aggregate->channels(); }
+      else {
+        auto value = function<double (*)(void*, const char*)>(p.host, "GetMediaTrackInfo_Value");
+        const double count = value ? value(entry->track, "I_NCHAN") : 2;
+        entry->channels = count >= 1 ? static_cast<unsigned>(std::min(32., count)) : 2;
+      }
+    }
     const auto project = p.host.current_project ? p.host.current_project() : nullptr;
     for (const auto& other : p.entries) {
       const auto& shared = other->track_source;
       if (shared && !shared->error && shared->track == entry->track && shared->project == project &&
-          shared->identity == entry->identity && shared->rate == entry->rate && shared->update_rate == update) {
+          shared->identity == entry->identity && shared->rate == entry->rate && shared->channels == entry->channels && shared->meter == (entry->kind == REAWEB_METER) &&
+          (shared->meter ? shared->reset_on_start == entry->reset_on_start : shared->update_rate == update)) {
         entry->track_source = shared; break;
       }
     }
     if (!entry->track_source) {
       entry->track_source = std::make_shared<Impl::TrackSource>(p.host, entry->track, entry->identity, entry->rate, update);
-      if (aggregate) entry->track_source->aggregate = std::make_unique<AggregateSource>(p.host, entry->track);
+      entry->track_source->meter = entry->kind == REAWEB_METER;
+      entry->track_source->channels = entry->channels;
+      entry->track_source->samples.resize(8192 * entry->channels);
+      entry->track_source->floats.resize(8192 * entry->channels);
+      entry->track_source->reset_on_start = entry->reset_on_start;
+      if (aggregate) entry->track_source->aggregate = meter_aggregate ? std::move(meter_aggregate) : std::make_unique<AggregateSource>(p.host, entry->track);
       else {
         entry->track_source->accessor = create(entry->track);
         if (!entry->track_source->accessor) throw Error("AUDIO_UNAVAILABLE", "Cannot create track audio accessor");
       }
     }
-    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate));
+    entry->input = std::make_unique<StreamBuffer>(REAWEB_AUDIO, audio_desc(entry->rate, entry->channels));
+    if (entry->kind == REAWEB_METER) {
+      entry->source_sequence = entry->track_source->sequence;
+      entry->source_reset = entry->track_source->reset_generation;
+      entry->reset_after = entry->source_sequence;
+    }
   }
-  auto desc = audio_desc(entry->rate); desc.fft_size = fft; desc.update_rate = update; desc.source = entry->identity.c_str();
+  auto desc = audio_desc(entry->rate, entry->channels); desc.fft_size = fft; desc.update_rate = update; desc.source = entry->identity.c_str();
   if (entry->kind == REAWEB_SPECTRUM) desc.max_bytes = (fft / 2 + 1) * 2 * 4;
-  if (entry->kind == REAWEB_METER) desc.max_bytes = 8 * 4;
+  if (entry->kind == REAWEB_METER) desc.max_bytes = static_cast<uint32_t>(AudioAnalysis::meter_size(desc.channels) * 4);
   if (entry->kind == REAWEB_WAVEFORM) desc.max_bytes = std::min(256, fft) * 2 * 2 * 4;
   if (entry->kind != REAWEB_AUDIO) desc.capacity = 3;
   entry->name = "runtime.audio." + std::to_string(++p.counter);
@@ -256,6 +441,14 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
       p.entries.push_back(entry); } }
   if (status) throw Error(StreamHub::code(status), "Cannot create audio analysis stream");
   return entry->name;
+}
+void NativeProducers::reset_meter(const std::string& name, int window) {
+  auto& p = *impl_; std::lock_guard<std::mutex> lock(p.mutex);
+  for (const auto& entry : p.entries) if (entry->name == name && entry->kind == REAWEB_METER && entry->window == window && !entry->stopping && !entry->error) {
+    entry->request_meter_reset(entry->source < 2 ? p.capture[entry->source].sequence.load() : entry->track_source->sequence);
+    return;
+  }
+  throw Error("INVALID_HANDLE", "Expected a built-in meter opened by this window");
 }
 std::string NativeProducers::midi(int device, int window) {
   auto& p = *impl_;
@@ -274,12 +467,22 @@ void NativeProducers::capture(bool output, int frames, double rate, int channels
   auto& capture = impl_->capture[output ? 1 : 0];
   ++capture.callbacks;
   capture.callback_frames = frames; capture.callback_channels = channels; capture.has_buffer = get != nullptr;
-  if (!capture.users.load(std::memory_order_relaxed) || !get || frames < 1 || frames > 8192 || rate < 8000 || rate > 768000) return;
+  if (!capture.users.load(std::memory_order_relaxed) || !get || frames < 1 || frames > 8192 || !std::isfinite(rate) || rate < 8000 || rate > 768000) { ++capture.generation; return; }
+  const auto now = std::chrono::steady_clock::now();
+  if (capture.last_capture.time_since_epoch().count() &&
+      std::chrono::duration<double>(now - capture.last_capture).count() > std::max(.1, capture.last_duration * 4)) ++capture.generation;
+  capture.last_capture = now; capture.last_duration = frames / rate;
+  if (capture.block.header.rate != static_cast<unsigned>(rate) || capture.block.header.channels != static_cast<unsigned>(channels)) ++capture.generation;
   capture.rate.store(static_cast<unsigned>(rate), std::memory_order_relaxed);
-  auto* left = get(output, 0); if (!left) { ++capture.unavailable; return; }
-  auto* right = channels == 1 ? left : get(output, 1); if (!right) right = left;
-  for (int i = 0; i < frames; ++i) { capture.samples[i * 2] = static_cast<float>(left[i]); capture.samples[i * 2 + 1] = static_cast<float>(right[i]); }
-  capture.ring.publish(capture.samples.data(), static_cast<uint32_t>(frames * 8), ++capture.sequence, capture.frames / rate);
+  const unsigned stored = channels > 0 ? std::min(32, channels) : 2;
+  std::array<double*, 32> buffers{};
+  for (unsigned ch = 0; ch < stored; ++ch) buffers[ch] = get(output, ch);
+  if (!buffers[0]) { ++capture.unavailable; ++capture.generation; return; }
+  if (stored == 2 && !buffers[1]) buffers[1] = buffers[0];
+  capture.block.header = {static_cast<unsigned>(rate), static_cast<unsigned>(channels), capture.generation, impl_->meter_playing.load() ? 1u : 0u, stored, 0};
+  for (int i = 0; i < frames; ++i) for (unsigned ch = 0; ch < stored; ++ch)
+    capture.block.samples[i * stored + ch] = buffers[ch] ? static_cast<float>(buffers[ch][i]) : 0;
+  capture.ring.publish(&capture.block, static_cast<uint32_t>(sizeof(Impl::Capture::Header) + frames * stored * 4), ++capture.sequence, capture.frames / rate);
   capture.frames += frames;
 }
 void NativeProducers::attached(const std::string& name) {
@@ -293,15 +496,27 @@ void NativeProducers::tick() {
   const auto now = std::chrono::steady_clock::now();
   const auto deadline = now + std::chrono::milliseconds(2);
   ++p.tick_sequence;
+  if (std::any_of(active.begin(), active.end(), [](const auto& entry) { return entry->kind == REAWEB_METER && entry->source < 2; })) {
+    auto play_state = function<int (*)()>(p.host, "GetPlayState");
+    const bool playing = play_state && (play_state() & 1);
+    p.meter_playing = playing;
+    for (const auto& entry : active) if (entry->kind == REAWEB_METER && entry->source < 2 && entry->reset_on_start && playing && !p.was_playing) {
+      entry->request_meter_reset(p.capture[entry->source].sequence.load());
+    }
+    p.was_playing = playing;
+  }
   for (size_t i = 0; i < active.size(); ++i) {
     auto& entry = *active[(i + p.tick_sequence - 1) % active.size()];
     if (!entry.attached || !entry.track_source) continue;
     auto& source = *entry.track_source;
     source.sample(p.tick_sequence, now, deadline);
+    if (entry.kind == REAWEB_METER && entry.source_reset != source.reset_generation) {
+      entry.source_reset = source.reset_generation; entry.request_meter_reset(entry.source_sequence);
+    }
     if (source.error) entry.error = source.error;
     else if (entry.source_sequence != source.sequence) {
       entry.source_sequence = source.sequence;
-      entry.input->publish(source.floats.data(), source.frames() * 8, entry.source_sequence, source.timestamp);
+      entry.input->publish(source.floats.data(), source.frames() * source.channels * sizeof(float), entry.source_sequence, source.timestamp);
     }
   }
   if (std::none_of(p.entries.begin(), p.entries.end(), [](const auto& e) { return e->kind == REAWEB_MIDI; })) { p.midi_initialized = false; return; }

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.8.2 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -123,6 +123,7 @@ add_library(reaweb_runtime STATIC
   src/runtime/native_stream.cpp
   src/runtime/native_tasks.cpp
   src/runtime/audio_analysis.cpp
+  src/runtime/loudness_meter.cpp
   src/runtime/aggregate_source.cpp
   src/runtime/native_producers.cpp
   src/runtime/stream_transport.cpp
@@ -225,6 +226,7 @@ if(REAWEB_BUILD_EXTENSION)
   install(FILES "${lunasvg_SOURCE_DIR}/LICENSE" DESTINATION ReaWebAPI/licenses RENAME lunasvg.txt)
   install(FILES "${lunasvg_SOURCE_DIR}/plutovg/LICENSE" DESTINATION ReaWebAPI/licenses RENAME plutovg.txt)
   install(FILES src/runtime/licenses/FTL.TXT src/runtime/licenses/stb.txt DESTINATION ReaWebAPI/licenses)
+  install(FILES src/runtime/licenses/loudness_meter.txt DESTINATION ReaWebAPI/licenses)
   install(FILES "${reaper_sdk_SOURCE_DIR}/sdk/reaper_plugin.h" DESTINATION ReaWebAPI/licenses)
   install(FILES "${wdl_SOURCE_DIR}/WDL/swell/swell.h" DESTINATION ReaWebAPI/licenses)
   if(WIN32)

@@ -6,6 +6,7 @@ public:
   NativeProducers(const Host& host, StreamHub& streams);
   ~NativeProducers();
   std::string audio(const std::string& kind, const Json& options, int window);
+  void reset_meter(const std::string& name, int window);
   std::string midi(int device, int window);
   void attached(const std::string& name);
   void tick();

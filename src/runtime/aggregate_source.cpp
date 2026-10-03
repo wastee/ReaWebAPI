@@ -49,6 +49,7 @@ struct AggregateSource::Impl {
   std::vector<double> sum;
   size_t next = 0;
   bool reading = false;
+  uint64_t generation = 0;
   int revision = 0, rate = 0, channels = 0, frames = 0;
   double position = 0;
 
@@ -69,7 +70,7 @@ struct AggregateSource::Impl {
   }
   ~Impl() { for (const auto& source : sources) destroy(source.second.accessor); }
 
-  bool collect(std::vector<Node>& nodes, std::vector<bool>& included) {
+  bool collect(std::vector<Node>& nodes, std::vector<bool>& included, bool layout = false) {
     if (host.current_project() != project) return false;
     std::unordered_map<void*, int> indices;
     int root_index = -1;
@@ -84,10 +85,10 @@ struct AggregateSource::Impl {
       nodes.push_back({track, host.track_guid(track)});
       auto& node = nodes.back();
       node.main = value(track, "B_MAINSEND") != 0;
-      node.muted = value(track, "B_MUTE") != 0;
+      node.muted = !layout && value(track, "B_MUTE") != 0;
       node.solo = static_cast<int>(value(track, "I_SOLO"));
       node.defeat = value(track, "B_SOLO_DEFEAT") != 0;
-      solo = solo || node.solo != 0;
+      solo = solo || (!layout && node.solo != 0);
       if (track == root && node.guid == root_guid) root_index = index;
     }
     if (root_index < 0) return false;
@@ -113,7 +114,7 @@ struct AggregateSource::Impl {
       const auto& node = nodes[i];
       if (node.main && node.parent >= 0) connect(static_cast<int>(i), node.parent);
       for (int j = 0, total = sends(node.track, -1); j < total; ++j) {
-        if (send_value(node.track, -1, j, "B_MUTE") != 0 || send_value(node.track, -1, j, "I_SRCCHAN") < 0) continue;
+        if ((!layout && send_value(node.track, -1, j, "B_MUTE") != 0) || send_value(node.track, -1, j, "I_SRCCHAN") < 0) continue;
         const auto found = indices.find(send(node.track, -1, j, "P_SRCTRACK", nullptr));
         if (found != indices.end()) connect(found->second, static_cast<int>(i));
       }
@@ -152,6 +153,18 @@ struct AggregateSource::Impl {
 };
 AggregateSource::AggregateSource(const Host& host, void* root) : impl_(std::make_unique<Impl>(host, root)) {}
 AggregateSource::~AggregateSource() = default;
+uint64_t AggregateSource::generation() const { return impl_->generation; }
+unsigned AggregateSource::channels() {
+  auto& p = *impl_;
+  std::vector<Node> nodes; std::vector<bool> included;
+  if (!p.collect(nodes, included, true)) throw Error("INVALID_HANDLE", "Aggregate source unavailable");
+  unsigned count = 1;
+  for (size_t i = 0; i < nodes.size(); ++i) if (included[i] || nodes[i].track == p.root) {
+    const double value = p.value(nodes[i].track, "I_NCHAN");
+    count = std::max(count, value >= 1 ? static_cast<unsigned>(std::min(32., value)) : 2u);
+  }
+  return count;
+}
 int AggregateSource::read(int rate, int channels, double position, int frames, double* output,
                           std::chrono::steady_clock::time_point deadline) {
   auto& p = *impl_;
@@ -165,7 +178,7 @@ int AggregateSource::read(int rate, int channels, double position, int frames, d
     for (size_t i = 0; i < p.block_nodes.size(); ++i) if (p.block_included[i]) wanted.emplace(p.block_nodes[i].track, p.block_nodes[i].guid);
     for (auto it = p.sources.begin(); it != p.sources.end();) {
       const auto found = wanted.find(it->first);
-      if (found == wanted.end() || found->second != it->second.guid) { p.destroy(it->second.accessor); it = p.sources.erase(it); }
+      if (found == wanted.end() || found->second != it->second.guid) { p.destroy(it->second.accessor); it = p.sources.erase(it); ++p.generation; }
       else ++it;
     }
     p.sum.assign(size, 0); p.scratch.resize(size); p.next = 0; p.reading = true;
@@ -180,8 +193,9 @@ int AggregateSource::read(int rate, int channels, double position, int frames, d
       if (!accessor) { p.reading = false; return -1; }
       found = p.sources.emplace(node.track, Impl::Source{node.guid, accessor.get()}).first;
       accessor.release();
+      ++p.generation;
     }
-    p.refresh(found->second.accessor);
+    if (p.refresh(found->second.accessor)) ++p.generation;
     std::fill(p.scratch.begin(), p.scratch.end(), 0);
     const int result = p.samples(found->second.accessor, rate, channels, position, frames, p.scratch.data());
     if (result < 0) { p.reading = false; return -1; }

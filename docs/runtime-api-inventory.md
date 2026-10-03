@@ -1,8 +1,8 @@
 # Runtime API 完整清单 / Complete API inventory
 
-JavaScript Runtime 公开以下 **15 个命名空间、76 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
+JavaScript Runtime 公开以下 **15 个命名空间、77 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
 
-The JavaScript Runtime exposes fifteen namespaces: 76 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
+The JavaScript Runtime exposes fifteen namespaces: 77 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
 
 Lua bootstrap is separate: `reaper.ReaWeb_Open(path)` runs before the browser exists. Lua-only native entry points remain documented in [Host API](host-api.md#lua-entry-points). They are not JavaScript aliases. Native transport command names in `capabilities.methods` are diagnostic wire identifiers, not callable JavaScript property paths; use `capabilities.runtime.namespaces` and this inventory for the public SDK surface.
 
@@ -210,6 +210,8 @@ const childId = await reaper.window.open("other/index.html");
 | `reaper.stream.open(name)` | `Promise<ReaWebStream>` | Attach a binary consumer. `latest()` reads local cached data |
 | `reaper.stream.getDiagnostics()` | `Promise<object>` | Stream allocations, consumers and producer counters |
 | `reaper.audio.openStream(kind, options)` | `Promise<ReaWebStream>` | PCM, FFT, Peak/RMS/LUFS or realtime waveform |
+| `reaper.audio.resetMeter(name)` | `Promise<boolean>` | Queue reset of an owned built-in loudness analyzer |
+| `reaper.audio.decodeMeter(data, channels)` | Object | Decode built-in Meter measurements with exact `bigint` clip counts |
 | `reaper.fs.watch(path, callback, options)` | `Promise<ReaWebDispose>` | Native coalesced file/directory notifications |
 | `reaper.clipboard.readBinary(format)` | `Promise<Uint8Array>` | Read a custom binary clipboard format |
 | `reaper.clipboard.writeBinary(format, bytes)` | `Promise<boolean>` | Write a custom binary clipboard format |

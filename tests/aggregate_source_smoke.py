@@ -89,7 +89,7 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
  try {
   await reaper.lifecycle.ready;
   metrics.extensionVersion=(await reaper.debug.getDiagnostics()).version;
-  check(metrics.extensionVersion==='0.3.8.2','extension version');
+  check(metrics.extensionVersion==='0.3.8.3','extension version');
   const t=[]; for(let i=0;i<8;i++)t.push(await reaper.GetTrack(0,i));
   const source=async i=>'track:'+await reaper.GetTrackGUID(t[i]);
   const opts=async i=>({source:await source(i),aggregate:true,fftSize:2048,updateRate:30});
@@ -106,12 +106,16 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
   await sleep(100);
   check((await reaper.stream.getDiagnostics()).streams.length===0,'rapid switches release all producers');
   const take=async(kind,options)=>{
+   if(kind==='meter'){await reaper.SetEditCurPos(.5,false,false);await reaper.OnPlayButton();}
    const before=await reaper.GetProjectStateChangeCount(0),undo=await reaper.Undo_CanUndo2(0);
    const stream=await reaper.audio.openStream(kind,options); active=stream;
    await until(()=>stream.latest()); await sleep(180);
+   if(kind==='meter')await until(()=>stream.latest().data[25]>=.1);
    const packet=stream.latest(),data=Array.from(packet.data);
+   if(kind==='meter')metrics.lastMeter={source:stream.info.source,rate:stream.info.sampleRate,data};
    check(stream.info.channels===2,kind+' stereo');
    await stream.close();active=null;await sleep(60);
+   if(kind==='meter')await reaper.OnStopButton();
    check(await reaper.GetProjectStateChangeCount(0)===before&&await reaper.Undo_CanUndo2(0)===undo,'stream preserves project and Undo');
    return data;
   };
@@ -119,7 +123,7 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
    const plain=await take(kind,{source:'selected-track',fftSize:2048});
    const disabled=await take(kind,{source:'selected-track',aggregate:false,fftSize:2048});
    const aggregate=await take(kind,{source:'selected-track',aggregate:true,fftSize:2048});
-   const count=kind==='meter'?4:plain.length;
+   const count=kind==='meter'?6:plain.length;
    check(plain.length===aggregate.length&&plain.slice(0,count).every((v,i)=>near(v,aggregate[i])&&near(v,disabled[i])),kind+' single-track/default/false equivalence');
    const folder=await take(kind,await opts(0));
    // Compare spectral gain at the actual device rate, which can place the tone between FFT bins.
@@ -143,7 +147,7 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
   await reaper.CreateTrackSend(t[6],t[4]);await pcm(4,0,'opposite-phase source PCM cancels');
   for(const kind of ['spectrum','meter','waveform']){
    const data=await take(kind,await opts(4));
-   check(peak(kind==='meter'?data.slice(0,4):data)<.0001,kind+' analyzes PCM cancellation');
+   check(peak(kind==='meter'?data.slice(0,6):data)<.0001,kind+' analyzes PCM cancellation');
   }
   const dup=await reaper.CreateTrackSend(t[1],t[0]);await pcm(0,1.5,'duplicate folder and receive path counted once');
   const cycle=await reaper.CreateTrackSend(t[0],t[1]);await pcm(0,1.5,'routing cycle terminates and deduplicates');

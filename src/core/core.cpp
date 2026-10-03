@@ -118,6 +118,7 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
   add("ReaWeb_StreamDiagnostics", 0, 0, [this](const Json& a) { return controls_.host_call("ReaWeb_StreamDiagnostics", a); });
   add("ReaWeb_WatchBegin", 2, 2, [this](const Json& a) { return controls_.host_call("ReaWeb_WatchBegin", a); });
   add("ReaWeb_AnalysisOpen", 2, 2, [this](const Json& a) { return controls_.host_call("ReaWeb_AnalysisOpen", a); });
+  add("ReaWeb_MeterReset", 1, 1, [this](const Json& a) { return controls_.host_call("ReaWeb_MeterReset", a); });
   add("ReaWeb_MIDIOpen", 1, 1, [this](const Json& a) { return controls_.host_call("ReaWeb_MIDIOpen", a); });
   add("ReaWeb_GetDevices", 0, 0, [this](const Json& a) { return controls_.host_call("ReaWeb_GetDevices", a); });
   add("ReaWeb_GetDisplays", 0, 0, [this](const Json& a) { return controls_.host_call("ReaWeb_GetDisplays", a); });

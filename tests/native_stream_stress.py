@@ -80,7 +80,7 @@ assert(reaper.ReaWeb_Open(root..'index.html')>0,reaper.ReaWeb_GetLastError())
  try{
   await reaper.lifecycle.ready;
   metrics.version=(await reaper.debug.getDiagnostics()).version;
-  check(metrics.version==='0.3.8.2','extension version');
+  check(metrics.version==='0.3.8.3','extension version');
   const root=await reaper.GetTrack(0,0),child=await reaper.GetTrack(0,1);
   await reaper.GetSet_LoopTimeRange(true,true,0,3,false);await reaper.GetSetRepeat(1);
   await reaper.SetEditCurPos(0,false,false);await reaper.OnPlayButton();
