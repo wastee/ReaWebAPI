@@ -72,6 +72,8 @@ struct StreamTransport::Impl {
   Socket listener = invalid_socket;
   uint16_t port = 0;
   std::atomic<bool> stopping{false};
+  std::atomic<uint64_t> connections{0}, handshake_failures{0}, expired_tickets{0};
+  std::atomic<const char*> last_handshake_error{""};
   std::thread thread;
   std::vector<Client> clients;
   std::map<std::shared_ptr<StreamBuffer>, Message> latest;
@@ -101,24 +103,28 @@ struct StreamTransport::Impl {
     WSACleanup();
 #endif
   }
+  bool reject(const char* reason) {
+    ++handshake_failures; last_handshake_error = reason; return false;
+  }
   bool handshake(Client& client) {
     const auto end = client.input.find("\r\n\r\n"); if (end == std::string::npos) return client.input.size() <= 8192;
     std::istringstream input(client.input.substr(0, end)); std::string line, method, path, version;
     std::getline(input, line); std::istringstream start(line); start >> method >> path >> version;
-    if (method != "GET" || version != "HTTP/1.1" || path.size() != 65 || path[0] != '/') return false;
+    if (method != "GET" || version != "HTTP/1.1" || path.size() != 65 || path[0] != '/') return reject("INVALID_HANDSHAKE");
     std::map<std::string, std::string> headers;
     while (std::getline(input, line)) {
-      const auto colon = line.find(':'); if (colon == std::string::npos) return false;
-      if (!headers.emplace(lower(line.substr(0, colon)), trim(line.substr(colon + 1))).second) return false;
+      const auto colon = line.find(':'); if (colon == std::string::npos) return reject("INVALID_HANDSHAKE");
+      if (!headers.emplace(lower(line.substr(0, colon)), trim(line.substr(colon + 1))).second) return reject("INVALID_HANDSHAKE");
     }
     if (headers["host"] != "127.0.0.1:" + std::to_string(port) || lower(headers["upgrade"]) != "websocket" ||
         lower(headers["connection"]).find("upgrade") == std::string::npos || headers["sec-websocket-version"] != "13" ||
-        headers["sec-websocket-key"].size() != 24) return false;
+        headers["sec-websocket-key"].size() != 24) return reject("INVALID_HANDSHAKE");
     {
       std::lock_guard<std::mutex> lock(hub.mutex_); auto ticket = hub.tickets_.find(path.substr(1));
-      if (ticket == hub.tickets_.end() || ticket->second.connected ||
-          (!ticket->second.external && ticket->second.origin != headers["origin"]) ||
-          Time::now() - ticket->second.created > std::chrono::seconds(10)) return false;
+      if (ticket == hub.tickets_.end()) return reject("TICKET_NOT_FOUND");
+      if (ticket->second.connected) return reject("TICKET_USED");
+      if (!ticket->second.external && ticket->second.origin != headers["origin"]) return reject("ORIGIN_MISMATCH");
+      if (Time::now() - ticket->second.created > std::chrono::seconds(10)) return reject("TICKET_EXPIRED");
       ticket->second.connected = true; client.token = ticket->first; client.stream = ticket->second.buffer;
     }
     const auto key = headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -128,7 +134,7 @@ struct StreamTransport::Impl {
     client.output = std::make_shared<Bytes>(response.begin(), response.end()); client.upgraded = true;
     const auto cached = latest.find(client.stream);
     if (cached != latest.end()) { client.waiting.push_back(cached->second); client.queued_bytes = cached->second->size(); }
-    client.input.erase(0, end + 4); return true;
+    ++connections; client.input.erase(0, end + 4); return true;
   }
   bool incoming(Client& client) {
     while (client.input.size() >= 2) {
@@ -148,9 +154,13 @@ struct StreamTransport::Impl {
     if (!read || (read < 0 && !would_block())) { client.failed = true; return; }
     if (read > 0) {
       client.input.append(input, read);
-      if (client.input.size() > 8192 || (!client.upgraded && !handshake(client)) || (client.upgraded && !incoming(client))) { client.failed = true; return; }
+      if (client.input.size() > 8192) { if (!client.upgraded) reject("HANDSHAKE_TOO_LARGE"); client.failed = true; return; }
+      if ((!client.upgraded && !handshake(client)) || (client.upgraded && !incoming(client))) { client.failed = true; return; }
     }
-    if (!client.upgraded) { if (Time::now() - client.opened > std::chrono::seconds(3)) client.failed = true; return; }
+    if (!client.upgraded) {
+      if (Time::now() - client.opened > std::chrono::seconds(3)) { reject("HANDSHAKE_TIMEOUT"); client.failed = true; }
+      return;
+    }
     {
       std::lock_guard<std::mutex> lock(hub.mutex_);
       if (!hub.tickets_.count(client.token)) { client.failed = true; return; }
@@ -196,7 +206,7 @@ struct StreamTransport::Impl {
           std::lock_guard<std::mutex> lock(hub.mutex_);
           for (const auto& slot : hub.slots_) if (slot.owned) buffers.push_back(slot.owned);
           for (auto it = hub.tickets_.begin(); it != hub.tickets_.end();)
-            if (!it->second.connected && Time::now() - it->second.created > std::chrono::seconds(10)) it = hub.tickets_.erase(it); else ++it;
+            if (!it->second.connected && Time::now() - it->second.created > std::chrono::seconds(10)) { ++expired_tickets; it = hub.tickets_.erase(it); } else ++it;
         }
         for (auto it = latest.begin(); it != latest.end();) {
           if (it->first->closed) it = latest.erase(it); else ++it;
@@ -232,4 +242,8 @@ struct StreamTransport::Impl {
 StreamTransport::StreamTransport(StreamHub& hub) : impl_(std::make_unique<Impl>(hub)) {}
 StreamTransport::~StreamTransport() = default;
 std::string StreamTransport::url() const { return "ws://127.0.0.1:" + std::to_string(impl_->port); }
+Json StreamTransport::diagnostics() const {
+  return {{"connections", impl_->connections.load()}, {"handshakeFailures", impl_->handshake_failures.load()},
+    {"expiredTickets", impl_->expired_tickets.load()}, {"lastHandshakeError", impl_->last_handshake_error.load()}};
+}
 }

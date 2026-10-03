@@ -196,7 +196,9 @@ Json StreamHub::info() const {
   std::lock_guard<std::mutex> lock(mutex_); Json streams = Json::array();
   reap();
   for (const auto& slot : slots_) if (slot.owned) streams.push_back({{"name", slot.name}, {"published", slot.owned->published.load()}, {"dropped", slot.owned->dropped.load()}});
-  return {{"allocatedBytes", allocated_}, {"consumers", tickets_.size()}, {"streams", streams}};
+  Json result{{"allocatedBytes", allocated_}, {"consumers", tickets_.size()}, {"streams", streams}};
+  if (transport_) result["transport"] = transport_->diagnostics();
+  return result;
 }
 size_t StreamHub::consumers(uint64_t handle) const {
   std::lock_guard<std::mutex> lock(mutex_); const auto index = handle & 255;

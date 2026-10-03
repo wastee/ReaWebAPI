@@ -28,8 +28,8 @@ struct NativeProducers::Impl {
     void* accessor = nullptr;
     std::unique_ptr<AggregateSource> aggregate;
     uint64_t tick = 0, sequence = 0;
-    int error = 0;
-    bool pending = false;
+    int error = 0, invalid_blocks = 0;
+    bool pending = false, discontinuity = false;
     double position = 0, timestamp = 0;
     std::chrono::steady_clock::time_point next_sample{};
     std::array<double, 8192 * 2> samples{};
@@ -57,9 +57,19 @@ struct NativeProducers::Impl {
       pending = aggregate && result == 2;
       if (result < 0) error = REAWEB_STREAM_CLOSED;
       else if (!pending) {
-        for (int i = 0; i < frames() * 2; ++i) floats[i] = static_cast<float>(samples[i]);
-        ++sequence; timestamp = position;
         next_sample = std::chrono::steady_clock::now() + std::chrono::microseconds(static_cast<int64_t>(1000000 / update_rate));
+        // Accessors can return a non-finite block around playback boundaries.
+        // Preserve the last valid buffer and mark the next block as discontinuous.
+        if (std::any_of(samples.begin(), samples.begin() + frames() * 2, [](double sample) {
+          return !std::isfinite(sample) || std::abs(sample) > std::numeric_limits<float>::max();
+        })) {
+          discontinuity = true;
+          if (++invalid_blocks >= 8) error = REAWEB_SERVICE_ERROR;
+          return;
+        }
+        invalid_blocks = 0;
+        for (int i = 0; i < frames() * 2; ++i) floats[i] = static_cast<float>(samples[i]);
+        sequence += discontinuity ? 2 : 1; discontinuity = false; timestamp = position;
       }
     }
   };

@@ -34,7 +34,7 @@ const stream = await reaper.audio.openStream('spectrum', {
 
 所有 Accessor 使用相同工程时间、采样率、双声道布局和块大小读取。Native 层先逐 sample 求和 PCM，再执行现有分析，仅创建一个对外 Stream。保留超过 `1.0` 的浮点结果，不归一化、限幅、按轨平均或补偿增益。Item/Take/Lane 播放状态由 REAPER Accessor 返回的 PCM 决定。
 
-相同轨道、聚合模式、采样率和更新频率的流复用源采样。聚合读取在宿主周期预算耗尽后从下一源轨继续，仅发布同一工程时间位置的完整求和结果。单次 REAPER Accessor 调用无法中断。分析异常以 `NATIVE_ERROR` 关闭受影响的流，不会停止其他生产者或后续新建流。
+相同轨道、聚合模式、采样率和更新频率的流复用源采样。聚合读取在宿主周期预算耗尽后从下一源轨继续，仅发布同一工程时间位置的完整求和结果。桥接请求采用独立处理预算，避免慢速采样阻塞连接与释放请求。单次 REAPER Accessor 调用无法中断。轨道 Accessor 丢弃偶发的非有限数或 Float32 溢出 PCM 块，恢复时原始 PCM 序号保留间断，分析流重置历史。连续八块无效数据以 `NATIVE_ERROR` 关闭源。其他分析异常仅关闭受影响的流，不会停止其他生产者或后续新建流。
 
 该模式表示 **pre-FX 源 PCM 的同步聚合**，不代表 post-FX、pre-fader、post-fader 或实际轨道输出。不应用轨道或 Send 的增益、声像、相位和通道映射，不创建 FX、Send、Track 或 Undo。`aggregate` 默认为 `false`，省略或显式关闭时保持现有行为。对 `master` 或 `input` 启用聚合会返回 `INVALID_ARGUMENT`。Stream 的 `source` 标识为 `track:<GUID>:pre-fx:aggregate-source`。删除绑定根轨或切换工程会关闭聚合 Stream。
 
@@ -45,3 +45,5 @@ MIDI 通过 `system.openMIDIInput(device)` 消费原始事件，`-1` 表示所�
 完整字段、布局、线程规则、容量、溢出策略和平台坐标差异见 [English contract](native-streams.md)。[Native Stream Demo](../web/native-stream/README.md) 可消费内建分析和第三方 Stream。ReaGBA 的 Service、输入与 `reagba.video` 接入代码保留在独立 ReaGBA 仓库，模拟器按自身约 59.73 Hz 节奏发布画面。
 
 页面如设置 Content Security Policy，需要允许 `connect-src ws://127.0.0.1:*`。连接仍受页面来源及一次性原生连接凭据约束。
+
+`stream.getDiagnostics().transport` 提供当前 Runtime 的成功连接数、握手拒绝数、过期凭据数及最近的握手拒绝代码，不包含连接凭据。传输尚未初始化时不返回此字段。

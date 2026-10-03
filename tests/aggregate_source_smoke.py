@@ -89,7 +89,7 @@ if not ok then local f=io.open(root..'launcher-error.txt','w');f:write(err);f:cl
  try {
   await reaper.lifecycle.ready;
   metrics.extensionVersion=(await reaper.debug.getDiagnostics()).version;
-  check(metrics.extensionVersion==='0.3.8.1','extension version');
+  check(metrics.extensionVersion==='0.3.8.2','extension version');
   const t=[]; for(let i=0;i<8;i++)t.push(await reaper.GetTrack(0,i));
   const source=async i=>'track:'+await reaper.GetTrackGUID(t[i]);
   const opts=async i=>({source:await source(i),aggregate:true,fftSize:2048,updateRate:30});

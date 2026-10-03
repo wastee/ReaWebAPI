@@ -89,7 +89,10 @@ try:
     process.stdin.flush()
     process.stdin.close()
     assert process.wait(timeout=5) == 0
-    assert json.loads(process.stdout.readline())['streams'] == []
+    diagnostics = json.loads(process.stdout.readline())
+    assert diagnostics['streams'] == []
+    assert diagnostics['transport'] == {'connections': 2, 'handshakeFailures': 2,
+                                        'expiredTickets': 0, 'lastHandshakeError': 'TICKET_USED'}
     print('Binary transport, authentication, independent consumers and producer close passed')
 finally:
     if process.poll() is None:

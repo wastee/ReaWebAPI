@@ -392,7 +392,6 @@ void Runtime::tick() {
   if (ticking_) return;
   ticking_ = true;
   struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
-  const auto deadline = Clock::now() + std::chrono::milliseconds(2);
   sync_external();
   if (auto platform = platform_.lock()) platform->pump();
   for (auto it = apps_.begin(); it != apps_.end();) {
@@ -401,6 +400,9 @@ void Runtime::tick() {
   }
   services_.tick(Clock::now(), Clock::now() + std::chrono::microseconds(500));
   producers_.tick();
+  // Accessor calls can exceed their sampling budget. Keep bridge replies and
+  // stream detach requests progressing independently of that work.
+  const auto deadline = Clock::now() + std::chrono::milliseconds(2);
   for (auto& event : tasks_.tick(Clock::now() + std::chrono::microseconds(250))) {
     auto session = sessions_.find(event.window);
     if (session == sessions_.end()) continue;

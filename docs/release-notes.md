@@ -2,10 +2,12 @@
 
 ## English
 
-- Fix audio analysis failures stopping the shared native worker and leaving subsequent streams waiting indefinitely on Windows, macOS and Linux.
-- Reuse track sampling across analysis streams and split aggregate reads across host ticks to reduce stalls when switching tracks. Release detached producers before opening replacements.
+- Recover from isolated invalid track PCM blocks during loop playback and source changes without disconnecting shared analyses.
+- Prevent slow track and aggregate sampling from starving native stream connection and detach requests on Windows, macOS and Linux.
+- Add native stream handshake failure and expired-ticket diagnostics.
 
 ## 简体中文
 
-- 修复 Windows、macOS 和 Linux 上音频分析异常导致共用原生工作线程退出、后续流持续等待数据的问题。
-- 多路分析复用轨道采样，聚合读取分散到多个宿主周期，减少切换轨道时的卡顿。打开替代流前回收已断开的生产者。
+- 修复循环播放与切换源时偶发无效轨道 PCM 块导致多路分析同时断开的问题。
+- 修复 Windows、macOS 和 Linux 上慢速轨道与聚合采样阻塞原生流连接及释放请求的问题。
+- 增加原生流握手失败与连接凭据过期诊断。

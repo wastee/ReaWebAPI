@@ -889,6 +889,57 @@ int main() {
       runtime.set_docked(id, false);
       CHECK(window->options.app_name() == "Rea&GBA 音");
     }
+
+    {
+      // A slow accessor must not consume the budget for stream tickets and detach replies.
+      adapter::Host audio_host;
+      audio_host.current_project = [&]() -> void* { return &storage; };
+      audio_host.change_count = [](void*) { return 0; };
+      audio_host.track_count = [] { return 1; };
+      audio_host.track_identity = [](int) { return "test-track"; };
+      audio_host.track_guid = [](void*) { return Guid{}; };
+      audio_host.get_track = [&](void*, int) -> void* { return &track; };
+      audio_host.get_selected_track = [&](void*, int) -> void* { return &track; };
+      audio_host.valid_track = [&](void*, void* t) { return t == &track; };
+      audio_host.play_state = [] { return 0; };
+      audio_host.cursor_position = [] { return 0.0; };
+      int reads = 0;
+      static int* sample_reads;
+      sample_reads = &reads;
+      audio_host.native_function = [](const char* name) -> void* {
+        if (!std::strcmp(name, "GetAudioDeviceInfo")) return nullptr;
+        if (!std::strcmp(name, "CreateTrackAudioAccessor")) return reinterpret_cast<void*>(+[](void* t) { return t; });
+        if (!std::strcmp(name, "DestroyAudioAccessor")) return reinterpret_cast<void*>(+[](void*) {});
+        if (!std::strcmp(name, "AudioAccessorValidateState")) return reinterpret_cast<void*>(+[](void*) { return false; });
+        if (!std::strcmp(name, "GetAudioAccessorSamples")) return reinterpret_cast<void*>(+[](void*, int, int channels, double, int frames, double* data) {
+          ++*sample_reads;
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          std::fill(data, data + channels * frames, 0.0); return 1;
+        });
+        return adapter::resolve(name);
+      };
+      adapter::host = &audio_host;
+      Runtime runtime(audio_host, root, [](const std::string&) {}, docks);
+      const auto id = runtime.open(entry.u8string()); auto window = windows.back().lock();
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      const auto name = runtime.producers().audio("meter", Json{{"source", "selected-track"}, {"updateRate", 120}}, id);
+      const auto first_ticket = runtime.streams().attach(name, id, 0, "http://127.0.0.1:1234");
+      runtime.producers().attached(name);
+      const auto request = window->send("ReaWeb_StreamOpen", Json::array({name}));
+      // Normal host cadence exceeds the sample interval, so every attached tick samples.
+      auto advance = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(15)); runtime.tick(); };
+      for (int i = 0; i < 30 && window->response(request).is_null(); ++i) advance();
+      CHECK(reads > 0);
+      CHECK(window->response(request).contains("result"));
+      const auto token = window->response(request)["result"]["token"];
+      runtime.streams().detach(first_ticket["token"], id);
+      const auto detach = window->send("ReaWeb_StreamDetach", Json::array({token}));
+      for (int i = 0; i < 30 && window->response(detach).is_null(); ++i) advance();
+      CHECK(window->response(detach)["result"] == true);
+      advance();
+      CHECK(runtime.streams().info()["streams"].empty());
+      adapter::host = &host;
+    }
     for (const auto& content : {"not json", "[]", R"({"name":4})", R"({"name":"   "})", R"({"version":"bad"})"}) {
       std::ofstream(metadata_root / "app.json") << content;
       bool rejected = false;

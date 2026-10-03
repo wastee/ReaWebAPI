@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <thread>
 #define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
@@ -26,6 +27,7 @@ const auto main_thread = std::this_thread::get_id();
 int creates = 0, destroys = 0, rate_expected = 48000, channels_expected = 2, frames_expected = 2048;
 double at_expected = 1.25;
 bool fail_create = false, fail_read = false, no_audio = false;
+bool invalid_pcm = false;
 int sample_delay = 0;
 void* project = reinterpret_cast<void*>(1);
 Guid guid(void* track) { Guid result{}; result[0] = static_cast<Track*>(track)->id; return result; }
@@ -74,6 +76,7 @@ Host host() {
       if (no_audio) { output[0] = 99; return 0; }
       for (int i = 0; i < frames; ++i) for (int ch = 0; ch < channels; ++ch)
         output[i * channels + ch] = t.item_muted ? 0 : t.amplitude * std::sin(2 * 3.141592653589793 * i / 32);
+      if (invalid_pcm) output[1] = std::numeric_limits<double>::quiet_NaN();
       return 1;
     });
     throw std::runtime_error(std::string("Unexpected host call: ") + name);
@@ -206,6 +209,26 @@ int main() {
         CHECK(creates == before + (aggregate ? 2 : 1));
         CHECK(root.reads == reads + 1);
         sample_delay = 0;
+        invalid_pcm = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(40)); producers.tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10)); producers.tick();
+        const auto skipped = hub.info();
+        CHECK(skipped["streams"].size() == 3);
+        for (const auto& stream : skipped["streams"]) CHECK(stream["published"].get<int>() == 1);
+        invalid_pcm = false;
+        for (int i = 0; i < 100; ++i) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(5)); producers.tick();
+          const auto state = hub.info(); bool resumed = state["streams"].size() == 3;
+          for (const auto& stream : state["streams"]) resumed = resumed && stream["published"].get<int>() > 1;
+          if (resumed) break;
+        }
+        const auto resumed = hub.info();
+        CHECK(resumed["streams"].size() == 3);
+        for (const auto& stream : resumed["streams"]) CHECK(stream["published"].get<int>() > 1);
+        invalid_pcm = true;
+        for (int i = 0; i < 9; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(40)); producers.tick(); }
+        CHECK(hub.info()["streams"].empty());
+        invalid_pcm = false;
         hub.detach_window(1); producers.tick(); CHECK(hub.info()["streams"].empty());
         CHECK(accessors.empty() && creates == destroys);
       }

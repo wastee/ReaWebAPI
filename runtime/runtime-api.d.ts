@@ -134,7 +134,7 @@ interface ReaWebDevToolsState {
 }
 interface ReaWebDiagnostics {
   system: { processCpuSeconds: number; logicalProcessors: number };
-  streams: { allocatedBytes: number; consumers: number; streams: { name: string; published: number; dropped: number }[] };
+  streams: { allocatedBytes: number; consumers: number; streams: { name: string; published: number; dropped: number }[]; transport?: { connections: number; handshakeFailures: number; expiredTickets: number; lastHandshakeError: string } };
   audioCapture: { callbacks: number; users: number; sampleRate: number; published: number; dropped: number; unavailable: number; blockFrames: number; channels: number; bufferAvailable: boolean }[];
   lifecycleAction: string; audioJobs: number; recentLogs: ReaWebLogEntry[]; devtools: ReaWebDevToolsState; }
 interface ReaWebEvents {
@@ -174,7 +174,7 @@ interface ReaWebEvents {
 interface ReaWebAPI {
   readonly stream: {
     open(name: string): Promise<ReaWebStream>;
-    getDiagnostics(): Promise<{ allocatedBytes: number; consumers: number; streams: { name: string; published: number; dropped: number }[] }>;
+    getDiagnostics(): Promise<{ allocatedBytes: number; consumers: number; streams: { name: string; published: number; dropped: number }[]; transport?: { connections: number; handshakeFailures: number; expiredTickets: number; lastHandshakeError: string } }>;
   };
   readonly host: {
     service(name: string): ReaWebHostService;

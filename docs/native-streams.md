@@ -26,6 +26,8 @@ Latest-type streams replay their most recent published packet to new consumers, 
 
 `on('data'|'close'|'error', callback)` returns a synchronous listener disposer. `close()` detaches only the current consumer. Closing or navigating the WebView detaches its consumers automatically. Closing a producer clears consumer caches and delivers `STREAM_CLOSED` or `EXTENSION_UNLOADED`. Missing streams, invalid arguments, unsupported formats, timeouts and transport failures report typed errors. Consumer close is idempotent.
 
+`stream.getDiagnostics().transport` reports successful connections, rejected handshakes, expired attachment tickets and the last handshake rejection code. These counters cover the Runtime lifetime and contain no connection tickets. The field is absent before transport initialization.
+
 ## Native producer
 
 Include [reaweb_stream.h](../src/public/reaweb_stream.h) and resolve the typed function pointers with REAPER `GetFunc`. ABI 1 provides `CreateFrameStream/PublishFrame`, `CreateAudioStream/PublishAudio`, `CreateSpectrumStream/PublishSpectrum`, `CreateMeterStream/PublishMeter`, `CreateWaveformStream/PublishWaveform`, `CreateBinaryStream/PublishBinary`, `CreateMIDIStream/PublishMIDI`, and `CloseStream`, all prefixed `ReaWeb_`.
@@ -76,7 +78,7 @@ For track sources, `aggregate: true` recursively includes the bound track, folde
 
 All accessors read at the same project time, sample rate, stereo layout and block size. Native code sums their PCM before the existing FFT, Peak/RMS/LUFS and waveform analysis. The single stream retains floating-point sums above `1.0`, without normalization, limiting, averaging or gain compensation. Item/take/lane playback is determined by REAPER's accessor PCM.
 
-Streams with the same track, aggregation mode, sample rate and update rate share source sampling. Aggregate reads yield between source tracks when the host tick budget is exhausted and publish only complete sums at one captured project position. A single REAPER accessor call cannot be interrupted. Analysis failures close the affected stream with `NATIVE_ERROR` without stopping other producers or later streams.
+Streams with the same track, aggregation mode, sample rate and update rate share source sampling. Aggregate reads yield between source tracks when the host tick budget is exhausted and publish only complete sums at one captured project position. Bridge dispatch has a separate time budget so slow source reads cannot starve connection and detach requests. A single REAPER accessor call cannot be interrupted. Track accessors discard isolated non-finite or Float32-overflow PCM blocks, then resume with a raw PCM sequence gap and reset analysis history. Eight consecutive invalid blocks close the source with `NATIVE_ERROR`. Other analysis failures close the affected stream without stopping other producers or later streams.
 
 This is synchronized **pre-FX source PCM aggregation**, not post-FX, pre-fader, post-fader or track output capture. Track/send gain, pan, phase and channel remapping are not applied. It creates no FX, sends, tracks or Undo entries. `aggregate: true` rejects `master` and `input` with `INVALID_ARGUMENT`. Omitted or `false` preserves the existing source behavior. The stream descriptor identifies this mode as `track:<GUID>:pre-fx:aggregate-source`. Deleting the bound track or switching projects closes the aggregate stream.
 
