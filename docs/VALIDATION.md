@@ -1,18 +1,20 @@
-# v0.3.8.3 validation
+# v0.3.8.4 validation
 
 | Target | Result |
 | --- | --- |
-| Windows x64 / MSVC | Release build. 24/24 CTest suites passed. REAPER 7.81 passed 138 Cockos comparison/history checks at each of 44.1/96 kHz in stereo, 146 checks at 48 kHz with six channels and 198 with 32 channels. Aggregate and loop/switch stress fixtures passed 125 and 185 checks. |
-| Linux x86_64 / GCC, WSL Ubuntu | Release extension and WebKit helper built. 23/23 CTest suites passed. REAPER 7.78 passed 146 Cockos comparison/history checks at 48 kHz with six channels, 125 aggregate checks and 185 loop/switch stress checks. |
-| macOS ARM64 / Apple Clang | Release build. 24/24 CTest suites passed. REAPER 7.81 passed 146 Cockos comparison/history checks at 48 kHz with six channels, 125 aggregate checks and 185 loop/switch stress checks. |
-| macOS Intel / Apple Clang | Release cross-build succeeded. Native tests cannot launch on the ARM64 host: `Bad CPU type in executable` / error -86. Intel runtime acceptance remains unverified. |
-| Linux ARM64 | Shared implementation. Not built or executed locally. |
-| SDK | Strict TypeScript contract, bridge, Demo, API inventory, package and release metadata checks passed. |
+| Windows x64 / MSVC | Release build. 24/24 CTest suites passed. Real WebView2 passed modules, fetch, HEAD/ranges, Canvas, IndexedDB, both Worker kinds, origin isolation and storage across host-process restarts. Virtual/HTTP navigation and Vite/openDev/HMR passed. |
+| Linux x86_64 / GCC | Release extension and WebKit helper built. 23/23 CTest suites passed. Isolated REAPER passed manifest IDs, launcher fallback, duplicate-root rejection, restart persistence and Unicode/space/#/% directory moves. WebKitGTK Inspector split, float/dock, shortcuts, hide/show and page-state retention passed under Xvfb. |
+| macOS ARM64 / Apple Clang | Release build on macOS 26.0.1. 24/24 CTest suites passed. REAPER 7.81 passed all nine App/phase cases across initial launch, restart and Unicode/space/#/% directory moves. Manifest IDs, Lua fallback, duplicate-root rejection, isolated localStorage/IndexedDB, modules, Workers, CSP, HEAD/ranges, Canvas, animation frames and source locations passed without skipped checks. Two active production Apps created no REAPER TCP listener. |
+| macOS Intel / Apple Clang | Release cross-build and ad-hoc signature verification passed. The ARM64 host cannot execute Intel binaries (`Bad CPU type in executable`), so Intel runtime acceptance remains unverified. |
+| Linux ARM64 | Not built or executed locally for this revision. |
+| SDK | TypeScript/Vite build, manifest validation, package contents and current-version-only ReaPack changelog checks passed. |
 
-The Cockos reference fixture processes exactly six seconds of identical Float32 PCM in the official JSFX and the compiled native analyzer. Its test-only JSFX copy exposes frame counts, channel True Peak maxima/clip counts, LUFS-M/S maxima and LRA bounds without changing the DSP. Signals cover silence, sine, near-full-scale sine, impulse, inter-sample peaks, sample clipping, pink noise and a level transition. RMS-M/I, LUFS-M/S/I, LUFS maxima and LRA/bounds match within 0.0005 dB/LU. Channel True Peak matches within 0.000002 linear amplitude and its clip counts match exactly. Live streams verify payloads, peak consistency, stopped history, reset, heterogeneous aggregate channel widths and closure after channel changes. Spectrum remains stereo. Track preroll is excluded from the exact six-second numerical reference.
+Resource tests cover manifest precedence, Lua filename normalization, conflicting roots, moved roots, metadata upgrade, MIME, conditional requests, byte ranges and path boundaries. Windows junctions and POSIX symlinks are exercised. Windows file-symlink cases require a privilege unavailable in this environment.
 
-Native tests cover mono/stereo/6/32-channel Track, Aggregate, Master and Input sources, both integrated modes with default playback-only, 44.1/48/96/192 kHz, 10/30/60 Hz publication and irregular blocks. A real accumulation exceeds 2^24 clipped samples. SDK reconstruction checks 2^24+1, 2^53+1 and 2^64-1 without integer loss. Per-channel and global histories share reset behavior. Binary tests cover stopped history, seek, joining a paused source, reset, accessor refresh, capture gaps, channel/sample-rate changes and reopen. Audio-callback allocation checks pass. Multi-channel hardware paths use a synthetic capture callback because the acceptance hosts do not provide 32-channel hardware.
+Windows WebView2 154.0.4258.53 Inspector layout checks fail for both virtual and original file-page controls: renderer bounds can be unavailable, and maximized-window restoration is not verified. No Inspector implementation was changed. Sources breakpoints and complete Network-pane acceptance remain unverified on Windows and Linux.
 
-A Linux differential check against the implementation before this optimization passed 3,145,504 exact comparisons of retained Meter fields, spectrum and waveform across 1/2/6/32 channels and 44.1/48/96/192 kHz. Changed LUFS-M/S/maxima and LRA/bounds are excluded and covered by the official JSFX fixture. Existing audio, MIDI, Native Stream ABI 1, third-party producer, Runtime and cleanup regressions pass.
+macOS Inspector passed Embedded/Floating, shortcuts, Console/Elements retention, resizing, hide/show, multi-window isolation and host migration. Network identified HTML/CSS/JS/module/fetch resources. Sources retrieved script contents and hit a breakpoint at its virtual URL. Source stacks and the Inspector connection remained valid after reload.
 
-Local review packages contain Windows x64, Linux x86_64 and macOS ARM64/Intel, with matching ReaPack platform entries and current-version-only `@changelog`. Intel is built but not runtime-validated. Linux ARM64 is omitted.
+Native cookies are unavailable for the tested custom schemes. Shared browser profiles and cookie settings remain unchanged. HTTP-origin browser data is retained without automatic migration.
+
+The local review bundle includes Windows x64, Linux x86_64 and macOS ARM64/Intel. Its ReaPack platform entries match those binaries. Linux ARM64 is omitted.

@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     CHECK(argc == 3);
     auto root = fs::u8path(argv[2]); fs::create_directories(root / "Scripts" / "Test");
     std::ofstream(root / "Scripts" / "Test" / "index.html") << "<html></html>";
+    std::ofstream(root / "Scripts" / "Test" / "app.json") << R"({"id":"external-coexistence-test"})";
     ExternalSettings settings{true, uint16_t(std::stoi(argv[1])), external_token()};
     CHECK(!read_external_settings(root / "ReaWebAPI.ini").enabled);
     std::ofstream(root / "ReaWebAPI.ini") << "[ReaWebAPI]\nWebViewColorProfile=sRGB\n";

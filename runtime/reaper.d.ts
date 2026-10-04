@@ -27,7 +27,7 @@ interface ReaWebError extends Error {
 }
 interface ReaWebRuntimeInfo {
   contract: 1;
-  mode: 'app-http' | 'dev-http';
+  mode: 'app-virtual' | 'dev-http';
   appId: string;
   origin: string;
   storageIsolation: 'origin';

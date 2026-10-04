@@ -2,12 +2,12 @@
 
 ## English
 
-- Complete the built-in loudness analyzer with REAPER-compatible True Peak, RMS-I, LUFS-M/S/I and LRA, separate sample/True Peak clip counts, channel/global peak maxima and LRA bounds.
-- Add meter reset, playback-start reset and force-mono calibration, plus playback-only/continuous integrated history, with analysis independent of publication rate.
-- Support 1–32 source channels and exact 64-bit clip counts with SDK decoding, updated documentation and Demo, while preserving Native Stream ABI 1.
+- Replace per-App HTTP listeners with native `reaweb://<appId>` resources on Windows, macOS and Linux, preserving modules, fetch, Workers, browser storage and DevTools.
+- Add authoritative `app.json.id`, Lua-launcher filename fallback and duplicate-root detection. Preserve App identity across directory moves and store port-free origin metadata.
+- Update SDK examples and diagnostics for virtual App origins. Existing HTTP-origin browser data is retained without automatic migration.
 
 ## 简体中文
 
-- 完善内置响度分析器，提供与 REAPER 一致的 True Peak、RMS-I、LUFS-M/S/I 和 LRA，增加独立的 Sample/True Peak 削波计数、通道及全局峰值最大值和 LRA 上下界。
-- 增加 Meter 手动复位、播放开始复位和 Mono 标定，提供仅播放或连续历史累计策略，分析独立于发布频率。
-- 支持 1–32 源通道和精确 64 位削波计数，同步 SDK 解码、文档和 Demo，保持 Native Stream ABI 1 不变。
+- Windows、macOS 和 Linux 使用原生 `reaweb://<appId>` 资源替代每 App HTTP listener，保留模块、fetch、Worker、浏览器存储和 DevTools 支持。
+- 新增权威 `app.json.id`、Lua 启动脚本文件名回退及重复目录检测，目录移动后保留 App 身份，来源元数据不再保存端口。
+- 同步 SDK 示例与虚拟 App 来源诊断，保留已有 HTTP origin 浏览器数据，不自动迁移。

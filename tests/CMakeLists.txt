@@ -228,7 +228,7 @@ if(WIN32 AND REAWEB_BUILD_EXTENSION)
   target_link_libraries(windows_navigation PRIVATE reaweb_core
     "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
     ole32 oleaut32 user32 gdi32 shlwapi shell32 version advapi32 uuid ws2_32 comctl32)
-  target_include_directories(windows_navigation PRIVATE "${webview2_SOURCE_DIR}/build/native/include")
+  target_include_directories(windows_navigation PRIVATE "${webview2_SOURCE_DIR}/build/native/include" "${httplib_SOURCE_DIR}")
   target_compile_definitions(windows_navigation PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_compile_options(windows_navigation PRIVATE /utf-8)
   add_executable(windows_native_drag EXCLUDE_FROM_ALL windows_native_drag.cpp

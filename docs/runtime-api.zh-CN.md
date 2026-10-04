@@ -50,7 +50,7 @@ document.title = 'SendFlow — Mixer';
 await reaper.window.setTitle('SendFlow'); // 显式覆盖原生窗口标题。
 ```
 
-优先级为 `setTitle()` 显式设置、非空网页标题、原有 `ReaWebAPI — <入口目录名>` 回退名称。`instanceKey` 和命名窗口 `id` 仅标识实例，不参与标题生成。网页标题缺失、移除或为空白时恢复回退名称。自动标题会移除 NUL 和首尾空白，超过 256 UTF-8 字节时在完整字符边界截断。
+优先级为 `setTitle()` 显式设置、非空网页标题、原有 `ReaWebAPI — <入口目录名>` 回退名称。`instanceKey` 和命名窗口 `id` 不参与标题生成。网页标题缺失、移除或为空白时恢复回退名称。自动标题会移除 NUL 和首尾空白，超过 256 UTF-8 字节时在完整字符边界截断。
 
 `setTitle()` 保留现有约定，接受 1–256 UTF-8 字节且不含 NUL 的字符串，返回 `Promise<boolean>`。显式设置在窗口存续期间优先于自动同步，重载和实例复用后仍保留，不修改 `document.title`。无效调用不改变标题或自动同步状态。关闭后重新打开会创建新的标题状态。自动更新为异步操作，适用于浮动窗口、Docker 标签和单标签浮动 Docker 标题栏，包括页面加载前已恢复保存的停靠状态的情况。后台标题更新不会切换当前标签。
 
@@ -180,7 +180,7 @@ const meter = track ? await reaper.audio.getTrackMeter(track) : null;
 
 ## App 与系统信息
 
-五个 App getter 都返回 Promise。`getId()` 复用规范化本地入口目录的存储身份，开发模式按受信任 URL 确定身份。同一 App 的窗口共享 ID 和数据目录；关闭、重开保持不变。移动目录或更换开发 URL 会改变身份。它是本机存储标识，不是发布者指定的全球 UUID；Manifest 不覆盖它。
+五个 App getter 都返回 Promise。生产 App 的 `getId()` 返回 `app.json.id`，未定义时使用规范化 Lua 启动脚本文件名。该 ID 决定 `reaweb://<appId>` 和 App 数据目录。移动根目录且旧路径不存在时保留身份。不同现存目录使用同一 ID 时返回 `APP_ID_CONFLICT`。开发身份仍按受信任 URL 确定。详见 [App 身份](frontend.zh-CN.md#资源来源与存储)。
 
 `getRootPath()` 返回本地入口／资源根目录的绝对路径。开发服务器模式返回本地启动目录，Lua 启动器默认是 REAPER 的 Scripts 目录。`getName()` 读取该目录 `app.json` 的可选 name，缺省为目录名；`getVersion()` 读取可选 version，缺省为 null，不使用扩展版本冒充 App 版本。元数据在创建 App 时读取，已有窗口共享快照，全部关闭后重开才重新读取。文件须为不超过 64 KiB 的 JSON 对象；name 非空白且不超过 256 字符，version 使用 schema 的 `N.N.N[-后缀]` 格式。错误元数据以 `APP_MANIFEST_INVALID` 拒绝打开。完整 Manifest 与入口校验仍由独立校验器负责。
 

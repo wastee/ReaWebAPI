@@ -17,11 +17,13 @@ def validate(path):
             value[key] = child
         return value
     manifest = json.loads(path.read_text(encoding='utf-8-sig'), object_pairs_hook=object_pairs)
-    if not isinstance(manifest, dict) or set(manifest) - {'schemaVersion', 'name', 'version', 'author', 'entry'}:
+    if not isinstance(manifest, dict) or set(manifest) - {'schemaVersion', 'id', 'name', 'version', 'author', 'entry'}:
         raise ValueError('Invalid manifest fields; permissions are not implemented')
     for key in ('name', 'version', 'entry'):
         if not isinstance(manifest.get(key), str) or not manifest[key].strip() or '\0' in manifest[key]:
             raise ValueError('Missing or invalid manifest field: ' + key)
+    if 'id' in manifest and (not isinstance(manifest['id'], str) or not re.fullmatch(r'[a-z0-9-]+', manifest['id'])):
+        raise ValueError('App ID must contain only lowercase a-z, 0-9 and -')
     if len(manifest['name']) > 256 or len(manifest['entry']) > 4096:
         raise ValueError('Manifest name or entry exceeds its limit')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?', manifest['version']):

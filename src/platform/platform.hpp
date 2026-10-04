@@ -1,6 +1,7 @@
 #pragma once
 #include "core/core.hpp"
 #include "runtime/icon.hpp"
+#include "web/web_resources.hpp"
 #include <memory>
 
 namespace reaweb {
@@ -28,6 +29,7 @@ struct WindowOptions {
   std::function<void()> on_dock_toggle;
   std::function<bool()> is_docked;
   std::function<std::string()> app_name;
+  std::shared_ptr<WebResources> resources;
 };
 class Window {
 public:

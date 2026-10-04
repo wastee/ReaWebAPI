@@ -49,7 +49,7 @@ document.title = 'SendFlow — Mixer';
 await reaper.window.setTitle('SendFlow'); // Explicit native-window override.
 ```
 
-Priority is an explicit `setTitle()` override, then a nonempty page title, then the existing `ReaWebAPI — <entry directory>` fallback. `instanceKey` and named-window `id` identify instances only and never supply the title. Missing, removed or blank page titles restore the fallback. Automatic titles remove NUL and surrounding whitespace and truncate to 256 UTF-8 bytes without splitting a character.
+Priority is an explicit `setTitle()` override, then a nonempty page title, then the existing `ReaWebAPI — <entry directory>` fallback. `instanceKey` and named-window `id` never supply the title. Missing, removed or blank page titles restore the fallback. Automatic titles remove NUL and surrounding whitespace and truncate to 256 UTF-8 bytes without splitting a character.
 
 `setTitle()` retains its existing contract: 1–256 UTF-8 bytes without NUL, returning `Promise<boolean>`. It overrides automatic synchronization for the lifetime of the window, including reloads and instance reuse, without changing `document.title`. Invalid calls leave the title and automatic synchronization unchanged. Closing and reopening creates fresh title state. Automatic updates are asynchronous and apply to floating windows, Docker labels and single-tab floating Docker captions, including when saved docking is restored before the page loads. Background title updates do not select an inactive tab.
 
@@ -135,7 +135,7 @@ Track meters return per-channel peak and peakDb; silence is null in dB. They are
 
 ## App identity, data and system
 
-All five App getters return Promises. `getId()` reuses the stable browser-storage identity of the canonical local entry directory (the trusted URL in development mode). Windows in that App share the ID and data directory; reopening preserves them. Moving the directory or changing the development URL creates a different identity. This is a local storage identity, not a publisher-assigned global UUID; a manifest does not override it.
+All five App getters return Promises. Production `getId()` returns `app.json.id`, or the normalized Lua launcher filename when the ID is absent. The ID determines `reaweb://<appId>` and the App data directory. Moving the root preserves identity if the previous root no longer exists. Existing roots with the same ID fail with `APP_ID_CONFLICT`. Development identity remains based on its trusted URL. See [App identity](frontend.md#resource-origin-and-storage).
 
 `getRootPath()` returns the absolute local entry/resource directory. Development pages use the local launch base (REAPER's Scripts directory for Lua launchers). `getName()` reads optional `name` from that directory's `app.json`, falling back to its directory name. `getVersion()` reads optional `version`, otherwise null; it never returns the extension version as the App version. Metadata is read when the App is created, shared by its open windows, and refreshed after all its windows close and it is reopened. Invalid metadata rejects opening with `APP_MANIFEST_INVALID`; the file must be a JSON object no larger than 64 KiB. Name must be nonblank and at most 256 characters; version follows the manifest schema's `N.N.N[-suffix]` format. Complete manifest/entry validation remains a separate tool; these getters do not install or launch manifests.
 
@@ -167,7 +167,7 @@ await dispose(); // Still safe after off.
 
 ## Manifest validation and example
 
-`SDK/app-manifest.schema.json` defines name/version/entry with optional schemaVersion and author. Run `python tools/validate_app.py runtime/runtime-demo/app.json` in source, or `python tools/validate_app.py runtime-demo/app.json` inside the SDK. Validation is read-only and checks field types, existence and resolved entry containment.
+`SDK/app-manifest.schema.json` defines name/version/entry with optional id, schemaVersion and author. Run `python tools/validate_app.py runtime/runtime-demo/app.json` in source, or `python tools/validate_app.py runtime-demo/app.json` inside the SDK. Validation is read-only and checks field types, existence and resolved entry containment.
 
 Manifest files do not automatically launch/install an App; existing HTML launchers remain the entry point. No app manager, updater, installer or permission enforcement is included. Unsupported permissions fields are rejected. Apps remain trusted; the resource-server root is not a native API sandbox.
 

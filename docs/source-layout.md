@@ -61,7 +61,7 @@ src/
 | `core/` | Bridge registration and dispatch, 730 Mirror bindings and native marshalling, synchronous batch validation/execution, worker queues, lossless file-time conversion / 桥接与镜像、批处理、工作队列、时间戳基础工具 |
 | `runtime/` | Session scheduling and host-call routing in `runtime.cpp`; window ownership/state in `window.cpp`; events, lifecycle, logs, managed Undo and portable App/audio/theme/file/system/drag services in their matching files / 会话与各功能域实现 |
 | `platform/` | Abstract host window interface and OS/WebView implementations; SWELL window support shared by macOS and Linux / 平台抽象、系统窗口、WebView 和共享 SWELL 窗口代码 |
-| `web/` | Read-only local App resource server, stable origins and resource-path validation / 本地资源服务、稳定来源和路径校验 |
+| `web/` | Read-only virtual App resources, stable identity and resource-path validation / 虚拟本地资源、稳定身份和路径校验 |
 | `plugin/` | REAPER entry point, native host API registration and host callbacks / REAPER 入口、Lua 宿主 API 注册和回调接线 |
 
 These are source responsibility groups, not five independent libraries. `reaweb_core` builds the portable bridge and services, `reaweb_runtime` builds session/window/event/lifecycle orchestration, and `reawebapi` adds the plugin entry and selected OS backend. Runtime tests and the Windows native-drag test link the same `reaweb_runtime` library as the extension. The Linux WebKit helper remains a separate executable.

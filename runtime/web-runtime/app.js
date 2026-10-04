@@ -35,6 +35,16 @@ await check('Promise / async / JSON / local fetch', true, async () => {
   assert((await response.json()).value === 42);
   assert(!(await fetch('./missing.json')).ok, 'Missing resource should return 404');
 });
+await check('HEAD / byte ranges / DevTools settings', true, async () => {
+  const body = await (await fetch('./data/config.json')).text();
+  const head = await fetch('./data/config.json', { method: 'HEAD' });
+  assert(head.ok && Number(head.headers.get('content-length')) === new TextEncoder().encode(body).length);
+  assert((await head.text()) === '');
+  const range = await fetch('./data/config.json', { headers: { Range: 'bytes=0-3' } });
+  assert(range.status === 206 && (await range.text()) === body.slice(0, 4));
+  const settings = await fetch('/.well-known/appspecific/com.chrome.devtools.json');
+  assert(settings.ok && typeof await settings.json() === 'object');
+});
 await check('Timers / requestAnimationFrame', true, async () => {
   await new Promise(resolve => setTimeout(resolve, 1));
   await bounded(new Promise(resolve => { const timer = setInterval(() => { clearInterval(timer); resolve(); }, 1); }));
@@ -67,11 +77,11 @@ await check('localStorage', true, () => {
   localStorage.setItem('reaweb-runtime-visits', String(report.storageVisits));
   assert(Number(localStorage.getItem('reaweb-runtime-visits')) === report.storageVisits);
 });
-await check('Cookies (shared profile)', false, () => {
+await check('Cookies (native scheme support)', false, () => {
   const old = document.cookie.match(/(?:^|;\s*)reaweb_runtime_visits=(\d+)/);
   report.cookieVisits = Number(old?.[1] || 0) + 1;
   document.cookie = 'reaweb_runtime_visits=' + report.cookieVisits + '; Path=/; SameSite=Strict; Max-Age=86400';
-  assert(document.cookie.includes('reaweb_runtime_visits=' + report.cookieVisits));
+  assert(document.cookie.includes('reaweb_runtime_visits=' + report.cookieVisits), 'Cookies are unavailable for this scheme');
 });
 await check('IndexedDB', false, async () => {
   await bounded(new Promise((resolve, reject) => {

@@ -11,7 +11,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - 支持 Lua 后端 + WebView UI，通过 `ReaWeb_Send`、`ReaWeb_Receive`、`reaper.host.send` 和 `message` 事件通信。
 - 可选 [External Client](docs/external-clients.zh-CN.md)，通过带认证的本机 WebSocket 复用 Native API、Batch、Service、Event 和二进制 Stream。服务默认关闭，可在 ReaWebAPI Preferences 中启用，默认地址为 `ws://127.0.0.1:9123`。
 - 15 个 Runtime 命名空间，涵盖窗口、事件、文件、原生对话框、拖放、音频、Undo 和应用服务。
-- 原生 WebView，支持模块、本地资源、Worker 和应用存储持久化。
+- 稳定的 `reaweb://<appId>` 来源，原生加载本地资源、模块和 Worker，持久化 App 存储，不创建每 App TCP listener。
 - 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。
@@ -56,7 +56,7 @@ Lua 通过 `reaper.ReaWeb_Open(path, instanceKey)` 打开应用。传入 `debug.
 
 [SDK](runtime/README.zh-CN.md) · [开发指南](docs/development.zh-CN.md) · [REAPER API](docs/api-reference.md) · [Runtime API](docs/runtime-api.zh-CN.md) · [Lua 宿主 API](docs/host-api.zh-CN.md) · [Web 运行环境](docs/frontend.zh-CN.md) · [DevTools](docs/devtools.zh-CN.md)
 
-所有 App 共享 `ReaWebAPI/WebViewData/`，App 身份、私有数据和窗口状态保存在 `ReaWebAPI/Apps/<appId>/`。origin 隔离与共享 cookie 规则见[存储约定](docs/frontend.zh-CN.md#资源来源与存储)。
+所有 App 共享 `ReaWebAPI/WebViewData/`，App 身份、私有数据和窗口状态保存在 `ReaWebAPI/Apps/<appId>/`。App ID、origin 隔离与原生 Cookie 规则见[存储约定](docs/frontend.zh-CN.md#资源来源与存储)。
 
 ## 构建
 

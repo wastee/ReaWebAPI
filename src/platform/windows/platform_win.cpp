@@ -16,6 +16,7 @@
 #include "platform/windows/win_icon.hpp"
 #include "platform/windows/win_dock_redraw.hpp"
 #include "platform/windows/win_context_menu.hpp"
+#include "platform/windows/win_resources.hpp"
 #include "platform/shared/window_menu.hpp"
 
 namespace reaweb {
@@ -269,6 +270,42 @@ public:
     if (SUCCEEDED(settings.As(&settings3))) settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
     EventRegistrationToken token{};
     auto weak = weak_from_this();
+    if (options_.resources) {
+      ComPtr<ICoreWebView2_22> resource_view;
+      check(webview_.As(&resource_view), "WebView2 resource source filtering");
+      check(resource_view->AddWebResourceRequestedFilterWithRequestSourceKinds(L"reaweb://*", COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL), "WebView2 App resource filter");
+      check(webview_->add_WebResourceRequested(Callback<ICoreWebView2WebResourceRequestedEventHandler>(
+        [weak](ICoreWebView2* sender, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
+          auto self = weak.lock();
+          if (!self || self->closed_) return E_ABORT;
+          try {
+            ComPtr<ICoreWebView2WebResourceRequest> request;
+            check(args->get_Request(&request), "App resource request");
+            LPWSTR raw_uri = nullptr, raw_method = nullptr;
+            request->get_Uri(&raw_uri); request->get_Method(&raw_method);
+            const auto uri = utf8(raw_uri), method = utf8(raw_method);
+            CoTaskMemFree(raw_uri); CoTaskMemFree(raw_method);
+            ComPtr<ICoreWebView2HttpRequestHeaders> native_headers;
+            check(request->get_Headers(&native_headers), "App request headers");
+            std::map<std::string, std::string> headers;
+            for (const auto* name : {"origin", "sec-fetch-site", "range", "if-range", "if-none-match", "if-modified-since"}) {
+              LPWSTR value = nullptr;
+              if (SUCCEEDED(native_headers->GetHeader(wide(name).c_str(), &value))) headers[name] = utf8(value);
+              CoTaskMemFree(value);
+            }
+            auto response = self->options_.resources->request(uri, method, headers);
+            std::string fields;
+            for (const auto& [name, value] : response.headers) fields += name + ": " + value + "\r\n";
+            ComPtr<ICoreWebView2_2> view2; check(sender->QueryInterface(IID_PPV_ARGS(&view2)), "WebView2 environment");
+            ComPtr<ICoreWebView2Environment> environment; check(view2->get_Environment(&environment), "WebView2 environment");
+            auto stream = Microsoft::WRL::Make<ResourceStream>(response);
+            ComPtr<ICoreWebView2WebResourceResponse> native_response;
+            check(environment->CreateWebResourceResponse(stream.Get(), response.status, wide(response.reason()).c_str(), wide(fields).c_str(), &native_response), "App resource response");
+            return args->put_Response(native_response.Get());
+          } catch (const std::exception& error) { self->fail(error.what()); return E_FAIL; }
+        }).Get(), &token), "WebView2 App resources");
+    }
     check(install_window_menu(webview_.Get(), options_.on_dock_toggle ? std::function<void()>([weak] {
       if (auto self = weak.lock(); self && !self->closed_) self->options_.on_dock_toggle();
     }) : std::function<void()>(), [weak] {
@@ -547,9 +584,15 @@ class WinPlatform final : public Platform {
   HWND clipboard_owner_ = nullptr;
 public:
   explicit WinPlatform(const fs::path& data) {
-    ComPtr<ICoreWebView2EnvironmentOptions> options;
+    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    auto scheme = Microsoft::WRL::Make<CoreWebView2CustomSchemeRegistration>(L"reaweb");
+    check(scheme->put_HasAuthorityComponent(TRUE), "App scheme authority");
+    check(scheme->put_TreatAsSecure(TRUE), "App secure scheme");
+    const wchar_t* origins[] = {L"reaweb://*"};
+    check(scheme->SetAllowedOrigins(1, origins), "App scheme origins");
+    ICoreWebView2CustomSchemeRegistration* schemes[] = {scheme.Get()};
+    check(options->SetCustomSchemeRegistrations(1, schemes), "Register App scheme");
     if (startup_color_profile == ColorProfile::SRGB) {
-      options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
       check(options->put_AdditionalBrowserArguments(L"--force-color-profile=srgb"), "WebView2 color profile");
     }
     check(OleInitialize(nullptr), "OleInitialize (WebView2 and native drag require STA)");

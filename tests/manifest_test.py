@@ -37,3 +37,11 @@ class ManifestTests(unittest.TestCase):
         self.path.write_text('{"name":"a","name":"b","version":"1.0.0","entry":"index.html"}')
         with self.assertRaises(ValueError):
             validate(self.path)
+
+    def test_app_identity(self):
+        self.write(id='timefold')
+        self.assertEqual(validate(self.path)[0]['id'], 'timefold')
+        for identity in ('', 'TimeFold', 'a_b', 'a.b', '../a', '音', None, 1):
+            self.write(id=identity)
+            with self.assertRaises(ValueError):
+                validate(self.path)

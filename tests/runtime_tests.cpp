@@ -117,6 +117,7 @@ int main() {
     auto root = fs::current_path() / ("runtime-test-" + std::to_string(Clock::now().time_since_epoch().count()));
     auto entry = root / "Scripts" / "Tool" / "index.html";
     fs::create_directories(entry.parent_path()); std::ofstream(entry) << "<html></html>";
+    std::ofstream(entry.parent_path() / "app.json") << Json{{"id", "test-" + state_key(entry.parent_path().u8string(), 0)}};
     int storage = 0, other = 0, track = 0, calls = 0, changes = 0;
     int selected_count = 1, selected_reads = 0, selection_checks = 0;
     uint64_t selection_signal = 0;
@@ -214,7 +215,7 @@ int main() {
       CHECK(result(runtime, *first, first->send("ReaWeb_SetIconVisible", {true}))["result"] == true);
       CHECK(first->icon_visible && first->icons.empty());
       const auto web = result(runtime, *first, first->send("ReaWeb_GetCapabilities"))["result"]["webRuntime"];
-      CHECK(web["contract"] == 1 && web["mode"] == "app-http" && web["storageIsolation"] == "origin");
+      CHECK(web["contract"] == 1 && web["mode"] == "app-virtual" && web["storageIsolation"] == "origin");
       CHECK(first->options.url == web["origin"].get<std::string>() + "/index.html");
       CHECK(profiles.back() == root / "ReaWebAPI" / "WebViewData");
       const auto app = result(runtime, *first, first->send("ReaWeb_GetAppInfo"))["result"];
@@ -541,6 +542,7 @@ int main() {
         return std::make_pair(id, window);
       };
       fs::create_directories(root / "Scripts" / "Other"); std::ofstream(root / "Scripts" / "Other" / "index.html") << "<html></html>";
+      std::ofstream(root / "Scripts" / "Other" / "app.json") << R"({"id":"other"})";
       auto [id, a] = open("Tool/index.html"); auto [other_id, b] = open("Other/index.html");
       const auto info_a = result(runtime, *a, a->send("ReaWeb_GetAppInfo"))["result"];
       const auto info_b = result(runtime, *b, b->send("ReaWeb_GetAppInfo"))["result"];
@@ -808,8 +810,9 @@ int main() {
       for (const auto& name : {"AppA", "AppB"}) {
         auto entry = resource / "Scripts" / name / "index.html";
         fs::create_directories(entry.parent_path()); std::ofstream(entry) << "<html></html>";
+        std::ofstream(entry.parent_path() / "app.json") << Json{{"id", "test-" + state_key(entry.parent_path().u8string(), 0)}};
         entries.push_back(entry);
-        records.push_back(resource / "ReaWebAPI" / "Apps" / ("local-" + app_identity(entry.parent_path())));
+        records.push_back(resource / "ReaWebAPI" / "Apps" / app_identity(entry.parent_path()));
       }
       {
         Runtime runtime(host, resource, [&](const std::string& error) { errors.push_back(error); });
@@ -862,8 +865,31 @@ int main() {
     CHECK(inspector.floating && inspector.width_ratio == 0.8);
     inspector.restore({{"mode", "embedded"}, {"widthRatio", -5}});
     CHECK(!inspector.floating && inspector.width_ratio == 0.2);
+    {
+      const auto fallback_root = root / "FallbackIdentity";
+      fs::create_directories(fallback_root);
+      std::ofstream(fallback_root / "index.html") << "<html></html>";
+      std::ofstream(fallback_root / "Unrelated.lua") << "-- This filename must not define identity";
+      Runtime runtime(host, root, [](const std::string&) {}, docks);
+      const auto id = runtime.open_instance((fallback_root / "index.html").u8string(), "@/Scripts/zaibuyidao_ReaGBA.lua", "", true);
+      auto window = windows.back().lock();
+      CHECK(window->options.url == "reaweb://zaibuyidao-reagba/index.html");
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(result(runtime, *window, window->send("ReaWeb_GetAppInfo"))["result"]["id"] == "zaibuyidao-reagba");
+      const auto child = result(runtime, *window, window->send("ReaWeb_Open", {"index.html"}));
+      CHECK(child.contains("result") && windows.back().lock()->options.url == window->options.url);
+      const auto duplicate = root / "FallbackCopy";
+      fs::create_directories(duplicate); std::ofstream(duplicate / "index.html") << "<html></html>";
+      bool conflict = false;
+      try { runtime.open_instance((duplicate / "index.html").u8string(), "@/Other/zaibuyidao_ReaGBA.lua"); }
+      catch (const Error& error) { conflict = error.code == "APP_ID_CONFLICT"; }
+      CHECK(conflict && runtime.is_open(id));
+      std::ofstream(duplicate / "app.json") << R"({"id":"manifest-wins","name":"Display only"})";
+      runtime.open_instance((duplicate / "index.html").u8string(), "opaque key", "", true);
+      CHECK(windows.back().lock()->options.url == "reaweb://manifest-wins/index.html");
+    }
     fs::create_directories(metadata_root);
-    std::ofstream(metadata_root / "app.json") << R"({"name":"SendFlow","version":"1.2.3-beta.1"})";
+    std::ofstream(metadata_root / "app.json") << R"({"id":"sendflow","name":"SendFlow","version":"1.2.3-beta.1"})";
     const auto metadata = app_info(metadata_root, root / "MetadataData", "stable-id");
     CHECK(metadata["name"] == "SendFlow" && metadata["version"] == "1.2.3-beta.1" && metadata["id"] == "stable-id");
     std::ofstream(metadata_root / "index.html") << "<title>Different page title</title>";
@@ -876,6 +902,7 @@ int main() {
       const auto entry = root / "ReaGBA" / "web" / "index.html";
       fs::create_directories(entry.parent_path());
       std::ofstream(entry) << "<title>ReaGBA</title>";
+      std::ofstream(entry.parent_path() / "app.json") << R"({"id":"reagba"})";
       Runtime runtime(host, root, [](const std::string&) {}, docks);
       const auto id = runtime.open(entry.u8string());
       auto window = windows.back().lock();

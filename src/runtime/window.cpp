@@ -11,7 +11,7 @@ int Runtime::open_instance(const std::string& path, const std::string& instance_
   check_thread();
   if (instance_key.find('\0') != std::string::npos || name.find('\0') != std::string::npos)
     throw Error("INVALID_ARGUMENT", "Instance key and window name must not contain NUL");
-  if (multiple || instance_key.empty()) return open(path);
+  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key);
   const auto key = std::make_pair(instance_key, name);
   // The identity lives with the session, so destruction cannot leave a stale registry entry.
   for (const auto& item : sessions_) {
@@ -21,7 +21,7 @@ int Runtime::open_instance(const std::string& path, const std::string& instance_
       return session.id;
     }
   }
-  const auto id = open(path);
+  const auto id = open_impl(path, {}, "", instance_key);
   sessions_.at(id)->instance = key;
   return id;
 }
@@ -30,22 +30,32 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
   return open_impl("", base, validate_dev_url(url));
 }
 
-int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url) {
+int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source) {
   check_thread();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
   if (sessions_.size() >= 32) throw Error("WINDOW_LIMIT", "At most 32 ReaWebAPI windows may be open");
   if (next_id_ == std::numeric_limits<int>::max()) throw Error("WINDOW_LIMIT", "Window id space exhausted");
-  const auto app_id = dev_url.empty() ? "local-" + app_identity(entry.parent_path()) : "dev-" + state_key(dev_url, 0);
+  const auto app_id = dev_url.empty() ? app_identity(entry.parent_path(), launcher_source) : "dev-" + state_key(dev_url, 0);
   const auto profile = resource_ / "ReaWebAPI" / "Apps" / app_id;
-  auto app = apps_[app_id].lock();
+  const auto app_key = (dev_url.empty() ? "app:" : "dev:") + app_id;
+  auto app = apps_[app_key].lock();
+  if (dev_url.empty()) {
+    if (app) {
+      std::error_code error;
+      if (!fs::equivalent(entry.parent_path(), app->resources->root(), error))
+        throw Error("APP_ID_CONFLICT", "APP_ID_CONFLICT: App ID '" + app_id + "' is already open from another root");
+    }
+  }
   if (!app) {
     app = std::make_shared<App>();
     app->id = app_id;
-    app->mode = dev_url.empty() ? "app-http" : "dev-http";
+    app->mode = dev_url.empty() ? "app-virtual" : "dev-http";
+    app->launcher_source = launcher_source;
     app->info = app_info(fs::canonical(entry.parent_path()), profile / "Data", app_id);
     if (dev_url.empty()) {
-      app->resources = std::make_unique<WebResources>(entry.parent_path(), profile);
+      bind_app_identity(entry.parent_path(), profile, app_id);
+      app->resources = std::make_shared<WebResources>(entry.parent_path(), app_id);
       app->origin = app->resources->origin();
     } else app->origin = dev_url.substr(0, dev_url.find('/', 7));
     app->platform = platform_.lock();
@@ -55,7 +65,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       app->platform = make_platform(data);
       platform_ = app->platform;
     }
-    apps_[app_id] = app;
+    apps_[app_key] = app;
   }
   const auto id = ++next_id_;
   auto session = std::make_shared<Session>();
@@ -71,7 +81,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   session->title = "ReaWebAPI — " + entry.parent_path().filename().u8string();
   session->default_title = session->title;
   session->bridge = std::make_unique<Bridge>(host_, Bridge::Controls{
-    [this, entry](const std::string& next) { return open(next, entry.parent_path()); },
+    [this, entry, launcher = app->launcher_source](const std::string& next) { return open_impl(next, entry.parent_path(), "", launcher); },
     [this, id] { close(id); }, [this, id] { devtools(id); },
     [this, id](bool docked) { return set_docked(id, docked); }, [this, id] { return is_docked(id); },
     [this, id](const std::string& method, const Json& args) { return host_call(id, method, args); }
@@ -153,7 +163,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       if (auto s = weak.lock())
         return s->title != s->default_title || s->title_explicit ? s->title : s->app->info.at("name").get<std::string>();
       return std::string();
-    }});
+    }, app->resources});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);

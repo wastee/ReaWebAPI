@@ -4,7 +4,9 @@
 #include <webkit2/webkit2.h>
 #include <X11/Xlib.h>
 #include "platform/linux/gtk_devtools.hpp"
+#include "platform/linux/gtk_resources.hpp"
 #include <iostream>
+#include <fstream>
 #include <thread>
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
 using namespace reaweb;
@@ -38,6 +40,14 @@ int main(int argc, char** argv) {
     auto window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_default_size(GTK_WINDOW(window), 1200, 700);
     auto view = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    const auto root = fs::temp_directory_path() / ("reaweb-virtual-inspector-" + std::to_string(getpid()));
+    fs::create_directories(root);
+    std::ofstream(root / "index.html") << "<!doctype html><h1>Inspector persistence test</h1><script src='app.js'></script>";
+    std::ofstream(root / "app.js") << "window.token='retained';console.log('retained console entry');";
+    auto resources = std::make_shared<WebResources>(root, "devtools-test");
+    g_object_set_data(G_OBJECT(view), "reaweb-resources", resources.get());
+    const bool baseline = argc > 1 && std::string(argv[1]) == "--baseline";
+    if (!baseline) register_app_resources(webkit_web_view_get_context(view));
     webkit_settings_set_enable_developer_extras(webkit_web_view_get_settings(view), TRUE);
     Json state = Json::object();
     int navigations = 0;
@@ -47,7 +57,8 @@ int main(int argc, char** argv) {
     {
       GtkDevTools tools(view, window, [&](Json next) { state = next; });
       gtk_widget_show_all(window);
-      webkit_web_view_load_html(view, "<!doctype html><h1>Inspector persistence test</h1><script>window.token='retained';console.log('retained console entry')</script>", "http://localhost/");
+      if (baseline) webkit_web_view_load_html(view, "<!doctype html><h1>Inspector persistence test</h1><script>window.token='retained';console.log('retained console entry')</script>", "http://localhost/");
+      else webkit_web_view_load_uri(view, "reaweb://devtools-test/index.html");
       until([&] { return navigations && !webkit_web_view_is_loading(view); });
       tools.open(); tools.toggle(); tools.open(); tools.toggle();
       const auto settle = std::chrono::steady_clock::now() + std::chrono::seconds(1);

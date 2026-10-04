@@ -24,7 +24,7 @@
 
 `projectScope` 为 `all`，`limits` 报告请求字节数、批处理及等待调用上限。诊断计数针对当前窗口，`lastError` 是诊断字符串，不是所有调用错误的历史记录。2 ms 调度预算是软预算，不约束单个原生函数的执行时间。
 
-能力与诊断都包含 `webRuntime`：`contract`（1）、`mode`（`app-http` / `dev-http`）、`appId`、`origin`、`storageIsolation`（`origin`）、`localResources`。详见 [Web Runtime 约定](frontend.zh-CN.md)。
+能力与诊断都包含 `webRuntime`：`contract`（1）、`mode`（`app-virtual` / `dev-http`）、`appId`、`origin`、`storageIsolation`（`origin`）、`localResources`。详见 [Web Runtime 约定](frontend.zh-CN.md)。
 
 ## 窗口
 
@@ -214,9 +214,9 @@ local settings = reaper.ReaWeb_Open(directory .. "settings.html", instanceKey, "
 local extra = reaper.ReaWeb_Open(directory .. "index.html", instanceKey, nil, true)
 ```
 
-Runtime 对 `(instanceKey, id)` 两个字符串分别进行区分大小写的精确匹配。nil 或空字符串 `id` 表示默认窗口。key 是不透明标识，不做路径规范化，不移除 source 的 `@` 前缀，也不读取 Lua 调用栈。在启动脚本中获取 source，再传给需要的辅助函数。后续调用应保持相同写法。复制到不同目录的启动脚本具有不同 key。正在关闭或初始化失败的窗口不参与复用，会话销毁时释放实例身份。
+Runtime 对 `(instanceKey, id)` 两个字符串分别进行区分大小写的精确匹配。nil 或空字符串 `id` 表示默认窗口。实例匹配将 key 作为不透明标识，不做路径规范化，也不移除 source 的 `@` 前缀。App 身份解析在缺少 `app.json.id` 时单独使用 Lua source 的文件名，不读取 Lua 调用栈。在启动脚本中获取 source，再传给需要的辅助函数。后续调用应保持相同写法。复制到不同目录的启动脚本具有不同 key。正在关闭或初始化失败的窗口不参与复用，会话销毁时释放实例身份。
 
-JavaScript 的 `reaper.window.open(path)` 和 `ReaWeb_OpenDev(url)` 行为不变。原生 C/C++ 调用方须使用 v0.3.5 签名 `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)`，省略的选项传 `nullptr`。现有单参数 Lua 调用仍然有效。
+JavaScript 的 `reaper.window.open(path)` 和 `ReaWeb_OpenDev(url)` 行为不变。原生 C/C++ 调用方须使用 v0.3.5 签名 `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)`，省略的选项传 `nullptr`。单参数 Lua 调用要求 App 定义 `app.json.id`。缺少该字段时须将启动脚本 source 作为 `instanceKey`，包括 `multiple = true` 的调用。
 
 ## Lua 消息桥接
 

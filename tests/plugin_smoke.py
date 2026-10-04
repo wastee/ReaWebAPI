@@ -446,6 +446,7 @@ try:
     if args.webview:
         folder = root / 'Scripts' / ('development' if args.dev else '空 格#%')
         folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'app.json').write_text(json.dumps({'id': 'plugin-smoke'}), encoding='utf-8')
         page = folder / 'index.html'
         page.write_text('<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" '
                         'content="default-src &#39;none&#39;; script-src &#39;self&#39;"><script src="app.js" defer></script>'

@@ -8,6 +8,7 @@
 #import <objc/runtime.h>
 #include "platform/shared/swell_window.hpp"
 #include "platform/macos/mac_devtools.hpp"
+#include "platform/macos/mac_resources.hpp"
 #include <fstream>
 #include <cstring>
 
@@ -232,6 +233,11 @@ public:
     auto config = [WKWebViewConfiguration new];
     config.websiteDataStore = data;
     config.processPool = pool;
+    if (delegate_->options.resources) {
+      auto handler = [ReaWebSchemeHandler new];
+      handler->resources = delegate_->options.resources;
+      [config setURLSchemeHandler:handler forURLScheme:@"reaweb"];
+    }
     [config.userContentController addScriptMessageHandler:delegate_ name:@"reaweb"];
     auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script +
       page_background_script("webkit.messageHandlers.reaweb.postMessage(message);"))

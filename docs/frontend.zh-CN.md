@@ -74,14 +74,24 @@ render(config, track);
 
 ## 资源来源与存储
 
-`reaper.window.open(path)` 仍然接收本地 HTML 路径。入口经规范化后的父目录就是 **App 根目录**。扩展用只读本地监听器将它映射至 `http://127.0.0.1:<port>/`，由 WebView 发起正常 HTTP 请求。支持相对资源、中文/空格/#/% 文件名、查询参数、MIME、HEAD 和字节范围请求。资源 URL 中的 `#`、`%` 需要编码，例如 `file%23%25.js`。不列出目录，不提供 HTTP 写入或桥接端点；解析后的路径及符号链接/junction 不得越出根目录。
+`reaper.window.open(path)` 接受本地 HTML 路径，其规范化父目录是 **App Root**。生产页面使用 `reaweb://<appId>/<entry>`，不创建 TCP listener。Windows、macOS、Linux 分别通过 WebView2 Custom Scheme、WKURLSchemeHandler、WebKitGTK URI handler 提供只读资源。支持相对 URL、ES modules、本地 fetch、Unicode/空格/#/% 文件名、MIME、HEAD 和单字节范围请求。URL 中的 `#` 和 `%` 必须编码，例如 `file%23%25.js`。拒绝目录列表、写入、目录遍历及指向根目录外的 symlink/junction。
 
-每个根目录保留独立的 App 身份与来源地址。所有 App 和 Module 共用一个浏览器 profile，localStorage 和 IndexedDB 仍按 origin 隔离。cookie 遵循原生主机、域与路径规则，同一主机的不同端口共享 cookie。句柄和订阅始终属于各自页面。请持久化设置或 GUID，不要保存原生句柄。
+在根目录 `app.json` 中定义稳定且全局唯一的 `id`：
 
-运行数据目录结构如下：
+```json
+{ "id": "timefold", "name": "TimeFold", "version": "1.0.5" }
+```
+
+对应入口为 `reaweb://timefold/index.html`，`reaper.app.getId()` 返回 `timefold`。ID 仅允许小写 ASCII `a-z`、`0-9` 和 `-`。显示名称与目录名称不参与身份计算。复制模板创建新 App 时应更换 ID。
+
+未定义 `id` 时，启动器必须将自身的 `debug.getinfo(1, "S").source` 作为 `ReaWeb_Open` 的 `instanceKey`。回退 ID 去掉启动脚本文件名的 `.lua`，转为小写，并将分隔符转换为 `-`。例如 `zaibuyidao_ReaGBA.lua` 对应 `zaibuyidao-reagba`。不扫描目录猜测启动脚本。缺少清单 ID 和有效启动脚本 source 时返回 `APP_ID_REQUIRED`。App 打开的子窗口继承启动脚本 source，其自身的清单 ID 仍优先。
+
+两个仍存在的目录不能绑定同一 ID，即使先前窗口已关闭。第二个目录返回 `APP_ID_CONFLICT`。移动或重命名原目录后，旧路径不存在即可保留身份。修改 ID 会创建新的 origin 和数据目录。
+
+所有 App 继续共享现有浏览器 profile。localStorage 和 IndexedDB 按 `reaweb://<appId>` 隔离，重启后保留。Cookie 由浏览器原生规则决定，自定义协议可能不支持 Cookie。App 持久状态应使用 localStorage 或 IndexedDB。Bridge 文档仍分别持有 handles 和 subscriptions。
 
 ```text
-<REAPER 资源目录>/ReaWebAPI/
+<REAPER resource>/ReaWebAPI/
   WebViewData/
   Apps/
     <appId>/
@@ -90,19 +100,15 @@ render(config, track);
       WindowState/
 ```
 
-Windows 的活动 App 共用一个 WebView2 Environment，Linux 共用一个 WebKitGTK context 和辅助进程，浏览器数据保存在 `WebViewData/`。macOS 在该目录保存共享 WKWebsiteDataStore UUID，实际数据库位置由 WebKit 管理。`origin.json` 记录各本地 App 的根目录与端口，`Data/` 和 `WindowState/` 保持 App 私有。开发入口使用配置的 origin，不创建 `origin.json`。
+Windows 共享一个 WebView2 Environment。Linux 共享一个 WebKitGTK context 与辅助进程。macOS 在 `WebViewData/` 保留共享 WKWebsiteDataStore UUID，实际数据库由 WebKit 管理。`origin.json` schema 2 仅记录 App ID、根目录与虚拟 origin，不包含端口。同一身份路径上的旧 schema 1 记录可升级。旧哈希 App 目录和浏览器数据继续保留，HTTP origin 的存储不自动迁移到虚拟 origin。身份元数据损坏时返回 `APP_ORIGIN_INVALID`。
 
-重开或重启保留来源与共享 profile。移动、重命名 App 目录会产生新身份，原目录中的更新保留身份。旧的 App 浏览器数据和全局窗口状态不迁移。
+备份时应同时保留共享 profile 与相关 `Apps/<appId>/` 目录。浏览器配额与用户清理数据的规则仍然适用。开发页面保留显式 HTTP origin，不创建生产 origin 记录。External Client 的监听器、配置与认证完全独立。
 
-若保存的端口被占用，返回 `APP_ORIGIN_BUSY`，不会悄悄改端口导致存储不可见。关闭冲突进程后重开即可。来源记录损坏或不匹配时返回 `APP_ORIGIN_INVALID`。不要把删除来源记录当作常规修复；新端口意味着新来源。浏览器配额、用户清理数据等正常限制仍然适用。
+资源处理器拒绝其他 App authority 和 origin，不开放宽松 CORS。App Root 限制资源加载，不限制可信原生 API 的文件权限。REAPER 调用仍通过原有主线程 bridge 执行。
 
-备份 App 状态时，应同时保留共享 `WebViewData/` 和相关 `Apps/<appId>/` 目录。
-
-仅监听回环地址，拒绝外来 Host/Origin 及跨来源 Fetch Metadata 请求，不设置宽松 CORS。最后一个 App 窗口关闭后停止服务，每个活动 App 使用两个有队列上限的资源线程；REAPER API 仍经原有桥接在主线程执行。App 根目录是资源加载边界，**不是原生 API 沙箱**：可信页面仍有已开放的文件和工程权限。不要在资源目录内放秘密文件或打开不可信 App。
-
-`reaper.system.getCapabilities()`、`reaper.debug.getDiagnostics()` 都返回 `webRuntime`：
-`{ contract: 1, mode: 'app-http' | 'dev-http', appId, origin, storageIsolation: 'origin', localResources }`。
-内建本地资源模式的 `localResources` 为 true。
+能力与诊断提供：
+`{ contract: 1, mode: 'app-virtual' | 'dev-http', appId, origin, storageIsolation: 'origin', localResources }`。
+生产 App 的 `origin` 为 `reaweb://<appId>`，`localResources` 为 true。
 
 ## 导航行为
 
@@ -135,16 +141,16 @@ Chromium 开发者工具读取 `/.well-known/appspecific/com.chrome.devtools.jso
 
 | 平台 | 后端 | 存储隔离 |
 | --- | --- | --- |
-| Windows x64 | WebView2 | 每个 App 使用独立用户数据目录 |
-| Linux x64 / ARM64 | WebKitGTK 4.1、X11/XWayland | 每个 App 使用独立辅助进程和数据目录 |
-| macOS ARM64 / Intel | WKWebView | 每个 App 使用独立持久数据存储 UUID |
+| Windows x64 | WebView2 | 共享 profile，按 App origin 隔离 |
+| Linux x64 / ARM64 | WebKitGTK 4.1、X11/XWayland | 共享 context 与辅助进程，按 App origin 隔离 |
+| macOS ARM64 / Intel | WKWebView | 共享持久数据存储，按 App origin 隔离 |
 
 WebView2 取决于已安装运行时，WKWebView 跟随系统更新，WebKitGTK 取决于发行版包。Linux 扩展旁必须放同版本 helper。可选能力会随引擎和图形环境变化。HTTPS 交给 WebView 处理；自动网络测试验证 HTTP CORS 与 WebSocket，不代表验证任意外部 TLS 服务。DOM 拖放测试使用合成事件，实体系统文件拖入和真实 REAPER 拖放仍需人工验收。
 
-macOS 对外来源使用 `http://localhost:<port>/`，监听器仍只绑定 127.0.0.1。macOS 14+ ATS 限制 IP 字面量 HTTP，使用未限定的本机名称可避免修改 REAPER 的 Info.plist。macOS 开发 URL 也建议使用 `localhost`。见 [Apple 本地网络规则](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)。
+三平台生产来源统一为 `reaweb://<appId>`。macOS 开发 HTTP URL 建议使用 `localhost`，以遵循 ATS 的本地网络规则。见 [Apple 本地网络规则](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)。
 
 本次 WSLg 环境的 WebKitGTK DMA-BUF 渲染路径会使可见页面的动画帧停住；以 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 运行 helper 后，包括原生 requestAnimationFrame 与 WebGL 的完整浏览器检查通过。这是环境开关，扩展不会默认强制设置，也不替换 JS 实现。目标 Linux 桌面应验证默认渲染器；遇到同类问题时，在启动 REAPER 前设置该变量。GTK 视口尺寸已按外部 X11 父窗口的客户区同步分配。
 
-主要实现：`src/web/web_resources.*` 负责资源服务，`src/runtime/runtime.*` 管理 App 来源和共享 profile 生命周期，三个平台文件负责原生 profile 与页面加载，`runtime/reaper.d.ts` 定义能力元数据。测试覆盖 HTTP 边界、全部 730 项镜像 ABI 映射及实际浏览器行为。
+主要实现：`src/web/web_resources.*` 负责资源服务，`src/runtime/runtime.*` 管理 App 来源和共享 profile 生命周期，三个平台文件负责原生 profile 与页面加载，`runtime/reaper.d.ts` 定义能力元数据。测试覆盖原生资源边界、全部 730 项镜像 ABI 映射及实际浏览器行为。
 
 原生行为参考：[WebView2 本地内容](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content)、[WebKitGTK 持久化 cookie](https://webkitgtk.org/reference/webkit2gtk/2.42.5/method.CookieManager.set_persistent_storage.html)。Linux 已明确开启原生 cookie 持久化。

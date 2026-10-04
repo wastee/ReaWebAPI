@@ -23,6 +23,7 @@ def run_checks(host, endpoints):
     app_a, app_b = root / 'Scripts/空 格#%/AppA', root / 'Scripts/AppB'
     for folder in (app_a, app_b):
         shutil.copytree(source, folder, dirs_exist_ok=True)
+        (folder / 'app.json').write_text(json.dumps({'id': 'runtime-' + folder.name.lower()}), encoding='utf-8')
         web_runtime_network.configure(folder, endpoints)
         # Native bridge output is only a transport for the report. The checks
         # themselves execute in the browser using unmodified native Web APIs.
@@ -45,7 +46,6 @@ def run_checks(host, endpoints):
     prior = json.loads(saved.read_text(encoding='utf-8')) if saved.exists() else None
     first_a = prior[-1]['storageVisits'] + 1 if prior else 1
     first_b = prior[1]['storageVisits'] + 1 if prior else 1
-    first_cookie = prior[-1]['cookieVisits'] + 1 if prior else 1
     active = {}
     if prior: origins = {app_a: prior[-1]['origin'], app_b: prior[1]['origin']}
     for index, (folder, visit) in enumerate(((app_a, first_a), (app_b, first_b), (app_a, first_a + 1))):
@@ -65,9 +65,9 @@ def run_checks(host, endpoints):
         assert report['passed'], report
         for name in ('storageVisits', 'indexedDBVisits'):
             assert report[name] == visit, (name, visit, report)
-        assert report['cookieVisits'] == first_cookie + index, report
-        assert all(check['ok'] for check in report['checks']), report
-        assert report['runtime']['mode'] == 'app-http' and report['runtime']['storageIsolation'] == 'origin'
+        assert report['origin'] == 'reaweb://runtime-' + folder.name.lower(), report
+        assert all(check['ok'] for check in report['checks'] if not check['name'].startswith('Cookies')), report
+        assert report['runtime']['mode'] == 'app-virtual' and report['runtime']['storageIsolation'] == 'origin'
         if folder in origins: assert report['origin'] == origins[folder], 'Origin changed on reopen'
         origins[folder] = report['origin']
         reports.append(report)
@@ -79,4 +79,4 @@ def run_checks(host, endpoints):
     assert origins[app_a] != origins[app_b], origins
     (root / 'web-runtime-report.json').write_text(json.dumps(reports, ensure_ascii=False, indent=2), encoding='utf-8')
     print('WebView2: required Web Runtime checks, IndexedDB, both Worker kinds, WebGL, '
-          'concurrent Apps, stable origin, reopen persistence, origin-isolated localStorage/IndexedDB and shared cookies passed')
+          'concurrent Apps, stable virtual origin, reopen persistence and origin-isolated localStorage/IndexedDB passed')

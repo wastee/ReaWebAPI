@@ -24,7 +24,7 @@ Small isolated requests and bounded replies use a fast path, while native API ex
 
 `projectScope` is `all`. `limits` reports request bytes, batch calls and pending calls. Diagnostics counters describe this window, and `lastError` is a diagnostic string rather than a complete history of rejected calls. The scheduler's 2 ms budget is a soft dispatch budget, not a deadline for an individual native function.
 
-Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (`app-http` / `dev-http`), `appId`, `origin`, `storageIsolation` (`origin`), and `localResources`. See the [Web Runtime contract](frontend.md).
+Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (`app-virtual` / `dev-http`), `appId`, `origin`, `storageIsolation` (`origin`), and `localResources`. See the [Web Runtime contract](frontend.md).
 
 ## Windows
 
@@ -43,7 +43,7 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | Default `true`. Setting `false` allows REAPER's normal global shortcut policy |
 | `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible` |
 
-Window placement and docking are persisted by entry file and instance slot. At most 32 ReaWebAPI windows can be open. Handles, subscriptions and pending requests remain document-local while browser storage is shared only within the same App directory.
+Window placement and docking are persisted by entry file and instance slot. At most 32 ReaWebAPI windows can be open. Handles, subscriptions and pending requests remain document-local while browser storage is isolated by App ID.
 
 ## Events
 
@@ -214,9 +214,9 @@ local settings = reaper.ReaWeb_Open(directory .. "settings.html", instanceKey, "
 local extra = reaper.ReaWeb_Open(directory .. "index.html", instanceKey, nil, true)
 ```
 
-Runtime compares `(instanceKey, id)` as separate, case-sensitive strings. Nil or empty `id` selects the default window. Keys are opaque: Runtime does not normalize paths, remove the `@` source prefix, or inspect the Lua stack. Capture the launcher source in the launcher itself and pass it through any helper. Use the same spelling on subsequent calls. Copied launchers in different directories have different keys. Closing or failed windows are excluded from reuse, and destroying the session releases its identity.
+Runtime compares `(instanceKey, id)` as separate, case-sensitive strings. Nil or empty `id` selects the default window. Instance matching treats keys as opaque and does not normalize paths or remove the `@` prefix. App identity separately uses the Lua source filename when `app.json.id` is absent. Runtime does not inspect the Lua stack. Capture the launcher source in the launcher itself and pass it through any helper. Use the same spelling on subsequent calls. Copied launchers in different directories have different keys. Closing or failed windows are excluded from reuse, and destroying the session releases its identity.
 
-JavaScript `reaper.window.open(path)` and `ReaWeb_OpenDev(url)` retain their existing behavior. Native C/C++ consumers must use the v0.3.5 signature `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)` and pass `nullptr` for omitted options. Existing one-argument Lua calls remain valid.
+JavaScript `reaper.window.open(path)` and `ReaWeb_OpenDev(url)` retain their existing behavior. Native C/C++ consumers must use the v0.3.5 signature `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)` and pass `nullptr` for omitted options. One-argument Lua calls require `app.json.id`. Without it, pass the launching Lua source as `instanceKey` even when `multiple = true`.
 
 ## Lua message bridge
 

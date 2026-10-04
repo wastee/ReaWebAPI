@@ -1,8 +1,8 @@
-"""Exercise the actual native resource origin over HTTP, without REAPER."""
-import concurrent.futures
-import http.client
+"""Exercise native virtual resources and persistent App identity without a listener."""
+import base64
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -28,14 +28,14 @@ class ResourceTests(unittest.TestCase):
         (self.root / 'module.wasm').write_bytes(b'\0asm')
         (self.root / 'binary.bin').write_bytes(bytes(range(256)) * 4096)
         (self.base / 'secret.txt').write_text('outside')
+        (self.root / 'app.json').write_text('{"id":"timefold"}')
         self.start()
 
     def start(self):
         self.process = subprocess.Popen([BINARY, str(self.root), str(self.profile)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8')
         self.origin = self.process.stdout.readline().strip()
-        hostname = 'localhost' if sys.platform == 'darwin' else '127.0.0.1'
-        self.assertTrue(self.origin.startswith('http://' + hostname + ':'), self.origin)
+        self.assertEqual(self.origin, 'reaweb://timefold')
 
     def stop(self):
         self.process.communicate('\n', timeout=8)
@@ -50,14 +50,10 @@ class ResourceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def request(self, path, method='GET', headers=None):
-        url = urlsplit(self.origin)
-        client = http.client.HTTPConnection(url.hostname, url.port, timeout=4)
-        try:
-            client.request(method, path, headers=headers or {})
-            response = client.getresponse()
-            return response.status, dict(response.getheaders()), response.read()
-        finally:
-            client.close()
+        request = dict(uri=self.origin + path, method=method, headers={k.lower(): v for k,v in (headers or {}).items()})
+        self.process.stdin.write(json.dumps(request) + '\n'); self.process.stdin.flush()
+        response = json.loads(self.process.stdout.readline())
+        return response['status'], response['headers'], base64.b64decode(response['body']['__reawebBytes'])
 
     def test_mime_unicode_query_range_and_head(self):
         for path, mime in [('app.js', 'text/javascript'), ('data.json', 'application/json'),
@@ -163,20 +159,83 @@ class ResourceTests(unittest.TestCase):
         self.assert_forbidden('/escape-dir/')
         self.assertEqual(self.request('/inside-dir/data.json')[2], b'{"value":42}')
 
-    def test_persisted_origin_and_port_conflict(self):
+    def test_persisted_origin_without_port(self):
         initial = self.origin
         duplicate = subprocess.run([BINARY, str(self.root), str(self.profile)], input='\n',
                                    capture_output=True, text=True, encoding='utf-8', timeout=8)
-        self.assertEqual(duplicate.returncode, 2)
-        self.assertIn('APP_ORIGIN_BUSY', duplicate.stdout)
+        self.assertEqual(duplicate.returncode, 0, duplicate.stdout)
+        self.assertEqual(duplicate.stdout.strip(), self.origin)
         self.stop()
         self.start()
         self.assertEqual(self.origin, initial)
-        self.assertEqual(json.loads((self.profile / 'origin.json').read_text())['schema'], 1)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-            for status, _, body in pool.map(lambda _: self.request('/binary.bin'), range(12)):
-                self.assertEqual(status, 200)
-                self.assertEqual(len(body), 1048576)
+        record = json.loads((self.profile / 'origin.json').read_text())
+        self.assertEqual(record['schema'], 2)
+        self.assertNotIn('port', record)
+        self.assertEqual(record['appId'], 'timefold')
+        status, _, body = self.request('/binary.bin')
+        self.assertEqual((status, len(body)), (200, 1048576))
+
+    def launch(self, root=None, profile=None, source='@zaibuyidao_ReaGBA.lua'):
+        return subprocess.run([BINARY, str(root or self.root), str(profile or self.profile), source],
+            input='\n', capture_output=True, text=True, encoding='utf-8', timeout=8)
+
+    def test_identity_conflict_and_move(self):
+        other = self.base / 'Copy'
+        shutil.copytree(self.root, other)
+        self.assertIn('APP_ID_CONFLICT', self.launch(root=other).stdout)
+        self.stop()
+        self.assertIn('APP_ID_CONFLICT', self.launch(root=other).stdout)
+        moved = self.base / 'Renamed App'
+        self.root.rename(moved)
+        self.root = moved
+        self.start()
+        self.assertEqual(self.origin, 'reaweb://timefold')
+        self.assertEqual(self.request('/data.json')[0], 200)
+
+    def test_manifest_precedence_and_launcher_fallback(self):
+        self.assertEqual(self.launch(source='not-a-lua-source').stdout.strip(), 'reaweb://timefold')
+        self.stop()
+        (self.root / 'app.json').write_text('{"name":"Ignored display name"}')
+        (self.root / 'Wrong.lua').write_text('-- Never infer identity from directory contents')
+        fallback = self.base / 'fallback'
+        for source in ('@/Scripts/zaibuyidao_ReaGBA.lua', r'C:\Scripts\Zaibuyidao ReaGBA.LUA'):
+            self.assertEqual(self.launch(profile=fallback, source=source).stdout.strip(), 'reaweb://zaibuyidao-reagba')
+        self.assertIn('APP_ID_REQUIRED', self.launch(profile=fallback, source='').stdout)
+        copy = self.base / 'OtherRoot'
+        shutil.copytree(self.root, copy)
+        self.assertIn('APP_ID_CONFLICT', self.launch(root=copy, profile=fallback).stdout)
+
+    def test_invalid_ids_are_not_silently_rewritten(self):
+        self.stop()
+        for identity in ('', 'TimeFold', 'a_b', 'with space', '../escape', 'a.b', '音', None, 42):
+            (self.root / 'app.json').write_text(json.dumps({'id': identity}))
+            self.assertIn('APP_MANIFEST_INVALID', self.launch(profile=self.base / 'invalid').stdout, identity)
+
+    def test_old_metadata_upgrade_retains_browser_data(self):
+        self.stop()
+        record = self.profile / 'origin.json'
+        record.write_text(json.dumps({'schema': 1, 'root': str(self.root.resolve()).replace('\\', '/'), 'port': 12345}))
+        browser = self.profile / 'WebViewData'
+        browser.mkdir(); (browser / 'retained').write_text('old browser state')
+        self.start()
+        data = json.loads(record.read_text())
+        self.assertEqual((data['schema'], data['origin']), (2, 'reaweb://timefold'))
+        self.assertNotIn('port', data)
+        self.assertEqual((browser / 'retained').read_text(), 'old browser state')
+
+    def test_ranges_cache_and_strict_paths(self):
+        self.assertEqual(self.request('/binary.bin', headers={'Range': 'bytes=-2'})[2], bytes([254, 255]))
+        self.assertEqual(self.request('/binary.bin', headers={'Range': 'bytes=1048576-'})[0], 416)
+        self.assertEqual(self.request('/binary.bin', headers={'Range': 'bytes=2-1'})[0], 400)
+        status, headers, body = self.request('/data.json')
+        self.assertEqual(self.request('/data.json', headers={'If-None-Match': headers['ETag']})[0], 304)
+        self.assertEqual(self.request('/data.json', headers={'If-None-Match': '"old", W/' + headers['ETag']})[0], 304)
+        self.assertEqual(self.request('/data.json', headers={'If-Modified-Since': headers['Last-Modified']})[0], 304)
+        self.assertEqual(self.request('/data.json', headers={'Range': 'bytes=0-1', 'If-Range': headers['Last-Modified']})[0], 206)
+        self.assertEqual(self.request('/data.json', headers={'If-None-Match': '"old"', 'If-Modified-Since': headers['Last-Modified']})[0], 200)
+        self.assertEqual(self.request('/data.json', headers={'Range': 'bytes=0-1', 'If-Range': '"old"'})[2], body)
+        for path in ('/%', '/%0', '/%GG', '/%2fetc/passwd', '/%2e%2e/secret.txt'):
+            self.assertNotEqual(self.request(path)[0], 200)
 
 
 if __name__ == '__main__':

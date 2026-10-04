@@ -1,0 +1,6 @@
+{
+  "id": "reawebapi-web-runtime",
+  "name": "Web Runtime",
+  "version": "1.0.0",
+  "entry": "index.html"
+}

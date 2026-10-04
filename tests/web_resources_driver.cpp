@@ -1,12 +1,21 @@
 #include "web/web_resources.hpp"
 #include <iostream>
 int main(int argc, char** argv) {
-  if (argc != 3) return 1;
+  if (argc != 3 && argc != 4) return 1;
   try {
-    reaweb::WebResources resources(reaweb::fs::u8path(argv[1]), reaweb::fs::u8path(argv[2]));
+    const auto root = reaweb::fs::u8path(argv[1]);
+    const auto id = reaweb::app_identity(root, argc == 4 ? argv[3] : "@zaibuyidao_ReaGBA.lua");
+    reaweb::bind_app_identity(root, reaweb::fs::u8path(argv[2]), id);
+    reaweb::WebResources resources(root, id);
     std::cout << resources.origin() << std::endl;
     std::string line;
-    std::getline(std::cin, line);
+    while (std::getline(std::cin, line) && !line.empty()) {
+      const auto input = reaweb::Json::parse(line);
+      const auto response = resources.request(input.at("uri"), input.value("method", "GET"),
+        input.value("headers", std::map<std::string, std::string>{}));
+      std::cout << reaweb::Json{{"status", response.status}, {"headers", response.headers},
+        {"body", reaweb::encode_binary(response.data, response.size)}}.dump() << std::endl;
+    }
   } catch (const reaweb::Error& e) {
     std::cout << e.code << ": " << e.what() << std::endl;
     return 2;

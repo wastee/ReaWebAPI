@@ -76,6 +76,9 @@ class SdkTests(unittest.TestCase):
                 self.assertIn('ReaWebAPI/SDK/runtime-demo/app.js', files)
                 self.assertIn('ReaWebAPI/SDK/lua-backend/reawebapi-lua-backend.lua', files)
                 self.assertIn('ReaWebAPI/SDK/tools/validate_app.py', files)
+                for app in ('starter', 'runtime-demo', 'web-runtime', 'modern/public', 'lua-backend', 'native-service', 'native-stream'):
+                    manifest = json.loads(files[f'ReaWebAPI/SDK/{app}/app.json'])
+                    self.assertRegex(manifest['id'], r'^[a-z0-9-]+$')
                 for name in ('LICENSE.md', 'COPYING', 'COPYING.LESSER', 'THIRD_PARTY.md'):
                     self.assertEqual(files[f'ReaWebAPI/{name}'], (ROOT / name).read_bytes())
                 for line in files['SHA256SUMS.txt'].decode().splitlines():

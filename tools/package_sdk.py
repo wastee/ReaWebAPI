@@ -28,7 +28,7 @@ def payload(root, version, revision):
     paths['ReaWebAPI/SDK/native/stream_extension.cpp'] = root / 'tests/native_stream_extension.cpp'
     for name in ('native-streams.md', 'native-streams.zh-CN.md'):
         paths[f'ReaWebAPI/docs/{name}'] = root / 'docs' / name
-    for name in ('reawebapi-native-stream.lua', 'index.html', 'app.js', 'style.css', 'README.md'):
+    for name in ('reawebapi-native-stream.lua', 'index.html', 'app.js', 'style.css', 'README.md', 'app.json'):
         paths[f'ReaWebAPI/SDK/native-stream/{name}'] = root / 'web/native-stream' / name
     paths['ReaWebAPI/SDK/native/test_extension.cpp'] = root / 'tests/native_service_extension.cpp'
     for name in ('external-clients.md', 'external-clients.zh-CN.md'):
@@ -37,20 +37,20 @@ def payload(root, version, revision):
         paths[f'ReaWebAPI/SDK/external-client/{name}'] = root / 'web/external-client' / name
     paths['ReaWebAPI/docs/native-services.md'] = root / 'docs/native-services.md'
     paths['ReaWebAPI/docs/native-services.zh-CN.md'] = root / 'docs/native-services.zh-CN.md'
-    for name in ('reawebapi-native-service.lua', 'Coexist.lua', 'index.html', 'app.js', 'style.css', 'README.md'):
+    for name in ('reawebapi-native-service.lua', 'Coexist.lua', 'index.html', 'app.js', 'style.css', 'README.md', 'app.json'):
         paths[f'ReaWebAPI/SDK/native-service/{name}'] = root / 'web/native-service' / name
-    for name in ('reawebapi-lua-backend.lua', 'index.html', 'app.js', 'style.css', 'README.md'):
+    for name in ('reawebapi-lua-backend.lua', 'index.html', 'app.js', 'style.css', 'README.md', 'app.json'):
         paths[f'ReaWebAPI/SDK/lua-backend/{name}'] = root / 'web/lua-backend' / name
     for name in ('Open.lua', 'index.html', 'app.js', 'style.css', 'app.json'):
         paths[f'ReaWebAPI/SDK/runtime-demo/{name}'] = root / 'runtime/runtime-demo' / name
-    for name in ('Open.lua', 'index.html', 'app.js', 'style.css', 'jsconfig.json'):
+    for name in ('Open.lua', 'index.html', 'app.js', 'style.css', 'jsconfig.json', 'app.json'):
         paths[f'ReaWebAPI/SDK/starter/{name}'] = root / 'runtime/starter' / name
-    for name in ('Open.lua', 'index.html', 'app.js', 'ui.js', 'style.css', 'README.md', 'README.zh-CN.md',
+    for name in ('Open.lua', 'index.html', 'app.js', 'ui.js', 'style.css', 'README.md', 'README.zh-CN.md', 'app.json',
                  'data/config.json', 'modules/空 格#%.js', 'workers/classic.js', 'workers/module.js'):
         paths[f'ReaWebAPI/SDK/web-runtime/{name}'] = root / 'runtime/web-runtime' / name
     for name in ('README.md', 'README.zh-CN.md', 'Open.lua', 'OpenDev.lua', 'index.html',
                  'package.json', 'package-lock.json', 'tsconfig.json', 'build.mjs',
-                 'src/main.ts', 'src/worker.ts', 'src/style.css', 'public/data.json'):
+                 'src/main.ts', 'src/worker.ts', 'src/style.css', 'public/data.json', 'public/app.json'):
         paths[f'ReaWebAPI/SDK/modern/{name}'] = root / 'runtime/modern' / name
     for name in ('README.md', 'README.zh-CN.md', 'development.md', 'development.zh-CN.md',
                  'devtools.md', 'devtools.zh-CN.md', 'SMOKE_TEST.md', 'VALIDATION.md',

@@ -10,7 +10,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - Optional [External Clients](docs/external-clients.md) over authenticated localhost WebSocket, sharing the Native API, Batch, Service, Event and binary Stream capabilities.
 - [Native Events and Host Services](docs/native-services.md) with subscription-driven state monitoring and a C/C++ extension registry, independent of Lua loops.
 - 15 Runtime namespaces for windows, events, files, native dialogs, drag and drop, audio, Undo and application services.
-- Native WebView support for modules, local resources, Workers and persistent App storage.
+- Stable `reaweb://<appId>` origins with native local resources, modules, Workers and persistent App storage, without per-App TCP listeners.
 - Docked and floating WebViews retain browser content during resizing, with the native background following the page's opaque HTML/body background color.
 - Windows/Linux [DevTools](docs/devtools.md) with a resizable right-hand panel, floating mode and saved layout preferences. Ctrl+Shift+I toggles visibility. Windows offers a borderless embedded panel, native floating window and page context-menu controls.
 - macOS [Web Inspector](docs/devtools.md#macos) supports a right-hand embedded panel, native floating window and saved layout preferences. Option+Command+I and the page context menu control the same inspection session.
@@ -57,7 +57,7 @@ External HTTP, HTTPS and mailto navigation opens in the system default handler w
 
 [SDK](runtime/README.md) · [Developer guide](docs/development.md) · [REAPER API](docs/api-reference.md) · [Runtime API](docs/runtime-api.md) · [Lua host API](docs/host-api.md) · [Web runtime](docs/frontend.md) · [DevTools](docs/devtools.md)
 
-All Apps share `ReaWebAPI/WebViewData/`. App identities, private data and window state remain under `ReaWebAPI/Apps/<appId>/`. See the [storage contract](docs/frontend.md#resource-origin-and-storage) for origin isolation and shared cookies.
+All Apps share `ReaWebAPI/WebViewData/`. App identities, private data and window state remain under `ReaWebAPI/Apps/<appId>/`. See the [storage contract](docs/frontend.md#resource-origin-and-storage) for App IDs, origin isolation and native cookie behavior.
 
 ## Build
 

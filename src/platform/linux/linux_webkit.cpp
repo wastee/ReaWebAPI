@@ -11,6 +11,7 @@
 #include "platform/linux/gtk_drag.hpp"
 #include "platform/linux/gtk_devtools.hpp"
 #include "platform/linux/gtk_context_menu.hpp"
+#include "platform/linux/gtk_resources.hpp"
 
 namespace reaweb {
 namespace {
@@ -30,6 +31,7 @@ class Page {
   GtkWidget* plug_ = nullptr;
   WebKitWebView* view_ = nullptr;
   WebKitUserContentManager* manager_ = nullptr;
+  std::shared_ptr<WebResources> resources_;
   ::Window parent_ = 0;
   bool failed_ = false;
   bool loaded_ = false, allow_reload_ = false, intercept_reload_ = false;
@@ -102,6 +104,12 @@ public:
     webkit_user_content_manager_add_script(manager_, script);
     webkit_user_script_unref(script);
     view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, "user-content-manager", manager_, nullptr));
+    const auto resource_root = request.value("resourceRoot", std::string());
+    if (!resource_root.empty()) {
+      const auto end = uri_.find('/', 9);
+      resources_ = std::make_shared<WebResources>(fs::u8path(resource_root), uri_.substr(9, end - 9));
+      g_object_set_data(G_OBJECT(view_), "reaweb-resources", resources_.get());
+    }
     g_object_ref_sink(view_);
     auto settings = webkit_web_view_get_settings(view_);
     webkit_settings_set_enable_developer_extras(settings, TRUE);
@@ -200,6 +208,7 @@ public:
     g_signal_handlers_disconnect_by_data(manager_, this);
     g_signal_handlers_disconnect_by_data(view_, this);
     webkit_web_view_stop_loading(view_);
+    g_object_set_data(G_OBJECT(view_), "reaweb-resources", nullptr);
     gtk_widget_destroy(plug_);
     g_object_unref(view_); g_object_unref(manager_); g_object_unref(plug_);
   }
@@ -277,6 +286,7 @@ struct Process {
     webkit_cookie_manager_set_persistent_storage(webkit_website_data_manager_get_cookie_manager(manager),
       cookies.c_str(), WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
     context = webkit_web_context_new_with_website_data_manager(manager);
+    register_app_resources(context);
     g_object_unref(manager);
     channel.send({{"op", "ready"}, {"protocol", 1}, {"version", REAWEB_VERSION}, {"browserVersion",
       std::to_string(webkit_get_major_version()) + "." + std::to_string(webkit_get_minor_version()) + "." + std::to_string(webkit_get_micro_version())}});

@@ -1,0 +1,6 @@
+{
+  "id": "reawebapi-starter",
+  "name": "ReaWebAPI Starter",
+  "version": "1.0.0",
+  "entry": "index.html"
+}

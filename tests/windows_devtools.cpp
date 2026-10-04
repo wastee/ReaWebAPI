@@ -145,6 +145,8 @@ void focus_switching(bool separate_profiles, bool dialog_navigation = false) {
     WindowOptions options;
     options.parent = reaper;
     options.entry = entry; options.title = "ReaWebAPI focus test " + std::to_string(i);
+    options.resources = std::make_shared<WebResources>(entry.parent_path(), "devtools-focus");
+    options.url = options.resources->entry_url(entry);
     options.script = "window.token='retained';setInterval(()=>chrome.webview.postMessage(window.token),25);";
     options.on_message = [&, i](std::string text) { CHECK(text == "retained"); ++messages[i]; };
     options.on_navigation = [&, i] { ++navigations[i]; };
@@ -258,6 +260,9 @@ int main(int argc, char** argv) {
     options.on_dock_toggle = [&] { docked = !docked; };
     options.is_docked = [&] { return docked; };
     options.entry = entry; options.title = "ReaWebAPI DevTools test";
+    options.resources = std::make_shared<WebResources>(entry.parent_path(), "devtools-test");
+    options.url = options.resources->entry_url(entry);
+    if (argc > 1 && std::string(argv[1]) == "--baseline") { options.url.clear(); options.resources.reset(); }
     options.script = "window.token='retained';setInterval(()=>chrome.webview.postMessage(window.token),50);console.log('retained console entry');";
     options.on_message = [&](std::string text) {
       if (text.rfind("width:", 0) == 0) { page_width = std::stoi(text.substr(6)); return; }
@@ -347,13 +352,14 @@ int main(int argc, char** argv) {
     }
     first->restore_devtools({{"mode", "floating"}});
     ShowWindow(inspector, SW_MAXIMIZE);
+    pump(windows, [&] { return IsZoomed(inspector); }, "Maximized floating inspector");
     first->restore_devtools({{"mode", "embedded"}});
     pump(windows, [&] { return fills_panel(panel, inspector); }, "Embed maximized inspector");
     shortcut(first); pump(windows, [&] { return !visible(first); });
     first->restore_devtools({{"mode", "floating"}});
     CHECK(!visible(first) && GetAncestor(inspector, GA_ROOT) == inspector);
     first->devtools(); pump(windows, [&] { return visible(first); });
-    CHECK(IsZoomed(inspector));
+    pump(windows, [&] { return IsZoomed(inspector); }, "Restored maximized inspector");
     ShowWindow(inspector, SW_RESTORE);
     first->restore_devtools({{"mode", "embedded"}});
     pump(windows, [&] { return fills_panel(panel, inspector); });

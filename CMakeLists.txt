@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.8.3 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,7 +29,7 @@ if(UNIX)
   target_link_libraries(reaweb_loudness PRIVATE m)
 endif()
 
-# Read-only local App resources. Browser networking remains native to the WebView.
+# MIME lookup and mapped local resources. No production App HTTP listener.
 FetchContent_Declare(httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG 278c2979e8c68468960c3073e28e1c51b098d6a4)

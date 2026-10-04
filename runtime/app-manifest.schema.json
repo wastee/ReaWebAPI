@@ -6,6 +6,7 @@
   "required": ["name", "version", "entry"],
   "properties": {
     "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Stable App identity and reaweb:// authority. If omitted, the Lua launcher filename supplies the ID." },
     "name": { "type": "string", "minLength": 1, "maxLength": 256 },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[A-Za-z0-9.-]+)?$" },
     "author": { "type": "string", "maxLength": 256 },

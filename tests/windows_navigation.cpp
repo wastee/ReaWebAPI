@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <httplib.h>
 #include "web/web_resources.hpp"
 
 namespace {
@@ -37,14 +38,20 @@ int main() {
     fs::create_directories(root);
     const auto entry = root / "index.html";
     std::ofstream(entry) << "<!doctype html><title>Navigation test</title><body>Retained page</body>";
-    WebResources resources(root, root / "origin");
+    httplib::Server dev;
+    CHECK(dev.set_mount_point("/", root.u8string()));
+    const auto port = dev.bind_to_any_port("127.0.0.1"); CHECK(port > 0);
+    std::thread serving([&] { dev.listen_after_bind(); });
+    struct Stop { httplib::Server& server; std::thread& thread; ~Stop() { server.stop(); thread.join(); } } stop{dev, serving};
+    auto resources = std::make_shared<WebResources>(root, "navigation-test");
     auto platform = make_platform(root / "profile");
-    for (const auto& url : {file_uri(entry), resources.entry_url(entry), resources.entry_url(entry) + "?dev=1"}) {
+    for (const auto& url : {file_uri(entry), resources->entry_url(entry), "http://127.0.0.1:" + std::to_string(port) + "/index.html"}) {
       std::string error;
       std::vector<Json> messages;
       int navigations = 0, reloads = 0;
       WindowOptions options;
       options.entry = entry; options.url = url; options.title = "Navigation regression";
+      if (url.rfind("reaweb:", 0) == 0) options.resources = resources;
       options.script = R"(window.retained=42; window.warnings=[];
         console.warn=(text)=>warnings.push(text);
         window.report=()=>chrome.webview.postMessage(JSON.stringify({url:location.href,retained,warnings}));
@@ -85,7 +92,7 @@ int main() {
       window.reset();
     }
     platform.reset();
-    std::cout << "WebView2 navigation: file/HTTP/dev entries, external handlers, local/query/hash, popup rejection and failure recovery passed\n";
+    std::cout << "WebView2 navigation: file/virtual/HTTP dev entries, external handlers, local/query/hash, popup rejection and failure recovery passed\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

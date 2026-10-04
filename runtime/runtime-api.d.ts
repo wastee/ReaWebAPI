@@ -229,7 +229,7 @@ interface ReaWebAPI {
     startText(text: string): Promise<boolean>;
   };
   readonly app: {
-    /** Stable storage identity for the canonical local entry directory or development URL. */
+    /** Manifest ID or normalized Lua launcher filename for production Apps, URL-derived identity in development. */
     getId(): Promise<string>;
     /** app.json name, otherwise the entry directory's name. */
     getName(): Promise<string>;

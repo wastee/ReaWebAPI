@@ -1,5 +1,7 @@
 #include "platform/macos/mac_devtools.hpp"
+#include "platform/macos/mac_resources.hpp"
 #include <iostream>
+#include <fstream>
 
 using namespace reaweb;
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed at " + std::to_string(__LINE__) + ": " #value); } while (false)
@@ -39,6 +41,13 @@ id evaluate(WKWebView* view, NSString* script) {
   if (result->error) throw std::runtime_error(std::string(script.UTF8String) + ": " + result->error.description.UTF8String);
   return result->value;
 }
+id await_value(WKWebView* view, NSString* expression) {
+  evaluate(view, [NSString stringWithFormat:@"globalThis.reawebAsync = {done:false}; Promise.resolve().then(() => (%@)).then(value => {reawebAsync.value=value;reawebAsync.done=true}, error => {reawebAsync.error=String(error);reawebAsync.done=true}); true", expression]);
+  pump([&] { return [evaluate(view, @"reawebAsync.done") boolValue]; });
+  NSString* error = evaluate(view, @"reawebAsync.error || ''");
+  if ([error length]) throw std::runtime_error([error UTF8String]);
+  return evaluate(view, @"reawebAsync.value");
+}
 void shortcut(NSWindow* window, NSEventModifierFlags modifiers, bool repeat = false) {
   auto event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:modifiers
     timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
@@ -75,14 +84,36 @@ int main(int argc, char** argv) {
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
       window.releasedWhenClosed = NO;
       auto config = [WKWebViewConfiguration new];
+      const auto root = fs::temp_directory_path() / ("reaweb-virtual-inspector-" + std::to_string(getpid()));
+      fs::create_directories(root);
+      std::ofstream(root / "index.html") << "<!doctype html><link rel='stylesheet' href='style.css'><h1>Native Web Inspector</h1><input id='state' value='retained'><script src='app.js'></script>";
+      std::ofstream(root / "style.css") << "h1 { color: rgb(12, 34, 56); }";
+      std::ofstream(root / "module.js") << "import {value} from './dependency.js'; export {value};";
+      std::ofstream(root / "dependency.js") << "export const value = 42;";
+      std::ofstream(root / "data.json") << R"({"value":42})";
+      std::ofstream(root / "app.js") <<
+        "window.token='retained'; window.virtualOrigin=location.origin;\n"
+        "window.breakpointProbe = () => {\n"
+        "  window.breakpointHits = (window.breakpointHits || 0) + 1;\n"
+        "};\n"
+        "window.resourceProbe = async () => {\n"
+        "  const module = await import('./module.js');\n"
+        "  const data = await (await fetch('./data.json')).json();\n"
+        "  window.sourceStack = new Error('virtual-origin-stack').stack; console.error(sourceStack);\n"
+        "  return module.value === data.value;\n"
+        "};\n";
+      auto handler = [ReaWebSchemeHandler new];
+      handler->resources = std::make_shared<WebResources>(root, "devtools-test");
+      [config setURLSchemeHandler:handler forURLScheme:@"reaweb"];
       config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
       auto view = [[WKWebView alloc] initWithFrame:window.contentView.bounds configuration:config];
       view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
       [window.contentView addSubview:view];
       [window makeKeyAndOrderFront:nil];
       [window makeFirstResponder:view];
-      [view loadHTMLString:@"<!doctype html><h1>Native Web Inspector</h1><input id='state' value='retained'><script>window.token='retained'</script>" baseURL:nil];
+      [view loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"reaweb://devtools-test/index.html"]]];
       pump([&] { return !view.loading && [evaluate(view, @"document.readyState") isEqual:@"complete"]; });
+      CHECK([evaluate(view, @"virtualOrigin") isEqual:@"reaweb://devtools-test"]);
       {
         MacDevTools tools(view, [&] { [view.window makeKeyAndOrderFront:nil]; [view.window makeFirstResponder:view]; });
         tick = [&] { tools.tick(); };
@@ -107,6 +138,29 @@ int main(int argc, char** argv) {
         auto front = [inspector extensionHostWebView];
         CHECK(std::abs(front.frame.size.width - 276) < 1);
         CHECK(tools.diagnostics()["mode"] == "embedded" && !tools.diagnostics().contains("fallbackReason"));
+        evaluate(front, @"WI.showNetworkTab(); true");
+        [view reload];
+        pump([&] { return !view.loading && [evaluate(view, @"typeof resourceProbe === 'function'") boolValue]; });
+        CHECK([await_value(view, @"resourceProbe()") boolValue]);
+        CHECK([evaluate(view, @"sourceStack.includes('reaweb://devtools-test/app.js')") boolValue]);
+        pump([&] { return [evaluate(front, @"['index.html','style.css','app.js','module.js','dependency.js','data.json'].every(name => [WI.networkManager.mainFrame.mainResource, ...WI.networkManager.mainFrame.resourceCollection].some(resource => resource.url === 'reaweb://devtools-test/' + name && resource.finished && resource.statusCode === 200))") boolValue]; });
+        CHECK([evaluate(front, @"WI.isShowingNetworkTab()") boolValue]);
+        if (argc > 1) snapshot(front, [[NSString stringWithUTF8String:argv[1]] stringByAppendingPathComponent:@"network-resources.png"]);
+        evaluate(front, @"globalThis.reawebScript = WI.debuggerManager.scriptsForURL('reaweb://devtools-test/app.js', WI.assumingMainTarget())[0]; WI.showSourcesTab({representedObjectToSelect:reawebScript}); true");
+        CHECK([await_value(front, @"reawebScript.requestContent().then(result => result.sourceCode.content.includes('window.breakpointProbe'))") boolValue]);
+        CHECK([await_value(front, @"WI.assumingMainTarget().DebuggerAgent.setBreakpointByUrl.invoke({url:'reaweb://devtools-test/app.js',lineNumber:2,columnNumber:0}).then(result => {globalThis.reawebBreakpoint=result.breakpointId;return result.locations.length>0})") boolValue]);
+        evaluate(view, @"setTimeout(breakpointProbe, 50); true");
+        pump([&] { return [evaluate(front, @"WI.debuggerManager.paused") boolValue]; });
+        CHECK([evaluate(front, @"WI.debuggerManager.activeCallFrame.sourceCodeLocation.sourceCode.url === 'reaweb://devtools-test/app.js' && WI.debuggerManager.activeCallFrame.sourceCodeLocation.lineNumber === 2 && WI.isShowingSourcesTab()") boolValue]);
+        if (argc > 1) snapshot(front, [[NSString stringWithUTF8String:argv[1]] stringByAppendingPathComponent:@"sources-breakpoint.png"]);
+        await_value(front, @"WI.debuggerManager.resume().then(() => true)");
+        pump([&] { return [evaluate(view, @"breakpointHits === 1") boolValue]; });
+        await_value(front, @"WI.assumingMainTarget().DebuggerAgent.removeBreakpoint(reawebBreakpoint).then(() => true)");
+        [view reload];
+        pump([&] { return !view.loading && [evaluate(view, @"window.token === 'retained'") boolValue]; });
+        CHECK([inspector isConnected] && [inspector extensionHostWebView] == front);
+        CHECK([await_value(view, @"resourceProbe()") boolValue]);
+        std::cout << "Virtual resources: Network HTML/CSS/JS/modules/fetch, Sources content and breakpoint, source stacks and Inspector reconnect after reload passed\n";
         evaluate(front, @"WI.showConsoleTab(); globalThis.reawebTestToken = 'inspector retained'; 'ok'");
         evaluate(view, @"setTimeout(() => console.log('ReaWeb retained console marker'), 50); 'ok'"); settle();
         // SSH test windows can be occluded, leaving Console messages queued for rendering.

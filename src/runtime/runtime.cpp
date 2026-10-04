@@ -65,7 +65,7 @@ void Runtime::check_thread() const {
 }
 Json Runtime::web_runtime(const Session& session) const {
   return {{"contract", 1}, {"mode", session.app->mode}, {"appId", session.app->id},
-    {"origin", session.app->origin}, {"storageIsolation", "origin"}, {"localResources", session.app->mode == "app-http"}};
+    {"origin", session.app->origin}, {"storageIsolation", "origin"}, {"localResources", session.app->mode == "app-virtual"}};
 }
 Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   auto& s = *sessions_.at(id);

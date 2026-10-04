@@ -65,9 +65,9 @@ private:
   Json external_event_data(ExternalSession& session, const std::string& name, Json data);
   void flush_external_events();
   struct App {
-    std::string id, origin, mode;
+    std::string id, origin, mode, launcher_source;
     Json info;
-    std::unique_ptr<WebResources> resources;
+    std::shared_ptr<WebResources> resources;
     std::shared_ptr<Platform> platform;
   };
   struct Session {
@@ -165,7 +165,7 @@ private:
   void enqueue_message(Session& session, const std::string& message, bool to_web);
   void clear_messages(Session& session);
   void flush_messages(Session& session, Clock::time_point deadline);
-  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url);
+  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source = {});
   bool start_async(Session& session, const Work& request);
   void refresh_icon(Session& session);
   void set_title(Session& session, const std::string& title);
