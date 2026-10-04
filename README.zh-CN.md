@@ -18,6 +18,8 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - WebView 右键菜单提供停靠和 DevTools 控制。Docker 页签菜单另提供刷新、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
 - JavaScript、TypeScript 模板，Runtime Studio 示例和中英文文档。
 
+Windows WebView 遵循 **Hide pointer while typing** 设置，输入时隐藏光标，在 REAPER 原生窗口上移动鼠标后恢复。参见[光标行为](docs/frontend.zh-CN.md#文本输入时的鼠标光标)。
+
 ## 下载与安装
 
 从 [Releases](https://github.com/zaibuyidao/ReaWebAPI/releases) 下载与 **REAPER 进程架构**一致的安装包。

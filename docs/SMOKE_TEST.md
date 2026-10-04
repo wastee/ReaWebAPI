@@ -1,5 +1,12 @@
 # REAPER host acceptance
 
+## Mouse pointer
+
+- On Windows, enable **Hide pointer while typing**, focus a ReaWebAPI text field, then move the pointer over Arrange View without clicking. Type, pause and move within Arrange View. The pointer must hide during typing, remain hidden while stationary and reappear with REAPER's native shape on movement. Repeat several typing/movement cycles without changing focus. Repeat with the system option off, default/sRGB WebView rendering, floating/docked windows, multiple WebViews, reload and close/reopen. Check text selection, native drags and CSS `cursor: none` separately.
+- Build and run `windows_cursor` on an unlocked interactive desktop, then repeat with `--srgb` and `--vanish-off`. Each invocation creates a fresh browser environment because WebView2 caches the system setting. It temporarily sets the system option for the selected case and restores it on exit. Run UI tests serially.
+- Run `python tests/windows_cursor_reaper.py --reaper <reaper.exe> --extension <binary> --output <new-directory>` for 20 typing/movement cycles in real Arrange View. Use `--baseline` with an affected binary to verify the stuck-hidden reproduction.
+- On macOS and Linux, verify text input and pointer movement between a WebView and Arrange View, including docked/floating windows. These backends retain native pointer handling.
+
 ## External Clients
 
 - Confirm the server is disabled by default and existing WebView, Mirror and Lua Backend tools work. Enable **Preferences → Plug-ins → ReaWebAPI → External Clients**, apply, and use the [standalone browser Demo](../web/external-client/README.md) with the copied token.

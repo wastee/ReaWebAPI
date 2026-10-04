@@ -15,6 +15,7 @@
 #include "platform/windows/win_devtools.hpp"
 #include "platform/windows/win_icon.hpp"
 #include "platform/windows/win_dock_redraw.hpp"
+#include "platform/windows/win_cursor.hpp"
 #include "platform/windows/win_context_menu.hpp"
 #include "platform/windows/win_resources.hpp"
 #include "platform/shared/window_menu.hpp"
@@ -102,6 +103,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   bool drop_enabled_ = false, dragging_ = false;
   WinIcon icon_;
   WinDockRedraw dock_redraw_;
+  WinCursor cursor_;
   COLORREF background_ = RGB(255, 255, 255);
   void set_background(unsigned color) {
     const auto next = RGB((color >> 16) & 255, (color >> 8) & 255, color & 255);
@@ -170,7 +172,10 @@ public:
         } catch (const std::exception& error) { self->options_.on_error(error.what()); }
         return 0;
       }
-      if (msg == WM_SHOWWINDOW && wp) self->icon_.refresh(hwnd, self->icon_host(true));
+      if (msg == WM_SHOWWINDOW) {
+        if (wp) self->icon_.refresh(hwnd, self->icon_host(true));
+        else self->cursor_.finish();
+      }
       if (msg == WM_SYSCOMMAND && (wp & 0xfff0) == dock_command) {
         if (self->options_.on_dock_toggle) self->options_.on_dock_toggle();
         return 0;
@@ -218,6 +223,7 @@ public:
     hwnd_ = CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, window_class, wide(options_.title).c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
       CW_USEDEFAULT, CW_USEDEFAULT, 860, 640, static_cast<HWND>(options_.parent), nullptr, instance, this);
     if (!hwnd_) throw std::runtime_error("CreateWindowEx failed");
+    cursor_.attach(hwnd_);
     if (options_.on_dock_toggle) {
       auto menu = GetSystemMenu(hwnd_, FALSE);
       AppendMenuW(menu, MF_SEPARATOR, 0, nullptr); AppendMenuW(menu, MF_STRING, dock_command, dock_label().c_str());
@@ -229,6 +235,7 @@ public:
     ShowWindow(hwnd_, SW_SHOW);
   }
   ~WinWindow() override {
+    cursor_.finish();
     closed_ = true;
     dock_redraw_.detach();
     if (devtools_) devtools_->detach();
@@ -338,7 +345,8 @@ public:
           args->get_Source(&source);
           if (same_document(utf8(source), self->uri_) && SUCCEEDED(args->TryGetWebMessageAsString(&message))) {
             const auto text = utf8(message);
-            if (page_background_message(text, [self](unsigned color) { self->set_background(color); })) {}
+            if (text == WinCursor::message) self->cursor_.typed();
+            else if (page_background_message(text, [self](unsigned color) { self->set_background(color); })) {}
             else if (text.rfind("{\"__reawebNativeDrop\":", 0) == 0) self->native_drop(args, text);
             else self->options_.on_message(text);
           }
@@ -356,7 +364,10 @@ public:
             [self](const std::string& script) { self->evaluate(script); });
         }
         else if (self->options_.on_reload && self->options_.on_reload()) args->put_Cancel(TRUE);
-        else if (self->options_.on_navigation) self->options_.on_navigation();
+        else {
+          self->cursor_.finish();
+          if (self->options_.on_navigation) self->options_.on_navigation();
+        }
         CoTaskMemFree(uri); return S_OK;
       }).Get(), &token), "add_NavigationStarting");
     check(webview_->add_FrameNavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>(
@@ -394,7 +405,7 @@ public:
         return S_OK;
       }).Get(), &token), "add_NavigationCompleted");
     check(webview_->AddScriptToExecuteOnDocumentCreated(wide(options_.script +
-      page_background_script("chrome.webview.postMessage(message);")).c_str(),
+      page_background_script("chrome.webview.postMessage(message);") + WinCursor::script).c_str(),
       Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
         [weak](HRESULT result, LPCWSTR) -> HRESULT {
           if (auto self = weak.lock(); self && !self->closed_) {
@@ -425,6 +436,7 @@ public:
     return hwnd_ && (focus == hwnd_ || IsChild(hwnd_, focus));
   }
   void tick() override {
+    if (!closed_) cursor_.tick();
     if (!closed_) dock_redraw_.sync(hwnd_);
     if (!closed_) icon_.refresh(hwnd_, icon_host());
     if (!closed_ && devtools_) devtools_->tick(webview_.Get());
@@ -451,7 +463,10 @@ public:
   void set_icon(const std::vector<IconBitmap>& images) override { icon_.set(hwnd_, images, icon_host()); }
   void clear_icon() override { icon_.clear(hwnd_, icon_host()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(hwnd_, visible, icon_host()); }
-  void set_visible(bool visible) override { ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE); }
+  void set_visible(bool visible) override {
+    if (!visible) cursor_.finish();
+    ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+  }
   void reload() override { if (webview_) webview_->Reload(); }
   Json bounds() const override {
     RECT rect{}; if (!hwnd_ || !GetWindowRect(hwnd_, &rect)) return nullptr;

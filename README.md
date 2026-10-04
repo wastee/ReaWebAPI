@@ -17,6 +17,8 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - WebView context menus provide docking and DevTools controls. Docker tab menus add reload, App folder and close actions. PNG, ICO and SVG window icons from HTML favicons or `reaper.window.setIcon(path)` survive docking and reloads, with visibility applied immediately by `reaper.window.setIconVisible(boolean)`, including the default startup icon. Floating Docker title bars follow the active WebView's icon settings on Windows, macOS and Linux.
 - JavaScript and TypeScript templates, Runtime Studio and bilingual documentation.
 
+Windows WebViews respect **Hide pointer while typing** and restore the pointer when it moves over REAPER's native windows. See [pointer behavior](docs/frontend.md#mouse-pointer-while-typing).
+
 ## Download and install
 
 Download a package matching your **REAPER process architecture** from [Releases](https://github.com/zaibuyidao/ReaWebAPI/releases).

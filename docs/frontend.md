@@ -18,6 +18,12 @@ On Windows, Apply/OK saves `[ReaWebAPI] WebViewColorProfile=Default|sRGB` in `Re
 
 The Windows override uses a [WebView2 browser flag](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags), whose behavior and availability may change with the runtime. Host environment or registry overrides can take precedence. It does not change the monitor's ICC profile, HDR configuration or other plug-ins. It cannot guarantee identical physical colors on every display. [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) and [WebKitGTK settings](https://webkitgtk.org/reference/webkit2gtk/stable/class.Settings.html) provide no matching per-WebView display-profile setting. This release does not implement an override for those backends.
 
+## Mouse pointer while typing
+
+On Windows, ReaWebAPI respects **Hide pointer while typing**. Typing in a WebView hides the pointer, including when it rests over REAPER's Arrange View. Moving it over a REAPER native window restores visibility and the native cursor shape without changing keyboard focus. A stationary pointer remains hidden until movement. No App-side handler or system-setting change is required.
+
+The Windows backend forwards a non-client movement notification to the focused WebView2 window when native pointer movement would otherwise leave its typing cursor hidden. macOS WKWebView and Linux WebKitGTK retain their native pointer handling. Restart REAPER after updating the extension.
+
 ## Plain Web Apps
 
 Docked and floating WebViews synchronize their native resize background with an opaque CSS canvas background on `html`, or on `body` when propagated to the canvas. Root/body attribute changes, stylesheet loads and style-node changes, viewport resizing and system color-scheme changes refresh this color. Transparent or translucent canvas backgrounds retain the browser's white fallback. Background images and gradients remain browser-rendered. No App-side resize handler is required.

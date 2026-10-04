@@ -18,6 +18,12 @@ Windows 上通过 Apply/OK 保存到 REAPER 资源目录中的 `ReaWebAPI.ini`�
 
 Windows 使用 [WebView2 浏览器开关](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags)，行为与可用性可能随运行时版本变化。宿主环境或注册表覆盖可能优先于该设置。该设置不会修改显示器 ICC 配置、HDR 配置或其他插件，也不能保证所有显示器的物理颜色完全一致。[WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) 和 [WebKitGTK 设置](https://webkitgtk.org/reference/webkit2gtk/stable/class.Settings.html) 没有对应的单个 WebView 显示配置接口，本版未实现这两个后端的覆盖。
 
+## 文本输入时的鼠标光标
+
+Windows 上，ReaWebAPI 遵循 **Hide pointer while typing** 设置。在 WebView 输入时隐藏光标，包括鼠标停留于 REAPER Arrange View 的情况。在 REAPER 原生窗口上移动鼠标后，光标恢复显示并保留原生形状，键盘焦点不变。鼠标静止时保持隐藏。App 无需添加处理代码，也无需修改系统设置。
+
+当原生窗口中的鼠标移动无法恢复输入隐藏状态时，Windows 后端向对应 WebView2 窗口补发非客户区移动通知。macOS WKWebView 和 Linux WebKitGTK 保留原生光标处理。更新扩展后需重启 REAPER。
+
 ## 普通 Web App
 
 停靠和浮动 WebView 的原生缩放背景跟随 `html` 的不透明 CSS 画布背景色，或传播到画布的 `body` 背景色。根节点和 body 属性变化、样式表加载、样式节点变化、视口缩放和系统深浅色切换会刷新该颜色。透明或半透明画布背景保留浏览器的白色默认底色，背景图片和渐变仍由浏览器绘制。App 无需添加缩放处理代码。

@@ -2,8 +2,8 @@
 
 ## English
 
-- Fix aggregate RMS/LUFS history repeatedly resetting when empty folder, bus or upstream track accessors report state changes on Windows, macOS and Linux.
+- Fix mouse pointer restoration over REAPER native windows after typing in a Windows WebView2 text field, preserving hide-while-typing behavior.
 
 ## 简体中文
 
-- 修复 Windows、macOS 和 Linux 上空父轨、空总线或上游空轨的采样器反复报告状态变化，导致聚合 RMS/LUFS 历史持续复位的问题。
+- 修复 Windows WebView2 文本输入后鼠标光标在 REAPER 原生窗口上移动时无法恢复的问题，保留输入时隐藏光标的行为。
