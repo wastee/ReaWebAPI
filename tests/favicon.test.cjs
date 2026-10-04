@@ -18,7 +18,7 @@ const until = async predicate => {
 function fixture(t, engine, links = [link('logo.svg')], options = {}) {
   const messages = [], requests = [], warnings = [], listeners = {}, queries = [];
   let observer, stopped = false;
-  const document = { baseURI: 'http://127.0.0.1:3210/app/index.html', querySelectorAll() {}, head: { querySelectorAll: () => links } };
+  const document = { baseURI: options.baseURI || 'http://127.0.0.1:3210/app/index.html', querySelectorAll() {}, head: { querySelectorAll: () => links } };
   const window = { document, URL, AbortController,
     addEventListener(name, callback) { listeners[name] = callback; },
     MutationObserver: class {
@@ -52,20 +52,23 @@ function fixture(t, engine, links = [link('logo.svg')], options = {}) {
     mutate() { if (!stopped) observer([{ type: 'attributes', target: { tagName: 'LINK' } }]); } };
 }
 for (const engine of ['windows', 'webkit']) {
-  test(`${engine}: declared favicon resolves against the document URL and follows replacement/removal`, async t => {
-    const f = fixture(t, engine, [link('logo.svg?v=1#icon', { type: 'image/svg+xml', rel: 'shortcut ICON' })]);
-    await until(() => f.commits().length === 1);
-    assert.equal(f.requests[0].url, 'http://127.0.0.1:3210/app/logo.svg?v=1#icon');
-    assert.equal(Buffer.from(f.commits()[0].args[0].icon.bytes.__reawebBytes, 'base64').toString(), svg);
-    f.document.baseURI = 'http://127.0.0.1:3210/assets/'; f.links[0].href = '图标.svg'; f.mutate();
-    await until(() => f.commits().length === 2);
-    assert.equal(f.requests[1].url, 'http://127.0.0.1:3210/assets/%E5%9B%BE%E6%A0%87.svg');
-    f.links.length = 0; f.mutate();
-    await until(() => f.commits().length === 3);
-    assert.equal(f.commits()[2].args[0].icon, null);
-    assert.equal(f.requests.length, 2);
-    assert.equal(f.warnings.length, 0);
-  });
+  for (const origin of ['reaweb://favicon-test', 'http://127.0.0.1:3210']) {
+    test(`${engine} ${origin}: declared favicon resolves against the document URL and follows replacement/removal`, async t => {
+      const f = fixture(t, engine, [link('logo.svg?v=1#icon', { type: 'image/svg+xml', rel: 'shortcut ICON' })],
+        { baseURI: `${origin}/app/index.html` });
+      await until(() => f.commits().length === 1);
+      assert.equal(f.requests[0].url, `${origin}/app/logo.svg?v=1#icon`);
+      assert.equal(Buffer.from(f.commits()[0].args[0].icon.bytes.__reawebBytes, 'base64').toString(), svg);
+      f.document.baseURI = `${origin}/assets/`; f.links[0].href = '图标.svg'; f.mutate();
+      await until(() => f.commits().length === 2);
+      assert.equal(f.requests[1].url, `${origin}/assets/%E5%9B%BE%E6%A0%87.svg`);
+      f.links.length = 0; f.mutate();
+      await until(() => f.commits().length === 3);
+      assert.equal(f.commits()[2].args[0].icon, null);
+      assert.equal(f.requests.length, 2);
+      assert.equal(f.warnings.length, 0);
+    });
+  }
 }
 test('new favicon invalidates a delayed fetch and unload disconnects observation', async t => {
   const fetches = [];

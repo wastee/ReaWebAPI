@@ -63,7 +63,7 @@ Declare a favicon in `<head>` to set the native host-window icon automatically:
 
 The Runtime selects the last supported `rel="icon"` declaration whose `media` matches, including `rel="shortcut icon"`. It follows changes to declarations, `<base href>` and media queries. Removing all eligible declarations restores the default window icon. An initially absent declaration preserves the current Runtime icon. It does not probe `/favicon.ico`.
 
-PNG, ICO and SVG are supported. Specify `type` for URLs without a supported extension. Relative URLs resolve against `document.baseURI`, including `<base href>`. HTTP(S), data and blob URLs use browser `fetch`, subject to CSP `connect-src` and CORS. Failed loads leave the current icon intact and report a Console warning.
+PNG, ICO and SVG are supported. Specify `type` for URLs without a supported extension. Relative URLs resolve against `document.baseURI`, including `<base href>`. App `reaweb:` URLs, HTTP(S), data and blob URLs use browser `fetch`, subject to CSP `connect-src` and CORS. Failed loads leave the current icon intact and report a Console warning.
 
 Use `setIcon()` for an explicit override:
 

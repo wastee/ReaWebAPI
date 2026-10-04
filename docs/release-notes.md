@@ -2,8 +2,8 @@
 
 ## English
 
-- Fix Master/Input Meter streams closing when the hardware callback omits its channel count and the device is not stereo. Creation and capture now use the same device channel count.
+- Fix HTML favicons being ignored for local `reaweb:` App resources on Windows, macOS and Linux, leaving the native window with its default icon.
 
 ## 简体中文
 
-- 修复硬件回调未提供通道数且设备非双通道时 Master/Input Meter 流被关闭的问题，创建和采集统一使用设备通道数。
+- 修复 Windows、macOS 和 Linux 上本地 `reaweb:` App 资源的 HTML favicon 被忽略，导致原生窗口保留默认图标的问题。

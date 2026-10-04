@@ -228,7 +228,7 @@
           const url = new window.URL(link.getAttribute('href'), document.baseURI);
           const type = (link.type || (url.protocol === 'data:' ? url.pathname.split(/[;,]/, 1)[0] : '')).split(';', 1)[0].trim().toLowerCase();
           const format = type ? (Object.hasOwn(formats, type) ? formats[type] : null) : url.pathname.toLowerCase().match(/\.(png|ico|svg)$/)?.[0];
-          if (format && ['http:', 'https:', 'data:', 'blob:'].includes(url.protocol)) icon = { url: url.href, format };
+          if (format && ['reaweb:', 'http:', 'https:', 'data:', 'blob:'].includes(url.protocol)) icon = { url: url.href, format };
         } catch { /* Ignore invalid favicon URLs. */ }
       }
       const key = icon ? `${icon.format}:${icon.url}` : '';

@@ -64,7 +64,7 @@ await reaper.window.setTitle('SendFlow'); // 显式覆盖原生窗口标题。
 
 选择最后一个格式受支持且 `media` 匹配的 `rel="icon"` 声明，兼容 `rel="shortcut icon"`。声明、`<base href>` 或媒体查询变化时自动更新。移除所有有效声明后恢复默认窗口图标。页面初始没有声明时保留当前 Runtime 图标，不会自动探测 `/favicon.ico`。
 
-支持 PNG、ICO、SVG。URL 没有对应扩展名时需声明 `type`。相对 URL 按 `document.baseURI` 解析，包括 `<base href>` 的影响。HTTP(S)、data 和 blob URL 通过浏览器 `fetch` 加载，遵循 CSP `connect-src` 和 CORS。加载失败保留当前图标，并在 Console 中报告警告。
+支持 PNG、ICO、SVG。URL 没有对应扩展名时需声明 `type`。相对 URL 按 `document.baseURI` 解析，包括 `<base href>` 的影响。App 的 `reaweb:` URL、HTTP(S)、data 和 blob URL 通过浏览器 `fetch` 加载，遵循 CSP `connect-src` 和 CORS。加载失败保留当前图标，并在 Console 中报告警告。
 
 需要显式覆盖时使用 `setIcon()`：
 

@@ -311,7 +311,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   resource = fs::u8path(reinterpret_cast<const char*(*)()>(host->GetFunc("GetResourcePath"))());
   if (!fs::exists(resource / "swell-dock-test.enabled")) return 0;
   page = resource / "Scripts" / "swell-dock-test" / "index.html"; fs::create_directories(page.parent_path());
-  std::ofstream(page.parent_path() / "app.json") << R"({"name":"Rea&GBA 音"})";
+  std::ofstream(page.parent_path() / "app.json") << R"({"id":"swell-dock-test","name":"Rea&GBA 音"})";
   for (const auto& name : {"red", "green"}) std::ofstream(page.parent_path() / (std::string(name) + ".svg"))
     << "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='"
     << (std::string(name) == "red" ? "#ff0000" : "#00ff00") << "'/></svg>";
