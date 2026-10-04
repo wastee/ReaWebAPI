@@ -82,4 +82,6 @@ Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned proje
 
 Native Streams share track sampling across analysis views and support `aggregate: true` for synchronized pre-FX source analysis of folders and receive buses: [contract](docs/native-streams.md) · [Demo](web/native-stream/README.md).
 
+Aggregate RMS/LUFS history continues accumulating when routed folders, buses or upstream tracks contain no media.
+
 The built-in Meter provides Sample/True Peak, separate sample/True Peak clip counts, per-channel and global peak maxima, RMS-M/I, LUFS-M/S/I and LRA bounds, with reset and mono calibration. Meter supports 1–32 source channels, exact integer clip counts and selectable integrated history. Analysis is independent of publication rate.

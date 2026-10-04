@@ -40,8 +40,10 @@ struct AggregateSource::Impl {
   void* (*create)(void*);
   void (*destroy)(void*);
   bool (*refresh)(void*);
+  double (*start)(void*);
+  double (*end)(void*);
   int (*samples)(void*, int, int, double, int, double*);
-  struct Source { Guid guid; void* accessor; };
+  struct Source { Guid guid; void* accessor; bool empty = true; };
   std::unordered_map<void*, Source> sources;
   std::vector<double> scratch;
   std::vector<Node> block_nodes;
@@ -66,6 +68,8 @@ struct AggregateSource::Impl {
     create = require<decltype(create)>(host, "CreateTrackAudioAccessor");
     destroy = require<decltype(destroy)>(host, "DestroyAudioAccessor");
     refresh = require<decltype(refresh)>(host, "AudioAccessorValidateState");
+    start = require<decltype(start)>(host, "GetAudioAccessorStartTime");
+    end = require<decltype(end)>(host, "GetAudioAccessorEndTime");
     samples = require<decltype(samples)>(host, "GetAudioAccessorSamples");
   }
   ~Impl() { for (const auto& source : sources) destroy(source.second.accessor); }
@@ -195,7 +199,12 @@ int AggregateSource::read(int rate, int channels, double position, int frames, d
       accessor.release();
       ++p.generation;
     }
-    if (p.refresh(found->second.accessor)) ++p.generation;
+    auto& source = found->second;
+    const bool changed = p.refresh(source.accessor);
+    const bool empty = p.start(source.accessor) == p.end(source.accessor);
+    // Empty accessors can report changes on every validation without new audio.
+    if (changed && (!source.empty || !empty)) ++p.generation;
+    source.empty = empty;
     std::fill(p.scratch.begin(), p.scratch.end(), 0);
     const int result = p.samples(found->second.accessor, rate, channels, position, frames, p.scratch.data());
     if (result < 0) { p.reading = false; return -1; }

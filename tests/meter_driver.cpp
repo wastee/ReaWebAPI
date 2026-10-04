@@ -22,6 +22,8 @@ void* native(const char* name) {
   if (!std::strcmp(name, "CreateTrackAudioAccessor")) return reinterpret_cast<void*>(+[](void* t) { return t; });
   if (!std::strcmp(name, "DestroyAudioAccessor")) return reinterpret_cast<void*>(+[](void*) {});
   if (!std::strcmp(name, "AudioAccessorValidateState")) return reinterpret_cast<void*>(+[](void*) { const bool value = refreshed; refreshed = false; return value; });
+  if (!std::strcmp(name, "GetAudioAccessorStartTime")) return reinterpret_cast<void*>(+[](void*) { return 0.; });
+  if (!std::strcmp(name, "GetAudioAccessorEndTime")) return reinterpret_cast<void*>(+[](void*) { return 60.; });
   if (!std::strcmp(name, "GetAudioAccessorSamples")) return reinterpret_cast<void*>(+[](void*, int sr, int channels, double at, int frames, double* out) {
     ++reads; end_position = at + double(frames) / sr;
     for (int i = 0; i < frames; ++i) for (int ch = 0; ch < channels; ++ch) out[i * channels + ch] = .5 * std::sin(2 * 3.141592653589793 * 1000 * (at + double(i) / sr));

@@ -21,6 +21,7 @@ struct Track {
   int solo = 0, reads = 0;
   std::vector<Receive> receives;
   unsigned channels = 2;
+  bool empty = false, changed = false;
 };
 std::vector<Track*> tracks;
 std::set<void*> accessors;
@@ -68,14 +69,19 @@ Host host() {
     if (!std::strcmp(name, "DestroyAudioAccessor")) return reinterpret_cast<void*>(+[](void* a) {
       CHECK(std::this_thread::get_id() == main_thread && accessors.erase(a) == 1); delete static_cast<Track**>(a); ++destroys;
     });
-    if (!std::strcmp(name, "AudioAccessorValidateState")) return reinterpret_cast<void*>(+[](void* a) { CHECK(accessors.count(a)); return true; });
+    if (!std::strcmp(name, "AudioAccessorValidateState")) return reinterpret_cast<void*>(+[](void* a) {
+      CHECK(accessors.count(a)); auto& t = **static_cast<Track**>(a);
+      const bool changed = t.changed || t.empty; t.changed = false; return changed;
+    });
+    if (!std::strcmp(name, "GetAudioAccessorStartTime")) return reinterpret_cast<void*>(+[](void* a) { CHECK(accessors.count(a)); return 0.; });
+    if (!std::strcmp(name, "GetAudioAccessorEndTime")) return reinterpret_cast<void*>(+[](void* a) { CHECK(accessors.count(a)); return (**static_cast<Track**>(a)).empty ? 0. : 30.; });
     if (!std::strcmp(name, "GetAudioAccessorSamples")) return reinterpret_cast<void*>(+[](void* a, int rate, int channels, double at, int frames, double* output) {
       CHECK(std::this_thread::get_id() == main_thread && accessors.count(a));
       CHECK(rate == rate_expected && channels == channels_expected && at == at_expected && frames == frames_expected);
       auto& t = **static_cast<Track**>(a); ++t.reads;
       if (sample_delay) std::this_thread::sleep_for(std::chrono::milliseconds(sample_delay));
       if (fail_read) return -1;
-      if (no_audio) { output[0] = 99; return 0; }
+      if (no_audio || t.empty) { output[0] = 99; return 0; }
       for (int i = 0; i < frames; ++i) for (int ch = 0; ch < channels; ++ch)
         output[i * channels + ch] = t.item_muted ? 0 : t.amplitude * std::sin(2 * 3.141592653589793 * i / 32);
       if (invalid_pcm) output[1] = std::numeric_limits<double>::quiet_NaN();
@@ -241,6 +247,49 @@ int main() {
         CHECK(accessors.empty() && creates == destroys);
       }
     }
+    for (int topology = 0; topology < 3; ++topology) {
+      Track target{10, .25}, signal{11, .5}, empty{12, 0};
+      empty.empty = true;
+      target.empty = topology != 2;
+      if (topology == 1) signal.parent = empty.parent = &target;
+      else target.receives = {{&signal}, {&empty}};
+      tracks = {&target, &signal, &empty};
+      rate_expected = 48000; channels_expected = 2; frames_expected = 2048; at_expected = 0;
+      auto h = host(); h.change_count = [](void*) { return 0; };
+      AggregateSource source(h, &target);
+      AudioAnalysis analysis(48000, 2, 2048);
+      uint64_t generation = 0;
+      for (int block = 0; block < 150; ++block) {
+        at_expected = double(block * frames_expected) / rate_expected;
+        auto pcm = read(source, topology == 2 ? .75 : .5);
+        if (source.generation() != generation) {
+          CHECK(block == 0); analysis.reset(); generation = source.generation();
+        }
+        analysis.process(pcm.data(), frames_expected);
+      }
+      const auto meter = analysis.meter();
+      const size_t base = 2 * AudioAnalysis::ChannelCount;
+      CHECK(std::abs(meter[base + AudioAnalysis::ProcessedSeconds] - 6.4) < .001);
+      for (auto field : {AudioAnalysis::RmsMomentary, AudioAnalysis::RmsIntegrated,
+                         AudioAnalysis::LufsMomentary, AudioAnalysis::LufsShortTerm, AudioAnalysis::LufsIntegrated})
+        CHECK(std::isfinite(meter[base + field]) && meter[base + field] > -30);
+      // A silent block in a nonempty accessor must still report media edits.
+      signal.changed = true; no_audio = true;
+      read(source, 0); CHECK(source.generation() > generation); generation = source.generation();
+      no_audio = false;
+      empty.empty = false; empty.changed = true; empty.amplitude = .125;
+      read(source, topology == 2 ? .875 : .625);
+      CHECK(source.generation() > generation); generation = source.generation();
+      empty.empty = true;
+      read(source, topology == 2 ? .75 : .5);
+      CHECK(source.generation() > generation); generation = source.generation();
+      read(source, topology == 2 ? .75 : .5); CHECK(source.generation() == generation);
+      signal.mute = true; read(source, topology == 2 ? .25 : 0);
+      CHECK(source.generation() > generation); generation = source.generation();
+      signal.mute = false; read(source, topology == 2 ? .75 : .5);
+      CHECK(source.generation() > generation);
+    }
+    CHECK(accessors.empty() && creates == destroys);
     std::cout << "Aggregate PCM, folders, receives, mute/solo, cycles, identity, analysis and accessor lifetime passed\n";
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

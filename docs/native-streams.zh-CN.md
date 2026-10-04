@@ -94,7 +94,7 @@ meter.on('data', ({ data }) => {
 
 `audio.decodeMeter(data, C)` 为同步 SDK 解码器，返回具名测量值及 `bigint[]` 类型的 `sampleClipCount` / `truePeakClipCount`，不发起 RPC。写入 JSON 时将 bigint 转为十进制字符串。该解码器仅用于上述内置布局，第三方 Meter 继续自行定义 payload。
 
-轨道和 Aggregate Meter 仅累计播放期间连续向前的 PCM。停止时保留历史，不反复读取 Edit Cursor。Seek、循环回跳、源内容变化和 Accessor 刷新会复位。播放开始默认复位。Master/Input 停止时继续分析实际捕获的 PCM，由 `integratedMode` 控制三项历史累计。Track/Aggregate 停止时不产生新 PCM，选择 `continuous` 也不会反复读取光标处音频。捕获间断和丢包会复位。采样率或通道布局变化以 `UNSUPPORTED_FORMAT` 关闭 Meter，重新打开后使用新元数据和空历史。`processedSeconds` 仅计入实际分析时长。
+轨道和 Aggregate Meter 仅累计播放期间连续向前的 PCM。停止时保留历史，不反复读取 Edit Cursor。Seek、循环回跳、源内容变化和 Accessor 刷新会复位。聚合源中音频时间范围持续为空的 Accessor 反复报告刷新时，不复位历史。添加或移除媒体仍会复位。播放开始默认复位。Master/Input 停止时继续分析实际捕获的 PCM，由 `integratedMode` 控制三项历史累计。Track/Aggregate 停止时不产生新 PCM，选择 `continuous` 也不会反复读取光标处音频。捕获间断和丢包会复位。采样率或通道布局变化以 `UNSUPPORTED_FORMAT` 关闭 Meter，重新打开后使用新元数据和空历史。`processedSeconds` 仅计入实际分析时长。
 
 原 Channel Peak 统一为 `samplePeak`。LUFS-M/S/I 分别使用唯一的 `lufsMomentary`、`lufsShortTerm`、`lufsIntegrated` 计算路径。历史峰值最大值为 `maxSamplePeak` 和 `maxTruePeak`。所有 Meter 复位触发共用 Analyzer 生命周期，同步清空滤波器、窗口、最大值和累计时长。`processedSeconds` 等于 Analyzer 已处理的 PCM 帧数除以采样率，读取和发布不增加时长。
 
