@@ -226,6 +226,55 @@ try:
             assert m[base+9] == max(m[5*channels:6*channels]) and m[base+10] == max(m[6*channels:7*channels]), m
             assert all(v == 0 for v in m[base+14:]), m
             command('close'); sock.close()
+    # Missing hook channel counts must use the same device fallback as creation.
+    for channels in (1, 2, 6, 16, 32, 40):
+        count = min(channels, 32)
+        for source in ('master', 'input'):
+            command('configure', inputChannels=channels, outputChannels=channels, callbackChannels=0)
+            name, sock = open_meter(source=source, integratedMode='continuous')
+            for _ in range(5):
+                command('capture', output=source == 'master', callbackChannels=0, frames=4410, amplitude=.02, channelRamp=True)
+                command('tick')
+            m = meter(sock, lambda m: m[7*count+11] >= .49)
+            assert len(m) == 13*count+14, (source, channels, len(m))
+            for ch in range(count):
+                assert abs(m[ch] - .02*(ch+1)) < .001, (source, channels, ch, m[ch])
+            assert math.isfinite(m[7*count]), (source, channels, m)
+            command('close'); sock.close()
+    # Device fallback is per direction. A positive hook count takes precedence.
+    for count, source, hook in ((16, 'master', 0), (2, 'input', 0), (6, 'master', 6), (1, 'input', 1)):
+        command('configure', inputChannels=2, outputChannels=16, callbackChannels=hook)
+        name, sock = open_meter(source=source)
+        command('capture', output=source == 'master', callbackChannels=hook, frames=4410, amplitude=.02, channelRamp=True)
+        m = meter(sock, lambda m: m[7*count+11] >= .099)
+        assert len(m) == 13*count+14, (source, count, len(m))
+        for ch in range(count):
+            assert abs(m[ch] - .02*(ch+1)) < .001, (source, ch, m[ch])
+        command('close'); sock.close()
+    # Preserve the first-buffer guard and the legacy missing-right fallback.
+    for count, source in ((16, 'master'), (2, 'input')):
+        command('configure', inputChannels=2, outputChannels=16, callbackChannels=0)
+        name, sock = open_meter(source=source)
+        for mask in (0, 2):
+            command('capture', output=source == 'master', callbackChannels=0, bufferMask=mask, frames=4410)
+        command('capture', output=source == 'master', callbackChannels=0, bufferMask=1, frames=4410, amplitude=.02, channelRamp=True)
+        m = meter(sock, lambda m: m[7*count+11] >= .099)
+        assert abs(m[7*count+11] - .1) < 1e-5, m
+        for ch in range(count):
+            expected = .02 if ch < 2 else 0
+            assert abs(m[ch] - expected) < .001, (source, ch, m[ch])
+        command('close'); sock.close()
+    command('configure', outputChannels=16, callbackChannels=0)
+    name, sock = open_meter(source='master')
+    command('capture', callbackChannels=0, frames=4410)
+    meter(sock, lambda m: m[7*16+11] >= .099)
+    command('tick', outputChannels=2)
+    command('capture', callbackChannels=0, frames=4410)
+    await_closed(); sock.close()
+    name, sock = open_meter(source='master')
+    command('capture', callbackChannels=0, frames=4410)
+    assert len(meter(sock, lambda m: m[25] >= .099)) == 40
+    command('close'); sock.close()
     # Channel changes require reopening, keeping immutable metadata honest.
     for aggregate in (False, True):
         command('configure', trackChannels=2)

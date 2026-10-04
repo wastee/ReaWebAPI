@@ -8,6 +8,7 @@ double position = 0, end_position = 0;
 int playing = 0, rate = 48000, revision = 0, reads = 0;
 int track_channels = 2, input_channels = 2, output_channels = 2;
 bool refreshed = false;
+uint32_t buffer_mask = 0xffffffffu;
 double tone[32][8192];
 int track;
 void* native(const char* name) {
@@ -46,13 +47,15 @@ int main() {
       if (command == "configure") {
         track_channels = request.value("trackChannels", track_channels);
         input_channels = request.value("inputChannels", input_channels); output_channels = request.value("outputChannels", output_channels);
-        producers.capture(false, 0, rate, input_channels, nullptr); producers.capture(true, 0, rate, output_channels, nullptr);
+        producers.capture(false, 0, rate, request.value("callbackChannels", input_channels), nullptr);
+        producers.capture(true, 0, rate, request.value("callbackChannels", output_channels), nullptr);
       } else if (command == "open") {
         const auto name = producers.audio(request.value("kind", "meter"), request.value("options", Json::object()), 1);
         result = hub.attach(name, 1, 0, "http://127.0.0.1:9000"); producers.attached(name);
       } else if (command == "reset") producers.reset_meter(request.at("name"), request.value("window", 1));
       else if (command == "tick") {
         track_channels = request.value("trackChannels", track_channels);
+        input_channels = request.value("inputChannels", input_channels); output_channels = request.value("outputChannels", output_channels);
         position = request.value("position", position); playing = request.value("playing", playing);
         revision += request.value("revision", 0); refreshed = request.value("refreshed", false);
         producers.tick(); result = {{"reads", reads}, {"end", end_position}};
@@ -63,7 +66,9 @@ int main() {
         int& channels = output ? output_channels : input_channels; channels = request.value("channels", channels);
         for (int ch = 0; ch < 32; ++ch) for (int i = 0; i < frames && i < 8192; ++i)
           tone[ch][i] = amplitude * (request.value("channelRamp", false) ? ch + 1 : 1) * std::sin(2 * 3.141592653589793 * 1000 * i / rate);
-        producers.capture(output, frames, rate, channels, +[](bool, int ch) { return tone[ch]; });
+        buffer_mask = request.value("bufferMask", 0xffffffffu);
+        producers.capture(output, frames, rate, request.value("callbackChannels", channels),
+          +[](bool, int ch) -> double* { return buffer_mask & (1u << ch) ? tone[ch] : nullptr; });
       } else if (command == "close") { hub.detach_window(1); producers.tick(); }
       else if (command == "info") result = hub.info();
       else throw std::runtime_error("Unknown test command");

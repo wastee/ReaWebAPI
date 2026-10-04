@@ -147,7 +147,7 @@ struct NativeProducers::Impl {
     struct Header { unsigned rate, channels; uint64_t generation; uint64_t playing; unsigned stored_channels, reserved; };
     struct Block { Header header{}; std::array<float, 8192 * 32> samples{}; } block;
     StreamBuffer ring{REAWEB_AUDIO, [] { auto desc = audio_desc(48000, 32); desc.format = REAWEB_BYTES; desc.max_bytes += sizeof(Header); return desc; }()};
-    std::atomic<unsigned> users{0}, rate{0};
+    std::atomic<unsigned> users{0}, rate{0}, device_channels{2};
     std::atomic<uint64_t> callbacks{0}, unavailable{0};
     std::atomic<int> callback_frames{0}, callback_channels{0};
     std::atomic<bool> has_buffer{false};
@@ -203,6 +203,12 @@ struct NativeProducers::Impl {
   bool was_playing = false;
   std::atomic<bool> meter_playing{false};
   explicit Impl(const Host& h, StreamHub& s) : host(h), streams(s), worker([this] { run(); }) {}
+  void update_device_channels(int source) {
+    // Some hardware hooks leave input_nch/output_nch at zero. Query the device
+    // on the main thread and share the same fallback with creation and capture.
+    auto count = function<int (*)()>(host, source ? "GetNumAudioOutputs" : "GetNumAudioInputs");
+    if (count) capture[source].device_channels = static_cast<unsigned>(std::clamp(count(), 0, 32));
+  }
   ~Impl() {
     stopping = true; worker.join();
     for (auto& entry : entries) { entry->track_source.reset(); streams.close(entry->handle); }
@@ -350,13 +356,13 @@ std::string NativeProducers::audio(const std::string& kind, const Json& options,
   entry->source = source == "master" ? 1 : source == "input" ? 0 : 2; entry->window = window; entry->fft_size = fft; entry->update_rate = update;
   entry->force_mono = options.value("forceMono", false); entry->reset_on_start = options.value("resetOnPlaybackStart", true);
   if (entry->source < 2) {
+    p.update_device_channels(entry->source);
     entry->reset_after = p.capture[entry->source].sequence.load();
     if (entry->kind == REAWEB_METER) {
       auto playing = function<int (*)()>(p.host, "GetPlayState");
       p.meter_playing = playing && (playing() & 1);
-      auto count = function<int (*)()>(p.host, entry->source ? "GetNumAudioOutputs" : "GetNumAudioInputs");
       const int observed = p.capture[entry->source].callback_channels.load();
-      const int channels = observed > 0 ? observed : count ? count() : 2;
+      const int channels = observed > 0 ? observed : static_cast<int>(p.capture[entry->source].device_channels.load());
       if (channels < 1) throw Error("AUDIO_UNAVAILABLE", "No active source channels");
       entry->channels = std::min(32, channels);
     }
@@ -474,11 +480,12 @@ void NativeProducers::capture(bool output, int frames, double rate, int channels
   capture.last_capture = now; capture.last_duration = frames / rate;
   if (capture.block.header.rate != static_cast<unsigned>(rate) || capture.block.header.channels != static_cast<unsigned>(channels)) ++capture.generation;
   capture.rate.store(static_cast<unsigned>(rate), std::memory_order_relaxed);
-  const unsigned stored = channels > 0 ? std::min(32, channels) : 2;
+  const unsigned stored = channels > 0 ? std::min(32, channels) : capture.device_channels.load(std::memory_order_relaxed);
+  if (!stored) { ++capture.unavailable; ++capture.generation; return; }
   std::array<double*, 32> buffers{};
   for (unsigned ch = 0; ch < stored; ++ch) buffers[ch] = get(output, ch);
   if (!buffers[0]) { ++capture.unavailable; ++capture.generation; return; }
-  if (stored == 2 && !buffers[1]) buffers[1] = buffers[0];
+  if (stored > 1 && (channels <= 0 || stored == 2) && !buffers[1]) buffers[1] = buffers[0];
   capture.block.header = {static_cast<unsigned>(rate), static_cast<unsigned>(channels), capture.generation, impl_->meter_playing.load() ? 1u : 0u, stored, 0};
   for (int i = 0; i < frames; ++i) for (unsigned ch = 0; ch < stored; ++ch)
     capture.block.samples[i * stored + ch] = buffers[ch] ? static_cast<float>(buffers[ch][i]) : 0;
@@ -491,6 +498,7 @@ void NativeProducers::attached(const std::string& name) {
 }
 void NativeProducers::tick() {
   auto& p = *impl_; p.reap();
+  for (int source = 0; source < 2; ++source) if (p.capture[source].users.load()) p.update_device_channels(source);
   std::vector<std::shared_ptr<Impl::Entry>> active;
   { std::lock_guard<std::mutex> lock(p.mutex); active = p.entries; }
   const auto now = std::chrono::steady_clock::now();

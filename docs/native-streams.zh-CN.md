@@ -76,7 +76,7 @@ LUFS-M/S/I 共用 Cockos K 加权，400 ms/3 s 窗口每 100 ms 更新。LUFS-I 
 
 响度通道按 REAPER 的 L/R/C/LFE/环绕顺序解释。少于六通道时权重均为 1，从六通道开始排除 LFE，所有 LUFS 指标统一使用 sqrt(2) 环绕幅度权重。`forceMono` 将全局 RMS/LUFS、其最大值和 LRA 上下界减去 3 dB，不混合 PCM。
 
-Track Meter 使用轨道通道数。Aggregate Meter 使用根轨及音频连接上游轨道中的最大通道数，布局不随 Mute/Solo 改变，各源按相同通道索引求和。此 pre-FX 聚合仍不应用 Send 通道映射。Master/Input 使用硬件采样通道数，保留单声道。超过 32 通道的源提供前 32 通道。通道布局变化以 `UNSUPPORTED_FORMAT` 关闭 Meter，重新打开以获取新元数据。
+Track Meter 使用轨道通道数。Aggregate Meter 使用根轨及音频连接上游轨道中的最大通道数，布局不随 Mute/Solo 改变，各源按相同通道索引求和。此 pre-FX 聚合仍不应用 Send 通道映射。Master/Input 使用硬件采样通道数，保留单声道。硬件回调未提供通道数时，创建和采集均使用设备启用的输入或输出通道数。超过 32 通道的源提供前 32 通道。通道布局变化以 `UNSUPPORTED_FORMAT` 关闭 Meter，重新打开以获取新元数据。
 
 `integratedMode` 默认 `playback-only`，仅在 REAPER 播放期间累计 RMS-I、LUFS-I 和 LRA。`continuous` 只要收到有效 PCM 就累计这三项。该选项不影响实时指标、峰值历史或削波计数。`resetOnPlaybackStart` 独立控制播放开始复位，需要跨播放开始保留连续历史时设为 `false`。
 
