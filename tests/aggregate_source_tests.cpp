@@ -205,23 +205,31 @@ int main() {
       tracks = {&root, &child}; child.parent = &root;
       StreamHub hub; NativeProducers producers(h, hub);
       for (const bool aggregate : {false, true}) {
-        const int before = creates, reads = root.reads;
+        const int before = creates, reads = root.reads, child_reads = child.reads;
         std::vector<std::string> names;
         for (const auto* kind : {"audio", "spectrum", "waveform"}) {
           names.push_back(producers.audio(kind, Json{{"source", "selected-track"}, {"aggregate", aggregate}}, 1));
           hub.attach(names.back(), 1, 0, "http://127.0.0.1:1234"); producers.attached(names.back());
         }
         sample_delay = aggregate ? 10 : 0;
-        for (int i = 0; i < 200; ++i) {
+        for (int i = 0; i < 200 && (root.reads == reads || (aggregate && child.reads == child_reads)); ++i) {
           producers.tick(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(creates == before + (aggregate ? 2 : 1));
+        CHECK(root.reads == reads + 1);
+        CHECK(child.reads == child_reads + (aggregate ? 1 : 0));
+        // Wait for worker publication without starting another sampling cycle.
+        // A slow worker can outlast the source's 30 Hz sampling interval.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
           const auto state = hub.info(); bool complete = true;
           for (const auto& stream : state["streams"]) complete = complete && stream["published"].get<int>() > 0;
           if (complete) break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         const auto final_state = hub.info();
-        for (const auto& stream : final_state["streams"]) CHECK(stream["published"].get<int>() > 0);
-        CHECK(creates == before + (aggregate ? 2 : 1));
-        CHECK(root.reads == reads + 1);
+        CHECK(final_state["streams"].size() == 3);
+        for (const auto& stream : final_state["streams"]) CHECK(stream["published"].get<int>() == 1);
         sample_delay = 0;
         invalid_pcm = true;
         std::this_thread::sleep_for(std::chrono::milliseconds(40)); producers.tick();
