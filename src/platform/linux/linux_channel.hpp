@@ -23,6 +23,7 @@ public:
     }
   }
   ~LinuxChannel() { ::close(fd_); }
+  int fd() const { return fd_; }
   void send(const Json& message) {
     auto line = message.dump(-1, ' ', true, Json::error_handler_t::replace) + '\n';
     if (line.size() > 128 * 1024 * 1024 || queued_ + line.size() > 256 * 1024 * 1024)

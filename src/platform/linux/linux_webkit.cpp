@@ -5,6 +5,7 @@
 #include <gtk/gtkx.h>
 #include <gdk/gdkx.h>
 #include <webkit2/webkit2.h>
+#include <glib-unix.h>
 #include <X11/Xlib.h>
 #include <cstring>
 #include <memory>
@@ -40,7 +41,78 @@ class Page {
   std::unique_ptr<GtkDevTools> devtools_;
   std::unique_ptr<GtkDockMenu> dock_menu_;
   bool focused_ = false;
+  bool visible_ = false, mapped_ = false, geometry_initialized_ = false;
+  int native_x_ = 0, native_y_ = 0, native_width_ = 0, native_height_ = 0;
+  int allocated_width_ = 0, allocated_height_ = 0;
+  ::Window watched_parent_ = 0;
+  int watched_parent_width_ = 0, watched_parent_height_ = 0;
+  gint64 last_parent_configure_ = 0;
+  bool filter_installed_ = false;
   GdkRGBA background_{1, 1, 1, 1};
+  // The host learns a new size from REAPER's message loop, so it can only tell
+  // this process about a resize as often as that loop runs. While the user drags
+  // an edge, the window manager resizes the parent far more often than that.
+  // Watching the parent directly lets the page follow at the rate the window
+  // manager actually delivers, instead of waiting for the next host round trip.
+  static GdkFilterReturn filterEvent(GdkXEvent* xevent, GdkEvent*, gpointer data) {
+    return static_cast<Page*>(data)->onParentConfigure(static_cast<XEvent*>(xevent));
+  }
+  GdkFilterReturn onParentConfigure(XEvent* xevent) {
+    if (xevent->type != ConfigureNotify || xevent->xconfigure.window != watched_parent_)
+      return GDK_FILTER_CONTINUE;
+    // Apply the parent's own change as a difference against the size this
+    // process last saw. The frame around the client area is a constant width, so
+    // the parent's change equals the client's change exactly, and a dropped
+    // event is still covered by the next one instead of accumulating error.
+    const int delta_width = xevent->xconfigure.width - watched_parent_width_;
+    const int delta_height = xevent->xconfigure.height - watched_parent_height_;
+    watched_parent_width_ = xevent->xconfigure.width;
+    watched_parent_height_ = xevent->xconfigure.height;
+    if ((!delta_width && !delta_height) || !geometry_initialized_ || !visible_ || !mapped_ || failed_)
+      return GDK_FILTER_CONTINUE;
+    last_parent_configure_ = g_get_monotonic_time();
+    resize(std::max(1, native_width_ + delta_width), std::max(1, native_height_ + delta_height));
+    return GDK_FILTER_CONTINUE;
+  }
+  // A host message carries the size REAPER had when its message loop last ran,
+  // which can be one pass behind what was just applied here. While the parent is
+  // actively reporting resizes, keep the size just applied instead of stepping
+  // backwards; the window is short so a host size that the parent never echoes,
+  // such as REAPER toggling its menu bar, is still applied once the drag stops.
+  // That also bounds any disagreement between the two ways of computing the size.
+  static constexpr gint64 drag_quiet_window_us_ = 200000;
+  void preferAppliedSize(int& width, int& height) {
+    if (!watched_parent_ || !last_parent_configure_) return;
+    if (g_get_monotonic_time() - last_parent_configure_ > drag_quiet_window_us_) return;
+    if (width == native_width_ && height == native_height_) return;
+    if (native_width_ > 0 && native_height_ > 0) { width = native_width_; height = native_height_; }
+  }
+  void watchParent(::Window parent, bool docked) {
+    // A docked window follows REAPER's own Docker layout, which the host reports
+    // after every layout pass; watching it too would only duplicate that work.
+    if (docked) parent = 0;
+    if (parent == watched_parent_) return;
+    auto gtk_display = gtk_widget_get_display(plug_);
+    auto display = gdk_x11_display_get_xdisplay(gtk_display);
+    if (watched_parent_) {
+      gdk_x11_display_error_trap_push(gtk_display);
+      XSelectInput(display, watched_parent_, NoEventMask);
+      gdk_x11_display_error_trap_pop_ignored(gtk_display);
+    }
+    watched_parent_ = parent;
+    watched_parent_width_ = watched_parent_height_ = 0;
+    last_parent_configure_ = 0;
+    // StructureNotifyMask is not exclusive, so REAPER keeps receiving its own
+    // events for this window; this process only adds its own copy.
+    gdk_x11_display_error_trap_push(gtk_display);
+    XSelectInput(display, parent, StructureNotifyMask);
+    XWindowAttributes attributes{};
+    if (XGetWindowAttributes(display, parent, &attributes)) {
+      watched_parent_width_ = attributes.width;
+      watched_parent_height_ = attributes.height;
+    }
+    gdk_x11_display_error_trap_pop_ignored(gtk_display);
+  }
   void set_background(unsigned color) {
     background_ = {((color >> 16) & 255) / 255.0, ((color >> 8) & 255) / 255.0, (color & 255) / 255.0, 1};
     webkit_web_view_set_background_color(view_, &background_);
@@ -192,6 +264,10 @@ public:
       [this] { return devtools_->menu_state(); });
     dock_menu_->set_app_name(request.value("appName", std::string()));
     gtk_widget_realize(plug_);
+    // A global filter: events of the foreign parent window have no GdkWindow in
+    // this process, so only GDK's display-wide filter list sees them.
+    gdk_window_add_filter(nullptr, &Page::filterEvent, this);
+    filter_installed_ = true;
     // Preserve presented pixels while WebKit prepares the next resized frame.
     XSetWindowAttributes attributes{};
     attributes.bit_gravity = NorthWestGravity;
@@ -199,8 +275,37 @@ public:
       gdk_x11_window_get_xid(gtk_widget_get_window(plug_)), CWBitGravity, &attributes);
     webkit_web_view_load_uri(view_, uri_.c_str());
   }
+  void resize(int width, int height) {
+    if (failed_ || !geometry_initialized_ || !parent_) return;
+    width = std::max(1, width);
+    height = std::max(1, height);
+    const int scale = std::max(1, gtk_widget_get_scale_factor(plug_));
+    const int gtk_width = std::max(1, static_cast<int>(std::lround(static_cast<double>(width) / static_cast<double>(scale))));
+    const int gtk_height = std::max(1, static_cast<int>(std::lround(static_cast<double>(height) / static_cast<double>(scale))));
+    const bool allocation_changed = allocated_width_ != gtk_width || allocated_height_ != gtk_height;
+    const bool native_size_changed = native_width_ != width || native_height_ != height;
+    if (!allocation_changed && !native_size_changed) return;
+    auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
+    if (allocation_changed) {
+      GtkAllocation allocation{0, 0, gtk_width, gtk_height};
+      gtk_widget_size_allocate(plug_, &allocation);
+      allocated_width_ = gtk_width;
+      allocated_height_ = gtk_height;
+    }
+    if (native_size_changed) {
+      // Keep GDK's native-window cache in sync with the allocation. GDK
+      // expects logical GTK units here and scales the X11 window itself.
+      gdk_window_resize(gtk_widget_get_window(plug_), gtk_width, gtk_height);
+      gdk_display_flush(gtk_widget_get_display(plug_));
+    }
+    native_width_ = width;
+    native_height_ = height;
+    XFlush(display);
+  }
   ~Page() {
     failed_ = true;
+    watchParent(0, false);
+    if (filter_installed_) { gdk_window_remove_filter(nullptr, &Page::filterEvent, this); filter_installed_ = false; }
     dock_menu_.reset();
     drag_.reset();
     devtools_.reset();
@@ -227,9 +332,17 @@ public:
       devtools_->restore(request.at("state"));
     } else if (op == "devtools-action") {
       devtools_->perform(static_cast<DevToolsAction>(request.at("action").get<int>()));
+    } else if (op == "resize") {
+      int width = request.at("width").get<int>(), height = request.at("height").get<int>();
+      preferAppliedSize(width, height);
+      resize(width, height);
     } else if (op == "park") {
-      // SWELL destroys its old X11 top-level when docking. Move out before that happens.
+      // SWELL destroys its old X11 top-level when docking. Move out before that
+      // happens, and stop watching it before its XID can be reused.
       set_host_focus(false);
+      visible_ = false;
+      mapped_ = false;
+      watchParent(0, false);
       gtk_widget_hide(plug_);
       auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
       const auto xid = gdk_x11_window_get_xid(gtk_widget_get_window(plug_));
@@ -237,6 +350,7 @@ public:
       XReparentWindow(display, xid, DefaultRootWindow(display), 0, 0);
       XSync(display, False);
       parent_ = 0;
+      geometry_initialized_ = false;
       devtools_->owner(0);
       channel_.send({{"id", id_}, {"op", "parked"}});
     } else if (op == "geometry") {
@@ -246,31 +360,92 @@ public:
       }
       const auto parent = request.at("parent").get<unsigned long>();
       const int x = request.at("x"), y = request.at("y");
-      const int width = std::max(1, request.at("width").get<int>()), height = std::max(1, request.at("height").get<int>());
+      const int host_width = std::max(1, request.at("width").get<int>()), host_height = std::max(1, request.at("height").get<int>());
+      // Start or stop watching this parent before the size below is resolved, so
+      // the first event of a new parent is never attributed to the old one.
+      watchParent(parent, request.value("docked", false));
+      // Position, parent and visibility still come from the host; only the size
+      // can already be stale, in which case the parent-derived size is newer.
+      int width = host_width, height = host_height;
+      preferAppliedSize(width, height);
+      const int scale = std::max(1, gtk_widget_get_scale_factor(plug_));
+      const auto to_gtk = [scale](int pixels) {
+        return std::max(1, static_cast<int>(std::lround(static_cast<double>(pixels) / static_cast<double>(scale))));
+      };
+      const int gtk_width = to_gtk(width), gtk_height = to_gtk(height);
+      // REAPER's SWELL geometry and the foreign X11 parent use the same
+      // coordinates. GTK's allocation uses the helper's logical coordinates,
+      // so convert only the GTK request using its runtime scale factor.
       auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
       auto xid = gdk_x11_window_get_xid(gtk_widget_get_window(plug_));
-      gdk_x11_display_error_trap_push(gtk_widget_get_display(plug_));
-      if (parent != parent_) { XReparentWindow(display, xid, parent, x, y); parent_ = parent; }
-      devtools_->owner(parent);
+      auto gtk_display = gtk_widget_get_display(plug_);
+      gdk_x11_display_error_trap_push(gtk_display);
+      const bool parent_changed = parent != parent_;
+      const bool position_changed = !geometry_initialized_ || native_x_ != x || native_y_ != y;
+      const bool native_size_changed = !geometry_initialized_ || native_width_ != width || native_height_ != height;
+      const bool allocation_changed = allocated_width_ != gtk_width || allocated_height_ != gtk_height;
+      if (parent_changed) {
+        if (mapped_) { XUnmapWindow(display, xid); mapped_ = false; }
+        XReparentWindow(display, xid, parent, x, y);
+        parent_ = parent;
+        devtools_->owner(parent);
+      }
       set_host_focus(request.value("focused", false));
-      gtk_window_resize(GTK_WINDOW(plug_), width, height);
+      // GtkPlug is a GtkWindow. Set its logical default size before showing it
+      // so GtkWindow does not replace the foreign-parent allocation with its
+      // default 200x200 requisition. Once shown, repeating this top-level resize
+      // request during a drag makes GTK renegotiate the embedded window each time.
+      if (!visible_) gtk_window_resize(GTK_WINDOW(plug_), gtk_width, gtk_height);
       // A foreign REAPER/X11 parent is not a GtkSocket, so allocate the client
-      // viewport explicitly instead of relying on GTK socket size negotiation.
-      GtkAllocation allocation{0, 0, width, height};
-      gtk_widget_size_allocate(plug_, &allocation);
-      XMoveResizeWindow(display, xid, x, y, width, height);
-      // A foreign parent cannot honor GtkPlug's XEmbed mapping requests.
-      if (request.at("visible").get<bool>()) { gtk_widget_show_all(plug_); XMapWindow(display, xid); }
-      else { gtk_widget_hide(plug_); XUnmapWindow(display, xid); }
+      // viewport explicitly. GTK's allocation and the X11 pixel size use
+      // different units at a scaled display.
+      GtkAllocation allocation{0, 0, gtk_width, gtk_height};
+      if (allocation_changed) {
+        gtk_widget_size_allocate(plug_, &allocation);
+        allocated_width_ = gtk_width;
+        allocated_height_ = gtk_height;
+      }
+      if (parent_changed || position_changed || native_size_changed) {
+        if (auto gdk_window = gtk_widget_get_window(plug_)) {
+          // GDK geometry uses the same logical units as GtkAllocation. Keep
+          // its cached size in sync instead of resizing the X11 child behind
+          // GTK's back.
+          const int gtk_x = static_cast<int>(std::lround(static_cast<double>(x) / scale));
+          const int gtk_y = static_cast<int>(std::lround(static_cast<double>(y) / scale));
+          gdk_window_move_resize(gdk_window, gtk_x, gtk_y, gtk_width, gtk_height);
+          gdk_display_flush(gtk_display);
+        } else {
+          XMoveResizeWindow(display, xid, x, y, static_cast<unsigned>(width), static_cast<unsigned>(height));
+        }
+      }
+      const bool requested_visible = request.at("visible").get<bool>();
+      if (requested_visible) {
+        if (!visible_) {
+          gtk_widget_show_all(plug_);
+          visible_ = true;
+          // The first allocation can happen while the plug is hidden. Repeat it
+          // after showing so GtkPaned and WebKit receive the real client size.
+          gtk_widget_size_allocate(plug_, &allocation);
+        }
+        if (!mapped_) { XMapWindow(display, xid); mapped_ = true; }
+      } else {
+        if (visible_) { gtk_widget_hide(plug_); visible_ = false; }
+        if (mapped_) { XUnmapWindow(display, xid); mapped_ = false; }
+      }
+      native_x_ = x; native_y_ = y; native_width_ = width; native_height_ = height;
+      geometry_initialized_ = true;
       XFlush(display);
       gdk_x11_display_error_trap_pop_ignored(gtk_widget_get_display(plug_));
     } else if (op == "focus" && parent_) {
-      set_host_focus(true);
-      gtk_widget_grab_focus(GTK_WIDGET(view_));
-      auto display = gtk_widget_get_display(plug_);
-      gdk_x11_display_error_trap_push(display);
-      XSetInputFocus(gdk_x11_display_get_xdisplay(display), gdk_x11_window_get_xid(gtk_widget_get_window(plug_)), RevertToParent, CurrentTime);
-      gdk_x11_display_error_trap_pop_ignored(display);
+      const bool focused = request.value("focused", true);
+      set_host_focus(focused);
+      if (focused) {
+        gtk_widget_grab_focus(GTK_WIDGET(view_));
+        auto display = gtk_widget_get_display(plug_);
+        gdk_x11_display_error_trap_push(display);
+        XSetInputFocus(gdk_x11_display_get_xdisplay(display), gdk_x11_window_get_xid(gtk_widget_get_window(plug_)), RevertToParent, CurrentTime);
+        gdk_x11_display_error_trap_pop_ignored(display);
+      }
     }
   }
   void start_drag(const Json& payload, std::function<void(Json)> reply) { drag_->start(payload, std::move(reply)); }
@@ -292,6 +467,7 @@ struct Process {
       std::to_string(webkit_get_major_version()) + "." + std::to_string(webkit_get_minor_version()) + "." + std::to_string(webkit_get_micro_version())}});
   }
   ~Process() { pages.clear(); g_object_unref(context); }
+  int fd() const { return channel.fd(); }
   void desktop(const Json& request) {
     const auto token = request.at("request").get<std::string>();
     auto respond = [&](Json response) { channel.send({{"op", "desktop-result"}, {"request", token}, {"response", response}}); };
@@ -424,12 +600,22 @@ int main(int argc, char** argv) {
   if (argc != 2 || !gtk_init_check(nullptr, nullptr) || !GDK_IS_X11_DISPLAY(gdk_display_get_default())) return 1;
   try {
     reaweb::Process process(argv[1]);
+    // Read host commands as soon as the socket becomes readable. The timer
+    // remains only as a retry path for non-blocking output and housekeeping.
+    auto input_source = g_unix_fd_add_full(G_PRIORITY_HIGH, process.fd(),
+      static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL),
+      +[](gint, GIOCondition, gpointer data) -> gboolean {
+        try { static_cast<reaweb::Process*>(data)->pump(); }
+        catch (...) { gtk_main_quit(); }
+        return G_SOURCE_CONTINUE;
+      }, &process, nullptr);
     auto timer = g_timeout_add(8, +[](gpointer data) -> gboolean {
       try { static_cast<reaweb::Process*>(data)->pump(); }
       catch (...) { gtk_main_quit(); }
       return G_SOURCE_CONTINUE;
     }, &process);
     gtk_main();
+    g_source_remove(input_source);
     g_source_remove(timer);
     return 0;
   } catch (...) { return 1; }

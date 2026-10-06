@@ -44,6 +44,12 @@ public:
   virtual void prepare_dock() {}
   virtual void prepare_undock() {}
   virtual void restore_floating() {}
+  virtual void show_after_create() {}
+  // True when docking reparents the native window into REAPER's Docker and hides
+  // it while that happens, which costs the window its visibility and its
+  // remembered Docker slot. The runtime restores both after the operation.
+  // Backends that leave the native window alone return false and are unaffected.
+  virtual bool dock_reparents_window() const { return false; }
   virtual void tick() {}
   virtual void focus() {}
   virtual void set_title(const std::string&) {}

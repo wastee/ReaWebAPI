@@ -179,6 +179,10 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     session->last_error = std::string("Window state was not restored: ") + e.what();
     log_(session->last_error);
   }
+  // A backend may create the native window hidden so Docker registration can
+  // happen before the first native show, and reveal it here. The default hook
+  // does nothing, so other backends keep their existing behavior.
+  session->window->show_after_create();
   return id;
 }
 
@@ -241,22 +245,38 @@ bool Runtime::set_docked(int id, bool docked) {
   if (!handle || !dock_.index || !dock_.add || !dock_.remove || !dock_.activate)
     throw Error("DOCK_UNAVAILABLE", "REAPER docking APIs are unavailable");
   if (docked == is_docked(id)) return docked;
+  const bool reparents = session.window->dock_reparents_window();
+  // Docking hides the native window while the Docker takes it over, so remember
+  // its visibility and restore it afterwards. Backends whose native window stays
+  // untouched keep their own handling.
+  const bool was_visible = reparents ? session.window->visible() : true;
   if (docked) {
     persist(session);
+    if (reparents) {
+      // Re-register the remembered dock id before the Docker takes the window,
+      // so it returns to the same slot instead of a freshly assigned one.
+      int saved_dock = -1;
+      if (session.pending_state.is_object()) saved_dock = session.pending_state.value("dockId", -1);
+      if (saved_dock < 0 && session.saved_state.is_object()) saved_dock = session.saved_state.value("dockId", -1);
+      if (dock_.remember && saved_dock >= 0) dock_.remember(session.ident, saved_dock);
+    }
     session.window->prepare_dock();
     dock_.add(handle, session.title, session.ident);
     if (!is_docked(id)) {
       session.window->restore_floating();
+      if (reparents && !was_visible) session.window->set_visible(false);
       session.icon_dirty = true; refresh_icon(session);
       throw Error("DOCK_FAILED", "REAPER did not accept the window into its Docker");
     }
     dock_.activate(handle);
+    if (reparents && was_visible) session.window->set_visible(true);
   } else {
     const auto index = dock_.index(handle);
     if (dock_.remember && index >= 0) dock_.remember(session.ident, index);
     session.window->prepare_undock();
     dock_.remove(handle);
     session.window->restore_floating();
+    if (reparents && !was_visible) session.window->set_visible(false);
   }
   session.icon_dirty = true; refresh_icon(session);
   return is_docked(id);
