@@ -34,12 +34,16 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
   if (message == WM_SETFOCUS && self->focus_) self->focus_();
   return FALSE;
 }
-SwellWindow::SwellWindow(const std::string& title, void* parent, std::function<void()> focus, std::function<void()> close)
+SwellWindow::SwellWindow(const std::string& title, void* parent, std::function<void()> focus, std::function<void()> close, bool hidden)
   : owner_(static_cast<HWND>(parent)), focus_(std::move(focus)), close_(std::move(close)) {
   window_ = CreateDialogParam(nullptr, MAKEINTRESOURCE(101), static_cast<HWND>(parent), procedure, reinterpret_cast<LPARAM>(this));
   if (!window_) throw std::runtime_error("Cannot create the REAPER WebView container");
   SetWindowText(window_, title.c_str());
-  ShowWindow(window_, SW_SHOW);
+  // A backend that has to finish Docker registration before the first native
+  // show asks for a hidden window and reveals it later through
+  // show_after_create(). Showing it here and hiding it again would steal the
+  // foreground for one round trip. Every other backend shows it here.
+  if (!hidden) ShowWindow(window_, SW_SHOW);
 }
 SwellWindow::~SwellWindow() {
   if (window_ && IsWindow(window_)) {

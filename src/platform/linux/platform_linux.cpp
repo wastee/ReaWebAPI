@@ -153,27 +153,75 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   bool maximized_ = false;
   LinuxIcon icon_;
   std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point last_resize_sync_{};
+  bool immediate_resize_enabled_ = false;
+  bool pending_origin_valid_ = false;
+  int pending_origin_x_ = 0, pending_origin_y_ = 0;
+  LONG_PTR saved_style_ = 0;
+  bool style_saved_ = false;
 public:
+  bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
     using State = unsigned (*)(void*);
     static auto state = reinterpret_cast<State>(dlsym(RTLD_DEFAULT, "gdk_window_get_state"));
     auto native = SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow");
     return state && native ? state(native) : 0;
   }
+  bool sync_resize() {
+    if (closed() || !immediate_resize_enabled_ || !geometry_.is_object()) return false;
+    auto handle = static_cast<HWND>(window_->handle());
+    RECT rect{};
+    GetClientRect(handle, &rect);
+    const int width = std::max(1, int(rect.right - rect.left));
+    const int height = std::max(1, int(rect.bottom - rect.top));
+    if (geometry_.value("width", 0) == width && geometry_.value("height", 0) == height) return false;
+    process_->send({{"id", id_}, {"op", "resize"}, {"width", width}, {"height", height}});
+    geometry_["width"] = width;
+    geometry_["height"] = height;
+    return true;
+  }
   LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id) {
+    auto on_close = std::move(options.on_close);
+    options.on_close = [this, on_close = std::move(on_close)]() mutable {
+      immediate_resize_enabled_ = false;
+      if (on_close) on_close();
+    };
     window_ = std::make_unique<SwellWindow>(options.title, options.parent, [this] {
       try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
-    }, options.on_close);
+    }, options.on_close, /*hidden=*/true);
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
       {"appName", options.app_name ? options.app_name() : options.title},
       {"resourceRoot", options.resources ? options.resources->root().u8string() : ""}});
     process_->listeners.emplace(id_, std::move(options));
     process_->backgrounds.emplace(id_, 0xffffff);
+    // A floating window must mirror the native resize without waiting for the
+    // next platform timer tick, so sync it here and let the timer cover the rest.
     window_->resize = [this] {
-      // Keep the helper parked until the next host tick finishes reparenting.
-      try { if (!geometry_.is_null()) sync(); }
-      catch (const std::exception& error) { process_->listeners.at(id_).on_error(error.what()); }
+      try {
+        // GDK writes the _NET_WM_SYNC_REQUEST acknowledgement counter back to the
+        // window manager only while it actually paints a frame
+        // (gdk_x11_window_end_frame in gdkwindow-x11.c). When the window shrinks,
+        // the new size already contains old content, so the X server sends no
+        // Expose, this process paints nothing, the window manager receives no
+        // acknowledgement, and it allows the next resize step only after its full
+        // 1 second timeout, which freezes the border. Request the repaint here.
+        //
+        // Only a floating window is a top-level window managed directly by the
+        // window manager, and only it is bound by the sync counter acknowledgement.
+        // While docked this window is a child of REAPER and the Docker schedules
+        // its repaints, so do not interfere there.
+        const auto handle = static_cast<HWND>(window_->handle());
+        if (!(GetWindowLong(handle, GWL_STYLE) & WS_CHILD)) InvalidateRect(handle, nullptr, FALSE);
+        if (closed() || !immediate_resize_enabled_) return;
+        if (native_state() & 2) { immediate_resize_enabled_ = false; return; }
+        const auto now = std::chrono::steady_clock::now();
+        if (last_resize_sync_.time_since_epoch().count() &&
+            now - last_resize_sync_ < std::chrono::milliseconds(8)) return;
+        if (sync_resize()) last_resize_sync_ = now;
+      } catch (const std::exception& error) {
+        process_->listeners.at(id_).on_error(error.what());
+      }
     };
     window_->context_menu = [this](LPARAM position) {
       auto keep_alive = shared_from_this();
@@ -193,10 +241,11 @@ public:
     };
   }
   ~LinuxWindow() override {
+    immediate_resize_enabled_ = false;
+    window_->resize = {};
     process_->listeners.erase(id_);
     process_->inspectors.erase(id_);
     process_->backgrounds.erase(id_);
-    window_->resize = {};
     try {
       // Detach before SWELL destroys the X11 parent, preserving other pages.
       process_->park(id_);
@@ -204,9 +253,13 @@ public:
     } catch (...) {}
   }
   void sync() {
-    if (closed()) return;
+    if (closed()) {
+      immediate_resize_enabled_ = false;
+      return;
+    }
     window_->set_background(process_->backgrounds.at(id_));
-    icon_.refresh(icon_target(), docked());
+    const bool is_docked = docked();
+    icon_.refresh(icon_target(is_docked), is_docked);
     using GetXid = unsigned long (*)(void*);
     static auto get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
     if (!get_xid) get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_drawable_get_xid"));
@@ -234,10 +287,59 @@ public:
     if (get_origin && get_origin(native, &native_x, &native_y)) { origin.x -= native_x; origin.y -= native_y; }
     else ScreenToClient(ancestor, &origin);
     const auto& options = process_->listeners.at(id_);
-    Json next = {{"id", id_}, {"op", "geometry"}, {"parent", get_xid(native)}, {"x", origin.x}, {"y", origin.y},
-      {"width", rect.right - rect.left}, {"height", std::max(1, int(rect.bottom - rect.top))}, {"visible", visible()}, {"focused", focused()},
-      {"docked", options.is_docked && options.is_docked()}, {"appName", options.app_name ? options.app_name() : options.title}};
-    if (geometry_ != next) { process_->send(next); geometry_ = std::move(next); }
+    const int raw_x = origin.x, raw_y = origin.y;
+    const int next_width = rect.right - rect.left;
+    const int next_height = std::max(1, int(rect.bottom - rect.top));
+    const bool next_visible = visible();
+    const bool next_focused = focused();
+    Json next = {{"id", id_}, {"op", "geometry"}, {"parent", get_xid(native)}, {"x", raw_x}, {"y", raw_y},
+      {"width", next_width}, {"height", next_height}, {"visible", next_visible}, {"focused", next_focused},
+      {"docked", is_docked}, {"appName", options.app_name ? options.app_name() : options.title}};
+    const bool has_geometry = geometry_.is_object();
+    const auto old_width = has_geometry ? geometry_.value("width", 0) : 0;
+    const auto old_height = has_geometry ? geometry_.value("height", 0) : 0;
+    const auto old_x = has_geometry ? geometry_.value("x", 0) : raw_x;
+    const auto old_y = has_geometry ? geometry_.value("y", 0) : raw_y;
+    const auto parent_id = next.at("parent").get<unsigned long>();
+    const auto next_focused_value = next.at("focused").get<bool>();
+    const auto next_docked = next.at("docked").get<bool>();
+    const auto next_app_name = next.at("appName").get<std::string>();
+    const bool non_origin_changed = !has_geometry ||
+      geometry_.value("parent", 0UL) != parent_id ||
+      old_width != next_width || old_height != next_height ||
+      geometry_.value("visible", false) != next_visible ||
+      geometry_.value("docked", false) != next_docked ||
+      geometry_.value("appName", std::string()) != next_app_name;
+    if (!has_geometry || non_origin_changed || (old_x == raw_x && old_y == raw_y)) {
+      pending_origin_valid_ = false;
+    } else if (pending_origin_valid_ && pending_origin_x_ == raw_x && pending_origin_y_ == raw_y) {
+      pending_origin_valid_ = false;
+    } else {
+      pending_origin_x_ = raw_x;
+      pending_origin_y_ = raw_y;
+      pending_origin_valid_ = true;
+      next["x"] = old_x;
+      next["y"] = old_y;
+    }
+    const auto next_x = next.at("x").get<int>();
+    const auto next_y = next.at("y").get<int>();
+    const bool layout_changed = !has_geometry ||
+      geometry_.value("parent", 0UL) != parent_id ||
+      geometry_.value("x", 0) != next_x || geometry_.value("y", 0) != next_y ||
+      geometry_.value("width", 0) != next_width || geometry_.value("height", 0) != next_height ||
+      geometry_.value("visible", false) != next_visible ||
+      geometry_.value("docked", false) != next_docked ||
+      geometry_.value("appName", std::string()) != next_app_name;
+    const bool focus_changed = !has_geometry ||
+      geometry_.value("focused", false) != next_focused_value;
+    if (layout_changed) {
+      process_->send(next);
+      geometry_ = next;
+    } else if (focus_changed) {
+      process_->send({{"id", id_}, {"op", "focus"}, {"focused", next_focused_value}});
+      geometry_["focused"] = next_focused_value;
+    }
+    immediate_resize_enabled_ = !next_docked && next_visible;
   }
   void evaluate(const std::string& script) override { process_->send({{"id", id_}, {"op", "eval"}, {"script", script}}); }
   void devtools() override { process_->send({{"id", id_}, {"op", "devtools"}}); }
@@ -255,20 +357,43 @@ public:
   bool closed() const override { return window_->closed() || !process_->error.empty(); }
   void* native_handle() const override { return window_->handle(); }
   void prepare_dock() override {
+    immediate_resize_enabled_ = false;
+    last_resize_sync_ = {};
     normal_ = placement(); maximized_ = (native_state() & 4) != 0;
     if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_RESTORE);
-    window_->prepare_dock(); prepare_undock();
+    window_->prepare_dock();
+    // REAPER's GTK Docker reparents this window, and SWELL's GDK backend only
+    // turns a reparented window into a child window when it already carries the
+    // child style. Hide it first so the style change cannot flash on screen.
+    const auto handle = static_cast<HWND>(window_->handle());
+    if (!style_saved_) {
+      saved_style_ = GetWindowLong(handle, GWL_STYLE);
+      style_saved_ = true;
+    }
+    ShowWindow(handle, SW_HIDE);
+    SetWindowLong(handle, GWL_STYLE, WS_CHILD);
+    prepare_undock();
   }
   void prepare_undock() override {
+    immediate_resize_enabled_ = false;
+    window_->set_visible(false);
     icon_.refresh(nullptr);
+    last_resize_sync_ = {};
     if (!geometry_.is_null()) {
       // Invalidate even on timeout so the next pump can reattach a late acknowledgement.
       geometry_ = Json();
+      pending_origin_valid_ = false;
       process_->park(id_);
     }
   }
   void restore_floating() override {
+    immediate_resize_enabled_ = false;
+    last_resize_sync_ = {};
     icon_.refresh(nullptr);
+    if (style_saved_) {
+      SetWindowLong(static_cast<HWND>(window_->handle()), GWL_STYLE, saved_style_);
+      style_saved_ = false;
+    }
     window_->restore_floating();
     if (!normal_.is_null()) restore_placement(normal_);
     if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
@@ -286,9 +411,9 @@ public:
     const auto& options = process_->listeners.at(id_);
     return options.is_docked && options.is_docked();
   }
-  void* icon_target() const override {
+  void* icon_target(bool is_docked) const {
     auto handle = static_cast<HWND>(window_->handle());
-    if (!docked()) return SWELL_GetOSWindow(handle, "GdkWindow");
+    if (!is_docked) return SWELL_GetOSWindow(handle, "GdkWindow");
     if (!window_->visible()) return nullptr;
     const auto main = process_->listeners.at(id_).parent;
     while (handle && handle != main) {
@@ -297,9 +422,17 @@ public:
     }
     return nullptr;
   }
+  void* icon_target() const override { return icon_target(docked()); }
   void clear_icon() override { icon_.clear(icon_target(), docked()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(icon_target(), visible, docked()); }
-  void set_visible(bool visible) override { window_->set_visible(visible); }
+  void set_visible(bool visible) override {
+    if (!visible) immediate_resize_enabled_ = false;
+    window_->set_visible(visible);
+  }
+  void show_after_create() override {
+    immediate_resize_enabled_ = false;
+    window_->set_visible(true);
+  }
   Json bounds() const override { return window_->placement(); }
   void reload() override { process_->send({{"id", id_}, {"op", "reload"}}); }
   void set_drop_enabled(bool enabled) override { process_->send({{"id", id_}, {"op", "drop-enabled"}, {"enabled", enabled}}); }

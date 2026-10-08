@@ -5,7 +5,8 @@
 namespace reaweb {
 class SwellWindow {
 public:
-  SwellWindow(const std::string& title, void* parent, std::function<void()> focus = {}, std::function<void()> close = {});
+  SwellWindow(const std::string& title, void* parent, std::function<void()> focus = {}, std::function<void()> close = {},
+    bool hidden = false);
   ~SwellWindow();
   void* handle() const { return window_; }
   bool closed() const;

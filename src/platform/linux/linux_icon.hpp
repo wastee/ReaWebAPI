@@ -93,6 +93,9 @@ public:
     if (shared && !dock_) return;
     if (!window) { applied_ = nullptr; return; }
     if (!initialized_ && visible_) return;
+    // The resize timer calls refresh(); do not query X11 decorations when the
+    // same icon state is already applied to the same native window.
+    if (window == applied_) return;
     if (get_decorations_ && set_decorations_) {
       constexpr unsigned all = 1, menu = 16;
       unsigned decorations = all;
@@ -100,7 +103,6 @@ public:
       const auto next = (visible_ == bool(decorations & all)) ? decorations & ~menu : decorations | menu;
       if (next != decorations) set_decorations_(window, next);
     }
-    if (window == applied_) return;
     if (!visible_ || images_.empty()) {
       if (!set_) throw Error("HOST_UNAVAILABLE", "REAPER's GTK backend does not expose window icons");
       set_(window, nullptr); applied_ = window; last_error.clear(); return;
