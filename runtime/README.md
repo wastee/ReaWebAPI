@@ -31,3 +31,5 @@ Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned proje
 [Native Stream Demo](../web/native-stream/README.md) · [Native Stream ABI and platform contracts](../docs/native-streams.md). The SDK includes `native/reaweb_stream.h`, `native/reaweb_tasks.h` and `native/stream_extension.cpp`.
 
 [Hidden startup / 隐藏启动示例](hidden-start/README.md)
+
+[Frameless Window](../web/frameless/README.md) provides resizable and fixed-size Lua launchers with native HTML drag regions. The packaged SDK includes this example in `frameless/`.

@@ -32,6 +32,8 @@ struct WindowOptions {
   std::shared_ptr<WebResources> resources;
   std::function<void()> on_present;
   bool hidden = false;
+  bool frameless = false;
+  bool resizable = true;
 };
 class Window {
 public:
@@ -65,6 +67,8 @@ public:
   virtual bool presentation_pending() const { return false; }
   virtual void cancel_pending_show() {}
   virtual bool focused() const { return false; }
+  virtual bool frameless_active() const { return false; }
+  virtual Json window_capabilities() const { return {{"hiddenStart", true}, {"frameless", false}, {"resizable", false}}; }
   virtual Json placement() const { return nullptr; }
   virtual void restore_placement(const Json&) {}
   virtual Json bounds() const { return placement(); }

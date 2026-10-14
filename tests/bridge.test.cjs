@@ -696,6 +696,7 @@ test('window.open preserves Promise window IDs and host errors without flat alia
   assert.equal(await answer(t, 'ReaWeb_Open', ['Other/index.html'], 7, t.window.reaper.window.open('Other/index.html')), 7);
   assert.equal(await answer(t, 'ReaWeb_OpenEx', ['Other/index.html', {hidden:true}], 8, t.window.reaper.window.open('Other/index.html', {hidden:true})), 8);
   assert.equal(await answer(t, 'ReaWeb_OpenEx', ['Other/index.html', {hidden:false}], 9, t.window.reaper.window.open('Other/index.html', {hidden:false})), 9);
+  assert.equal(await answer(t, 'ReaWeb_OpenEx', ['Other/index.html', {frameless:true,resizable:false}], 10, t.window.reaper.window.open('Other/index.html', {frameless:true,resizable:false})), 10);
   const rejected = assert.rejects(t.window.reaper.window.open('missing.html'), {code:'FILE_NOT_FOUND'});
   await flush();
   t.reply(t.messages.length - 1, {error:{code:'FILE_NOT_FOUND',message:'HTML file does not exist'}});

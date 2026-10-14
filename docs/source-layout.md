@@ -47,6 +47,7 @@ src/
 │  ├─ linux/linux_webkit.cpp
 │  ├─ linux/linux_channel.hpp
 │  ├─ linux/gtk_drag.hpp
+│  ├─ shared/drag_regions.hpp
 │  ├─ shared/startup.hpp
 │  └─ shared/swell_window.cpp / swell_window.hpp
 ├─ web/

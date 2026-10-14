@@ -164,3 +164,20 @@ Implementation: `src/web/web_resources.*` handles local resources; `src/runtime/
 Native behavior references: [WebView2 local content](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content), [WebKitGTK persistent cookies](https://webkitgtk.org/reference/webkit2gtk/2.42.5/method.CookieManager.set_persistent_storage.html). Native cookie persistence is explicitly enabled on Linux.
 
 Hidden startup loads the same resources and Runtime without showing the native window. Readiness remains a document handshake, independent of rendering or App data. See [hidden startup](host-api.md#hidden-startup) and the [preload example](../runtime/hidden-start/README.md).
+
+## Native drag regions
+
+For a window created with `{frameless:true}`, add `data-reaweb-drag` to a rectangular title region and `data-reaweb-no-drag` to custom interactive areas. Buttons, links, inputs, selects, textareas, editable/focusable elements and scrollable descendants are excluded automatically. Explicitly exclude custom controls, overlays and Shadow DOM hosts. Keep a visible close control calling `reaper.window.close()`.
+
+```html
+<header data-reaweb-drag>
+  <span>My App</span>
+  <button id="close">Close</button>
+  <div data-reaweb-no-drag>Custom controls</div>
+</header>
+<script>
+  document.querySelector('#close').onclick = () => reaper.window.close();
+</script>
+```
+
+Windows uses WebView2 native non-client regions. macOS and Linux cache clipped DOM rectangles before the press and consume the native mouse event directly. They do not start native movement from an asynchronous Runtime call. Keep title regions stable during interaction. Layout snapshots have a 32 ms sampling interval, with at most 512 rectangles in each drag/exclusion list. Oversized snapshots disable dragging. Arbitrary shapes and animated hit regions are outside this contract. Drag regions are inactive inside Docker containers. Right-click outside a drag region retains the existing page context-menu behavior. See the [Demo](../web/frameless/README.md).

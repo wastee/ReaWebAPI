@@ -223,3 +223,5 @@ const childId = await reaper.window.open("other/index.html");
 See [Native Streams](native-streams.md) for buffer layouts, limits and lifecycle.
 
 `window.open` accepts `{hidden?: boolean}` since v0.3.8.15, defaults to visible startup, and still returns `Promise<number>`. Check `capabilities.runtime.window?.hiddenStart`. Lua adds `ReaWeb_OpenEx(path, optionsJson)` and `ReaWeb_Show(windowId)`. See [Hidden startup](host-api.md#hidden-startup) / [隐藏启动](host-api.zh-CN.md#隐藏启动).
+
+v0.3.8.16 adds creation-only `{frameless?:boolean, resizable?:boolean}` to `window.open`. `getState()` / `windowstatechange` add `frameless`, `resizable`, `framelessActive`. Native drag regions use `data-reaweb-drag` / `data-reaweb-no-drag`. Public method counts are unchanged. See [Frameless windows](host-api.md#frameless-windows) / [无边框窗口](host-api.zh-CN.md#无边框窗口).

@@ -110,7 +110,7 @@ type ReaWebRuntimeNamespace = 'window' | 'theme' | 'dialog' | 'events' | 'lifecy
   | 'clipboard' | 'dragDrop' | 'app' | 'system' | 'transaction' | 'host' | 'stream';
 interface ReaWebRuntimeCapabilities {
   contract: 2; namespaces: ReaWebRuntimeNamespace[]; cleanupTimeoutMs: number;
-  window?: { hiddenStart: boolean };
+  window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11' };
   /** Reserved Runtime namespace identifiers. */
   reservedNamespaces: ReaWebRuntimeNamespace[];
   host: { maxMessageBytes: number; maxPendingMessages: number; maxQueuedBytes: number;
@@ -120,7 +120,7 @@ interface ReaWebRuntimeCapabilities {
   stream: { abi: 1; transport: 'websocket-binary'; maxStreams: number; maxConsumers: number; maxBytes: number; kinds: ReaWebStreamInfo['kind'][] };
 }
 interface ReaWebCapabilities { runtime: ReaWebRuntimeCapabilities; }
-interface ReaWebWindowOpenOptions { hidden?: boolean; }
+interface ReaWebWindowOpenOptions { hidden?: boolean; frameless?: boolean; resizable?: boolean; }
 interface ReaWebDevToolsState {
   mode: 'embedded' | 'floating';
   /** Embedded panel share of available width: 0.2–0.8, default 0.4. */

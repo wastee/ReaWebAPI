@@ -65,6 +65,9 @@ interface ReaWebWindowState {
   focused: boolean;
   keyboardCapture: boolean;
   iconVisible: boolean;
+  frameless: boolean;
+  resizable: boolean;
+  framelessActive: boolean;
 }
 interface ReaWebEvents {
   projectchange: { projectEpoch: number; changeCount: number };

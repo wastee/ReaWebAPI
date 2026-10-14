@@ -77,6 +77,7 @@ class LinuxIcon {
     set_data_(dock_, dock_owner, this); applied_ = nullptr;
   }
 public:
+  bool decorations = true;
   ~LinuxIcon() { release_dock(); }
   std::string last_error;
   void clear(void* window, bool shared = false) {
@@ -96,7 +97,7 @@ public:
     // The resize timer calls refresh(); do not query X11 decorations when the
     // same icon state is already applied to the same native window.
     if (window == applied_) return;
-    if (get_decorations_ && set_decorations_) {
+    if ((decorations || shared) && get_decorations_ && set_decorations_) {
       constexpr unsigned all = 1, menu = 16;
       unsigned decorations = all;
       get_decorations_(window, &decorations);

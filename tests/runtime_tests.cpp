@@ -64,6 +64,7 @@ struct FakeWindow : Window {
   }
   void devtools() override {}
   bool closed() const override { return is_closed; }
+  bool frameless_active() const override { return options.frameless && !(options.is_docked && options.is_docked()); }
   void* native_handle() const override { return const_cast<FakeWindow*>(this); }
   Json placement() const override { return bounds; }
   void restore_placement(const Json& value) override { bounds = value; }
@@ -179,6 +180,36 @@ int main() {
       CHECK(pending->presentation_cancelled && !pending->visible());
       until(runtime, [&] { return !runtime.is_open(closing); });
       CHECK(pending->reloads == 0);
+    }
+    windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
+    {
+      Runtime runtime(host, root / "FramelessProfile", [](const std::string&) {}, docks);
+      for (const auto* invalid : {R"({"frameless":1})", R"({"resizable":null})", R"({"frameless":"true"})"}) {
+        bool rejected = false;
+        try { runtime.open_ex(entry.u8string(), invalid); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
+        CHECK(rejected);
+      }
+      const auto id = runtime.open_ex(entry.u8string(), R"({"instanceKey":"frame","hidden":true,"frameless":true,"resizable":false})");
+      auto window = windows.back().lock();
+      CHECK(window->options.frameless && !window->options.resizable && !window->shown);
+      CHECK(runtime.open_ex("missing.html", R"({"instanceKey":"frame","hidden":true,"frameless":false,"resizable":true})") == id);
+      CHECK(window->options.frameless && !window->options.resizable && window->reloads == 0);
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      auto state = [&] { return result(runtime, *window, window->send("ReaWeb_GetWindowState"))["result"]; };
+      CHECK(state()["frameless"] == true && state()["resizable"] == false && state()["framelessActive"] == true);
+      runtime.set_docked(id, true);
+      CHECK(state()["framelessActive"] == false);
+      runtime.show(id); runtime.set_docked(id, false);
+      CHECK(state()["framelessActive"] == true && window->reloads == 0);
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetBounds", {{{"width", 432}}}))["result"]["width"] == 432);
+      const auto child = result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"frameless", true}, {"resizable", false}}}))["result"].get<int>();
+      CHECK(child != id && windows.back().lock()->options.frameless && !windows.back().lock()->options.resizable);
+      CHECK(result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"resizable", 0}}}))["error"]["code"] == "INVALID_ARGUMENT");
+      runtime.close(child); runtime.close(id);
+      until(runtime, [&] { return runtime.diagnostics(id).value("stage", "") == "closed"; });
+      const auto reopened = runtime.open_ex(entry.u8string(), R"({"instanceKey":"frame","hidden":true})");
+      CHECK(!windows.back().lock()->options.frameless && windows.back().lock()->options.resizable);
+      runtime.close(reopened);
     }
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {

@@ -388,7 +388,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
     add_api("ReaWeb_Close", reinterpret_cast<void*>(ReaWeb_Close), reinterpret_cast<void*>(id_vararg<ReaWeb_Close>),
       "bool\0int\0windowId\0Close a ReaWebAPI window.\0");
     add_api("ReaWeb_OpenEx", reinterpret_cast<void*>(ReaWeb_OpenEx), reinterpret_cast<void*>(open_ex_vararg),
-      "int\0const char*,const char*\0path,optionsJson\0Open local HTML with JSON options: instanceKey, id, multiple, hidden. Hidden applies only to new windows. Returns a window id, or 0 on failure.\0");
+      "int\0const char*,const char*\0path,optionsJson\0Open local HTML with JSON options: instanceKey, id, multiple, hidden, frameless, resizable. Creation options do not reconfigure reused windows. Returns a window id, or 0 on failure.\0");
     add_api("ReaWeb_Show", reinterpret_cast<void*>(ReaWeb_Show), reinterpret_cast<void*>(id_vararg<ReaWeb_Show>),
       "bool\0int\0windowId\0Show a ReaWebAPI window without forcing focus. Returns false for an invalid or closed id.\0");
     add_api("ReaWeb_IsOpen", reinterpret_cast<void*>(ReaWeb_IsOpen), reinterpret_cast<void*>(id_vararg<ReaWeb_IsOpen>),

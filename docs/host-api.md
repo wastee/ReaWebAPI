@@ -41,7 +41,7 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | `reaper.window.setDocked(docked)` | `boolean` | Returns the actual docked state, preserving the page |
 | `reaper.window.isDocked()` | `boolean` | Reads docked state |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | Default `true`. Setting `false` allows REAPER's normal global shortcut policy |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive` |
 
 Window placement and docking are persisted by entry file and instance slot. At most 32 ReaWebAPI windows can be open. Handles, subscriptions and pending requests remain document-local while browser storage is isolated by App ID.
 
@@ -249,7 +249,7 @@ loop()
 
 ### Hidden startup
 
-Since v0.3.8.15, `ReaWeb_OpenEx(path, optionsJson)` accepts a JSON object string with optional `instanceKey:string`, `id:string`, `multiple:boolean` and `hidden:boolean`. Defaults match `ReaWeb_Open`, with `hidden:false`. Unknown fields, wrong types, null, empty or invalid JSON fail with `0` and `ReaWeb_GetLastError()`. Omitted or empty identity strings retain the existing instance rules.
+Since v0.3.8.15, `ReaWeb_OpenEx(path, optionsJson)` accepts a JSON object string with optional `instanceKey:string`, `id:string`, `multiple:boolean`, `hidden:boolean`, `frameless:boolean` and `resizable:boolean`. Defaults match `ReaWeb_Open`, with `hidden:false`, `frameless:false` and `resizable:true`. The last two fields require v0.3.8.16. Unknown fields, wrong types, null, empty or invalid JSON fail with `0` and `ReaWeb_GetLastError()`. Omitted or empty identity strings retain the existing instance rules.
 
 ```lua
 assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
@@ -268,3 +268,22 @@ Hidden startup is not persisted. Reload retains the current visibility intent. A
 `ReaWeb_IsReady` means the document Runtime handshake completed, not that a frame was painted or business data is ready. Use an App-defined `ui-ready` message when needed. Hidden browsers can throttle timers and rendering, and Show does not guarantee a completed GPU frame.
 
 Native plugins discover `int (*)(const char*, const char*)` for `ReaWeb_OpenEx` and `bool (*)(int)` for `ReaWeb_Show` through `GetFunc`. The existing four-argument `ReaWeb_Open` ABI is unchanged. JavaScript checks `(await reaper.system.getCapabilities()).runtime.window?.hiddenStart` before passing `{hidden:true}`. On older versions, keep using ordinary Open or report that hidden startup is unavailable.
+
+### Frameless windows
+
+Since v0.3.8.16, Lua `ReaWeb_OpenEx` and JavaScript `window.open` accept `frameless?:boolean` (default `false`) and `resizable?:boolean` (default `true`). These are creation options. Reused instances retain their configuration and document. Reload and Dock/Undock retain both flags, which are not saved in WindowState. `resizable:false` disables interactive resizing, including maximize, while valid `setSize()` calls and Docker layout remain available. Existing native ABIs and native-unit outer bounds are unchanged.
+
+```lua
+local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","frameless":true,"resizable":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+```
+
+```javascript
+const id = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
+```
+
+`getState()` and `windowstatechange` include `frameless`, `resizable` and `framelessActive`. The first two are creation flags. The last identifies an independently hosted frameless window and is false in all Docker containers, including floating Dockers and pending saved Dock restoration. Dock/Undock retains the WebView document, handles and subscriptions. Native title and icon APIs keep their existing meaning.
+
+Use `data-reaweb-drag` and `data-reaweb-no-drag` for [native drag regions](frontend.md#native-drag-regions). No `beginDrag`, `beginResize`, `setFrameless` or `setResizable` method is added. The [runnable Demo](../web/frameless/README.md) includes resizable/fixed launchers and a lifecycle-aware close button.
+
+`capabilities.runtime.window` and diagnostics `windowFeatures` report `frameless`, `resizable`, `dragRegions` and `windowSystem` (`win32`, `appkit` or `x11`). Windows requires WebView2 non-client region support. Linux requires X11/XWayland with `_NET_WM_MOVERESIZE` support. Native Wayland is unsupported. Unsupported creation fails explicitly. Asynchronous WebView initialization failures follow the existing error and cleanup path. No fallback to a decorated visible window is performed.

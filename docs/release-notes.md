@@ -2,10 +2,10 @@
 
 ## English
 
-- Add native hidden startup through Lua `ReaWeb_OpenEx` and JavaScript `window.open(path, {hidden:true})` on Windows, macOS and Linux.
-- Add Lua `ReaWeb_Show` without forced focus. Preserve hidden startup across reloads and defer saved Docker attachment until Show or Focus.
+- Add optional frameless floating windows and creation-time `resizable` control through Lua `ReaWeb_OpenEx` and JavaScript `window.open`.
+- Add native HTML drag regions, window configuration/state reporting and resizable/fixed-size examples for Windows, macOS and Linux X11/XWayland.
 
 ## 简体中文
 
-- Windows、macOS 和 Linux 新增原生隐藏启动，支持 Lua `ReaWeb_OpenEx` 和 JavaScript `window.open(path, {hidden:true})`。
-- 新增不强制聚焦的 Lua `ReaWeb_Show`。重载保留隐藏意图，保存的 Docker 停靠状态延迟到 Show 或 Focus 时接入。
+- Lua `ReaWeb_OpenEx` 和 JavaScript `window.open` 新增可选无边框浮动窗口及创建时 `resizable` 配置。
+- 新增原生 HTML 拖动区、窗口配置与状态字段，以及 Windows、macOS 和 Linux X11/XWayland 的可缩放和固定尺寸示例。

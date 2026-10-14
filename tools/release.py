@@ -91,6 +91,8 @@ def descriptor(version, demo_directory=None):
             'native-service/reawebapi-native-service.lua',
             'native-service/Coexist.lua',
             'native-stream/reawebapi-native-stream.lua',
+            'frameless/Open.lua',
+            'frameless/Fixed.lua',
         ) else 'script nomain'
         url = f'https://raw.githubusercontent.com/zaibuyidao/ReaScripts/$commit/ReaWebAPI/web/{quote(name, safe="/")}'
         lines.append(f'  [{options}] web/{name} {url}')

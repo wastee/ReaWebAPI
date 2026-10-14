@@ -58,6 +58,7 @@ void SwellWindow::prepare_dock() { GetWindowRect(window_, &floating_); }
 void SwellWindow::restore_floating(bool show) {
   SetParent(window_, nullptr);
   SetWindowLong(window_, GWL_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner_));
+  if (configure_floating) configure_floating();
   SetWindowPos(window_, nullptr, floating_.left, floating_.top,
     floating_.right - floating_.left, floating_.bottom - floating_.top, SWP_NOZORDER | SWP_NOACTIVATE);
   if (show) {

@@ -13,18 +13,18 @@ int Runtime::open_ex(const std::string& path, const std::string& options) {
   for (const auto& field : value.items()) {
     const auto& key = field.key();
     if ((key == "instanceKey" || key == "id") ? !field.value().is_string() :
-        (key == "multiple" || key == "hidden") ? !field.value().is_boolean() : true)
+        (key == "multiple" || key == "hidden" || key == "frameless" || key == "resizable") ? !field.value().is_boolean() : true)
       throw Error("INVALID_ARGUMENT", "Unknown or invalid open option: " + key);
   }
   return open_instance(path, value.value("instanceKey", ""), value.value("id", ""),
-    value.value("multiple", false), value.value("hidden", false));
+    value.value("multiple", false), value.value("hidden", false), value.value("frameless", false), value.value("resizable", true));
 }
 
-int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple, bool hidden) {
+int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple, bool hidden, bool frameless, bool resizable) {
   check_thread();
   if (instance_key.find('\0') != std::string::npos || name.find('\0') != std::string::npos)
     throw Error("INVALID_ARGUMENT", "Instance key and window name must not contain NUL");
-  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key, hidden);
+  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key, hidden, frameless, resizable);
   const auto key = std::make_pair(instance_key, name);
   // The identity lives with the session, so destruction cannot leave a stale registry entry.
   for (const auto& item : sessions_) {
@@ -34,7 +34,7 @@ int Runtime::open_instance(const std::string& path, const std::string& instance_
       return session.id;
     }
   }
-  const auto id = open_impl(path, {}, "", instance_key, hidden);
+  const auto id = open_impl(path, {}, "", instance_key, hidden, frameless, resizable);
   sessions_.at(id)->instance = key;
   return id;
 }
@@ -43,7 +43,7 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
   return open_impl("", base, validate_dev_url(url));
 }
 
-int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden) {
+int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable) {
   check_thread();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
@@ -84,6 +84,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   auto session = std::make_shared<Session>();
   session->id = id;
   session->background_start = hidden;
+  session->frameless = frameless;
+  session->resizable = resizable;
   session->entry = entry;
   session->app = app;
   std::set<int> slots;
@@ -180,7 +182,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, app->resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }, hidden});
+    }, hidden, frameless, resizable});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);
@@ -365,7 +367,8 @@ void Runtime::refresh_icon(Session& s) {
 Json Runtime::window_state(const Session& s) const {
   return {{"id", s.id}, {"title", s.title}, {"docked", is_docked(s.id)},
     {"visible", s.window->visible()}, {"focused", s.window->focused()}, {"keyboardCapture", s.capture_keyboard},
-    {"iconVisible", s.icon_visible}};
+    {"iconVisible", s.icon_visible}, {"frameless", s.frameless}, {"resizable", s.resizable},
+    {"framelessActive", !is_docked(s.id) && s.window->frameless_active()}};
 }
 
 void Runtime::persist(Session& s, bool force) {

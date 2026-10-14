@@ -74,4 +74,20 @@ for _, path in ipairs(launchers) do
     assert(not windows[2] and next(ext) == nil, 'Backend termination must release ownership')
   end
 end
+for _, name in ipairs({'Open.lua', 'Fixed.lua'}) do
+  local called = false
+  reaper = {
+    APIExists = function(api) return api == 'ReaWeb_OpenEx' end,
+    ReaWeb_OpenEx = function(path, options)
+      assert(path:match('/frameless/index.html$'), path)
+      assert(options:find('"frameless":true', 1, true), options)
+      assert(options:find('"resizable":' .. tostring(name == 'Open.lua'), 1, true), options)
+      assert(options:find(name, 1, true) and options:find('"instanceKey":"@', 1, true), options)
+      called = true; return 1
+    end,
+    MB = function(message) error(message) end,
+  }
+  assert(loadfile(root .. '/web/frameless/' .. name))()
+  assert(called, name)
+end
 print('Lua launchers: singleton, focus, close, restart, backend cleanup and message encoding passed')

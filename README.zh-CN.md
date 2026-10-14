@@ -10,9 +10,10 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - Mirror-aware Batch Builder，支持 456 项已审核 API（含播放查询和时间换算）、延迟引用、多返回值解构和结果类型推导。
 - 支持 Lua 后端 + WebView UI，通过 `ReaWeb_Send`、`ReaWeb_Receive`、`reaper.host.send` 和 `message` 事件通信。
 - 可选 [External Client](docs/external-clients.zh-CN.md)，通过带认证的本机 WebSocket 复用 Native API、Batch、Service、Event 和二进制 Stream。服务默认关闭，可在 ReaWebAPI Preferences 中启用，默认地址为 `ws://127.0.0.1:9123`。
+- Windows、macOS 和 Linux X11/XWayland 支持可选的[无边框浮动窗口](docs/host-api.zh-CN.md#无边框窗口)、原生拖动区和创建时缩放配置。
 - 15 个 Runtime 命名空间，涵盖窗口、事件、文件、原生对话框、拖放、音频、Undo 和应用服务。
 - 稳定的 `reaweb://<appId>` 来源，原生加载本地资源、模块和 Worker，持久化 App 存储，不创建每 App TCP listener。
-- 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。Windows 取消停靠后的标题栏和边框保留系统样式。
+- 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。默认 Windows 窗口取消停靠后的标题栏和边框保留系统样式。
 - Windows 和 macOS 在页面首帧准备完成后显示新窗口，现有 App 无需修改启动代码。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。

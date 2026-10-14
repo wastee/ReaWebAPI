@@ -41,7 +41,7 @@
 | `reaper.window.setDocked(docked)` | `boolean` | 返回实际停靠状态，保留页面 |
 | `reaper.window.isDocked()` | `boolean` | 获取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | 默认 `true`，设为 `false` 后遵循 REAPER 的全局快捷键规则 |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive` |
 
 窗口位置和停靠状态按入口文件及实例序号保存，最多同时打开 32 个窗口。同一 App 目录的窗口共享浏览器存储，不同目录隔离；句柄、订阅及等待请求始终只属于本页。
 
@@ -249,7 +249,7 @@ loop()
 
 ### 隐藏启动
 
-v0.3.8.15 起，`ReaWeb_OpenEx(path, optionsJson)` 接收 JSON 对象字符串，可选字段仅为 `instanceKey:string`、`id:string`、`multiple:boolean` 和 `hidden:boolean`。默认值沿用 `ReaWeb_Open`，`hidden` 默认为 `false`。未知字段、类型错误、null、空字符串或无效 JSON 返回 `0`，通过 `ReaWeb_GetLastError()` 获取错误。缺省或空身份字符串沿用原有实例规则。
+v0.3.8.15 起，`ReaWeb_OpenEx(path, optionsJson)` 接收 JSON 对象字符串，可选字段为 `instanceKey:string`、`id:string`、`multiple:boolean`、`hidden:boolean`、`frameless:boolean` 和 `resizable:boolean`。默认值沿用 `ReaWeb_Open`，`hidden` 和 `frameless` 默认为 `false`，`resizable` 默认为 `true`。后两个字段要求 v0.3.8.16。未知字段、类型错误、null、空字符串或无效 JSON 返回 `0`，通过 `ReaWeb_GetLastError()` 获取错误。缺省或空身份字符串沿用原有实例规则。
 
 ```lua
 assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
@@ -268,3 +268,22 @@ assert(reaper.ReaWeb_Show(id), reaper.ReaWeb_GetLastError())
 `ReaWeb_IsReady` 仅表示文档 Runtime 握手完成，不代表首帧或业务数据已就绪。需要时使用 App 自定义的 `ui-ready` 消息。隐藏页面的定时器和渲染可能受浏览器节流，Show 不保证 GPU 已完成首帧合成。
 
 原生插件通过 `GetFunc` 获取 `ReaWeb_OpenEx` 的 `int (*)(const char*, const char*)` 和 `ReaWeb_Show` 的 `bool (*)(int)`。原有四参数 `ReaWeb_Open` ABI 不变。JavaScript 在传入 `{hidden:true}` 前检查 `(await reaper.system.getCapabilities()).runtime.window?.hiddenStart`。旧版本继续使用普通 Open，或明确报告不支持隐藏启动。
+
+### 无边框窗口
+
+v0.3.8.16 起，Lua `ReaWeb_OpenEx` 和 JavaScript `window.open` 接受 `frameless?:boolean`（默认 `false`）及 `resizable?:boolean`（默认 `true`）。两者仅在创建时生效。复用实例保留原配置和文档，Reload 与 Dock/Undock 保留配置，两个字段不写入 WindowState。`resizable:false` 禁止交互式缩放及最大化，合法的 `setSize()` 调用和 Docker 布局仍然可用。原生 ABI、外部尺寸及原生坐标单位不变。
+
+```lua
+local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","frameless":true,"resizable":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+```
+
+```javascript
+const id = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
+```
+
+`getState()` 和 `windowstatechange` 增加 `frameless`、`resizable` 与 `framelessActive`。前两个字段表示创建配置，最后一个字段仅在独立无边框宿主内为 `true`。所有 Docker、浮动 Docker 和待恢复的保存停靠状态均为 `false`。Dock/Undock 保留 WebView 文档、句柄和订阅，原生标题和图标 API 的含义不变。
+
+使用 `data-reaweb-drag` 与 `data-reaweb-no-drag` 声明[原生拖动区](frontend.zh-CN.md#原生拖动区)。不新增 `beginDrag`、`beginResize`、`setFrameless` 或 `setResizable`。[可运行示例](../web/frameless/README.md)提供可缩放与固定尺寸启动脚本，以及使用既有生命周期的关闭按钮。
+
+`capabilities.runtime.window` 和诊断中的 `windowFeatures` 报告 `frameless`、`resizable`、`dragRegions` 及 `windowSystem`（`win32`、`appkit` 或 `x11`）。Windows 要求 WebView2 非客户区支持，Linux 要求 X11/XWayland 和支持 `_NET_WM_MOVERESIZE` 的窗口管理器，不支持原生 Wayland。不支持的创建选项明确失败，异步 WebView 初始化失败沿用既有错误报告和清理流程，不退化为带装饰的可见窗口。

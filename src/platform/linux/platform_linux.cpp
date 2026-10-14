@@ -39,6 +39,7 @@ class LinuxProcess {
 public:
   std::string error;
   std::string version;
+  bool frameless_supported = false;
   std::map<int, WindowOptions> listeners;
   std::map<int, Json> inspectors;
   std::map<int, unsigned> backgrounds;
@@ -98,7 +99,8 @@ public:
         if (op == "ready") {
           if (message.value("protocol", 0) != 1 || message.value("version", "") != REAWEB_VERSION)
             throw std::runtime_error("WebKit helper version does not match the extension. Install both files from the same release");
-          version = message.value("browserVersion", ""); ready_ = true; return;
+          version = message.value("browserVersion", "");
+          frameless_supported = message.value("frameless", false); ready_ = true; return;
         }
         if (op == "parked") { parked_.insert(message.at("id").get<int>()); return; }
         auto it = listeners.find(message.at("id").get<int>());
@@ -143,6 +145,15 @@ public:
     }
     if (!parked_.erase(id)) throw Error("DOCK_BUSY", "WebKit is busy. Retry docking when the page is ready.");
   }
+  void require_frameless() {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (!ready_ && error.empty() && std::chrono::steady_clock::now() < deadline) {
+      pump();
+      if (!ready_) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!ready_ || !error.empty() || !frameless_supported)
+      throw Error("HOST_UNAVAILABLE", error.empty() ? "Frameless windows require an X11 window manager with _NET_WM_MOVERESIZE support" : error);
+  }
 };
 class LinuxWindow final : public Window, public std::enable_shared_from_this<LinuxWindow> {
   std::shared_ptr<LinuxProcess> process_;
@@ -160,6 +171,7 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   LONG_PTR saved_style_ = 0;
   bool style_saved_ = false;
   bool initial_hidden_ = false, cancelled_ = false, wants_visible_ = true;
+  bool frameless_ = false, resizable_ = true;
 public:
   bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
@@ -182,6 +194,8 @@ public:
     return true;
   }
   LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id), initial_hidden_(options.hidden), wants_visible_(!options.hidden) {
+    frameless_ = options.frameless; resizable_ = options.resizable;
+    icon_.decorations = !frameless_;
     auto on_close = std::move(options.on_close);
     options.on_close = [this, on_close = std::move(on_close)]() mutable {
       immediate_resize_enabled_ = false;
@@ -190,9 +204,17 @@ public:
     window_ = std::make_unique<SwellWindow>(options.title, options.parent, [this] {
       try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
     }, options.on_close, /*hidden=*/true);
+    if (frameless_ || !resizable_) {
+      const auto handle = static_cast<HWND>(window_->handle());
+      auto style = GetWindowLong(handle, GWL_STYLE);
+      if (frameless_) style = style & ~(WS_CAPTION | WS_BORDER);
+      if (!resizable_) style &= ~WS_THICKFRAME;
+      SetWindowLong(handle, GWL_STYLE, style);
+    }
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
       {"appName", options.app_name ? options.app_name() : options.title},
+      {"frameless", frameless_}, {"resizable", resizable_},
       {"resourceRoot", options.resources ? options.resources->root().u8string() : ""}});
     process_->listeners.emplace(id_, std::move(options));
     process_->backgrounds.emplace(id_, 0xffffff);
@@ -469,6 +491,13 @@ public:
   void start_drag(const Json& payload, Reply reply) override { process_->desktop("ReaWeb_Drag", payload, std::move(reply), id_); }
   bool visible() const override { return window_->visible() && !(native_state() & 2); }
   bool focused() const override { return window_->focused(); }
+  bool frameless_active() const override {
+    const auto handle = static_cast<HWND>(window_->handle());
+    return frameless_ && !closed() && !docked() && !(GetWindowLong(handle, GWL_STYLE) & (WS_CHILD | WS_CAPTION));
+  }
+  Json window_capabilities() const override {
+    return {{"hiddenStart", true}, {"frameless", process_->frameless_supported}, {"resizable", true}, {"dragRegions", process_->frameless_supported}, {"windowSystem", "x11"}};
+  }
   Json placement() const override {
     if (initial_hidden_ && !normal_.is_null()) return normal_;
     const bool maximized = (native_state() & 4) != 0;
@@ -488,7 +517,7 @@ public:
     auto it = process_->inspectors.find(id_);
     if (it != process_->inspectors.end()) inspector.update(it->second);
     inspector["embeddedSupported"] = true;
-    return {{"backend", "WebKitGTK"}, {"browserVersion", process_->version}, {"helperProtocol", 1}, {"devtools", inspector}, {"iconError", icon_.last_error}};
+    return {{"backend", "WebKitGTK"}, {"browserVersion", process_->version}, {"helperProtocol", 1}, {"devtools", inspector}, {"iconError", icon_.last_error}, {"windowFeatures", window_capabilities()}};
   }
 };
 class LinuxPlatform final : public Platform {
@@ -500,6 +529,7 @@ public:
   explicit LinuxPlatform(fs::path data) : data_(std::move(data)) {}
   std::shared_ptr<Window> open(WindowOptions options) override {
     if (!process_ || (!process_->error.empty() && process_->listeners.empty())) process_ = std::make_shared<LinuxProcess>(data_);
+    if (options.frameless) process_->require_frameless();
     auto window = std::make_shared<LinuxWindow>(process_, ++next_id_, std::move(options));
     windows_.push_back(window);
     return window;

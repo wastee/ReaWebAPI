@@ -164,3 +164,20 @@ WebView2 取决于已安装运行时，WKWebView 跟随系统更新，WebKitGTK 
 原生行为参考：[WebView2 本地内容](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content)、[WebKitGTK 持久化 cookie](https://webkitgtk.org/reference/webkit2gtk/2.42.5/method.CookieManager.set_persistent_storage.html)。Linux 已明确开启原生 cookie 持久化。
 
 隐藏启动沿用相同资源加载和 Runtime 通道，原生窗口保持不可见。就绪仍表示文档握手，与渲染和业务数据独立。参见[隐藏启动](host-api.zh-CN.md#隐藏启动)和[预加载示例](../runtime/hidden-start/README.md)。
+
+## 原生拖动区
+
+以 `{frameless:true}` 创建窗口后，在矩形标题区域添加 `data-reaweb-drag`，在自定义交互区域添加 `data-reaweb-no-drag`。按钮、链接、输入框、选择框、文本框、可编辑或可聚焦元素及可滚动后代自动排除。自定义控件、覆盖层及 Shadow DOM 宿主应显式排除。页面应保留调用 `reaper.window.close()` 的可见关闭控件。
+
+```html
+<header data-reaweb-drag>
+  <span>My App</span>
+  <button id="close">关闭</button>
+  <div data-reaweb-no-drag>自定义控件</div>
+</header>
+<script>
+  document.querySelector('#close').onclick = () => reaper.window.close();
+</script>
+```
+
+Windows 使用 WebView2 原生非客户区。macOS 和 Linux 在按下前缓存经过裁剪的 DOM 矩形，直接消费原生鼠标事件，不通过异步 Runtime 调用开始拖动。交互期间应保持标题区布局稳定。布局快照采样间隔为 32 ms，拖动矩形和排除矩形各最多 512 个，超限时停用拖动。任意形状和动画命中区域不在此合同内。Docker 内停用拖动区，拖动区外的右键操作保留既有页面菜单行为。参见[示例](../web/frameless/README.md)。

@@ -45,6 +45,8 @@ def payload(root, version, revision):
         paths[f'ReaWebAPI/SDK/runtime-demo/{name}'] = root / 'runtime/runtime-demo' / name
     for name in ('Open.lua', 'index.html', 'app.json', 'README.md'):
         paths[f'ReaWebAPI/SDK/hidden-start/{name}'] = root / 'runtime/hidden-start' / name
+    for name in ('Open.lua', 'Fixed.lua', 'launch.lua', 'index.html', 'app.js', 'style.css', 'app.json', 'README.md'):
+        paths[f'ReaWebAPI/SDK/frameless/{name}'] = root / 'web/frameless' / name
     for name in ('Open.lua', 'index.html', 'app.js', 'style.css', 'jsconfig.json', 'app.json'):
         paths[f'ReaWebAPI/SDK/starter/{name}'] = root / 'runtime/starter' / name
     for name in ('Open.lua', 'index.html', 'app.js', 'ui.js', 'style.css', 'README.md', 'README.zh-CN.md', 'app.json',
@@ -77,6 +79,7 @@ def payload(root, version, revision):
                 text = text.replace(f'](../src/public/{header})', f'](../SDK/native/{header})')
             text = text.replace('](../web/native-stream/', '](../SDK/native-stream/').replace('](web/native-stream/', '](SDK/native-stream/')
             text = text.replace('](../web/external-client/', '](../SDK/external-client/').replace('](web/external-client/', '](SDK/external-client/')
+            text = text.replace('](../web/frameless/', '](../SDK/frameless/').replace('](web/frameless/', '](SDK/frameless/')
             text = text.replace('](../tests/native_stream_extension.cpp)', '](../SDK/native/stream_extension.cpp)')
             text = text.replace('](../tests/native_service_extension.cpp)', '](../SDK/native/test_extension.cpp)')
             if name == 'ReaWebAPI/docs/release-notes.md':

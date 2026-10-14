@@ -86,6 +86,10 @@ async function runtimeContract(track: MediaTrackHandle, take: MediaItem_TakeHand
   await reaper.window.setIcon(new Uint8Array());
   const windowId: number = await reaper.window.open('other/index.html');
   const hiddenId: number = await reaper.window.open('other/index.html', {hidden:true});
+  const framelessId: number = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
+  const frameState: boolean = (await reaper.window.getState()).framelessActive;
+  // @ts-expect-error Creation flags require booleans.
+  reaper.window.open('other/index.html', {resizable:1});
   // @ts-expect-error Hidden startup requires a boolean.
   reaper.window.open('other/index.html', {hidden:1});
   // @ts-expect-error JS child windows do not accept Lua instance keys.

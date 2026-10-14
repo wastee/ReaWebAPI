@@ -21,7 +21,7 @@ public:
   Runtime(Host host, fs::path resource, std::function<void(const std::string&)> log, DockApi dock = {});
   ~Runtime();
   int open(const std::string& path, const fs::path& base = {});
-  int open_instance(const std::string& path, const std::string& instance_key, const std::string& name = {}, bool multiple = false, bool hidden = false);
+  int open_instance(const std::string& path, const std::string& instance_key, const std::string& name = {}, bool multiple = false, bool hidden = false, bool frameless = false, bool resizable = true);
   int open_ex(const std::string& path, const std::string& options);
   int open_dev(const std::string& url, const fs::path& base = {});
   bool is_open(int id) const;
@@ -96,6 +96,7 @@ private:
     bool ready = false, capture_keyboard = true;
     bool closing = false;
     bool background_start = false, pending_dock = false;
+    bool frameless = false, resizable = true;
     std::optional<bool> native_dock_request;
     std::shared_ptr<const IconSource> icon_source;
     std::vector<IconBitmap> icon_bitmaps;
@@ -168,7 +169,7 @@ private:
   void enqueue_message(Session& session, const std::string& message, bool to_web);
   void clear_messages(Session& session);
   void flush_messages(Session& session, Clock::time_point deadline);
-  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source = {}, bool hidden = false);
+  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source = {}, bool hidden = false, bool frameless = false, bool resizable = true);
   void attach_pending_dock(Session& session);
   bool start_async(Session& session, const Work& request);
   void refresh_icon(Session& session);

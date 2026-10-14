@@ -107,6 +107,9 @@ void tick() {
       if (variant == 3) {
         std::string url; std::ifstream(resource / "startup-test.url") >> url;
         id = reinterpret_cast<int(*)(const char*)>(host->GetFunc("ReaWeb_OpenDev"))(url.c_str());
+      } else if (variant == 5) {
+        id = reinterpret_cast<int(*)(const char*, const char*)>(host->GetFunc("ReaWeb_OpenEx"))(
+          (resource / "Scripts/startup-test/index.html").c_str(), "{\"instanceKey\":\"startup-test.lua\",\"frameless\":true}");
       } else {
         id = reinterpret_cast<int(*)(const char*, const char*, const char*, const bool*)>(host->GetFunc("ReaWeb_Open"))(
           (resource / "Scripts/startup-test/index.html").c_str(), "startup-test.lua", nullptr, nullptr);

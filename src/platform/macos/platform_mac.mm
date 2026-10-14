@@ -2,6 +2,7 @@
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
 #include "platform/shared/startup.hpp"
+#include "platform/shared/drag_regions.hpp"
 #include "platform/shared/window_menu.hpp"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -175,6 +176,26 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   std::unique_ptr<SwellWindow> window_;
   ReaWebNativeView* webview_;
   id mouse_monitor_;
+  DragRegions drag_regions_;
+  NSWindow* floating_window() const {
+    if (!window_) return nil;
+    auto content = (__bridge NSView*)GetDlgItem(static_cast<HWND>(window_->handle()), 0);
+    return content.window.contentView == content ? content.window : nil;
+  }
+  void configure_floating() {
+    const auto& options = delegate_->options;
+    if (!options.frameless && options.resizable) return;
+    auto native = floating_window();
+    if (!native) throw Error("WINDOW_STYLE_FAILED", "The standalone AppKit host is unavailable");
+    const auto frame = native.frame;
+    auto style = native.styleMask;
+    if (options.frameless) style &= ~(NSWindowStyleMaskTitled | NSWindowStyleMaskFullSizeContentView);
+    if (options.resizable) style |= NSWindowStyleMaskResizable;
+    else style &= ~NSWindowStyleMaskResizable;
+    native.styleMask = style;
+    [native setFrame:frame display:NO];
+    if (native.styleMask != style) throw Error("WINDOW_STYLE_FAILED", "AppKit could not apply the requested window style");
+  }
   std::unique_ptr<MacDevTools> devtools_;
   ReaWebDelegate* delegate_;
   mutable Json normal_;
@@ -268,7 +289,8 @@ public:
     }
     [config.userContentController addScriptMessageHandler:delegate_ name:@"reaweb"];
     auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script +
-      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);"))
+      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);") +
+      (delegate_->options.frameless ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : ""))
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
     webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
@@ -284,6 +306,22 @@ public:
       auto view = weak_view;
       if (view && event.window == view.window) {
         const auto point = [view convertPoint:event.locationInWindow fromView:nil];
+        if (event.type == NSEventTypeLeftMouseDown && frameless_active() &&
+            NSPointInRect(point, view.bounds) && NSPointInRect(point, view.visibleRect)) {
+          const double zoom = view.pageZoom;
+          const double x = (point.x - view.bounds.origin.x) / zoom;
+          const double y = (view.flipped ? point.y - view.bounds.origin.y : NSMaxY(view.bounds) - point.y) / zoom;
+          const auto frame = view.window.frame;
+          const auto screen = [view.window convertPointToScreen:event.locationInWindow];
+          const bool resize_edge = delegate_->options.resizable && !view.window.zoomed &&
+            (screen.x < NSMinX(frame)+6 || screen.x >= NSMaxX(frame)-6 || screen.y < NSMinY(frame)+6 || screen.y >= NSMaxY(frame)-6);
+          if (!resize_edge && drag_regions_.hit(x, y, view.bounds.size.width / zoom, view.bounds.size.height / zoom)) {
+            if (event.clickCount == 2) {
+              if (delegate_->options.resizable) [view.window zoom:nil];
+            } else [view.window performWindowDragWithEvent:event];
+            return nil;
+          }
+        }
         if (NSPointInRect(point, view.bounds)) view->lastDragEvent = event;
       }
       return event;
@@ -292,9 +330,10 @@ public:
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true);
-    delegate_->navigationStarted = [this] { startup_.navigate(); };
+    delegate_->navigationStarted = [this] { startup_.navigate(); drag_regions_.clear(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
       if (message == "__reawebPresent") { prepare_startup(); return; }
+      if (delegate_->options.frameless && drag_regions_.message(message)) return;
       if (!page_background_message(message, [this](unsigned color) {
         window_->set_background(color);
         auto background = [NSColor colorWithSRGBRed:((color >> 16) & 255) / 255.0
@@ -309,6 +348,14 @@ public:
     content.wantsLayer = YES;
     webview_.frame = content.bounds;
     [content addSubview:webview_];
+    window_->configure_floating = [this] { configure_floating(); };
+    try { configure_floating(); }
+    catch (...) {
+      [NSEvent removeMonitor:mouse_monitor_]; mouse_monitor_ = nil;
+      webview_.navigationDelegate = nil; webview_.UIDelegate = nil;
+      [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"reaweb"];
+      throw;
+    }
     devtools_ = std::make_unique<MacDevTools>(webview_, [this] { if (!closed()) focus(); });
     webview_->devtoolsMenu = [this](NSMenu* menu, NSInteger index) { return devtools_->insert_menu(menu, index); };
     window_->context_menu = [this](LPARAM position) {
@@ -487,7 +534,14 @@ public:
     if (maximized_ && window_->visible() && !webview_.window.zoomed) [webview_.window zoom:nil];
   }
   Json diagnostics() const override {
-    return {{"backend", "WKWebView"}, {"browserVersion", [[[NSBundle bundleForClass:[WKWebView class]] objectForInfoDictionaryKey:@"CFBundleVersion"] UTF8String] ?: "system"}, {"devtools", devtools_->diagnostics()}};
+    return {{"backend", "WKWebView"}, {"browserVersion", [[[NSBundle bundleForClass:[WKWebView class]] objectForInfoDictionaryKey:@"CFBundleVersion"] UTF8String] ?: "system"}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
+  }
+  bool frameless_active() const override {
+    auto native = floating_window();
+    return delegate_->options.frameless && native && !(native.styleMask & NSWindowStyleMaskTitled);
+  }
+  Json window_capabilities() const override {
+    return {{"hiddenStart", true}, {"frameless", true}, {"resizable", true}, {"dragRegions", true}, {"windowSystem", "appkit"}};
   }
 };
 class MacPlatform final : public Platform {

@@ -31,3 +31,5 @@
 [Native Stream 示例](../web/native-stream/README.md) · [Native Stream ABI 与平台契约](../docs/native-streams.zh-CN.md)。SDK 包含 `native/reaweb_stream.h`, `native/reaweb_tasks.h` 和 `native/stream_extension.cpp`。
 
 [Hidden startup / 隐藏启动示例](hidden-start/README.md)
+
+[无边框窗口示例](../web/frameless/README.md)提供可缩放和固定尺寸 Lua 启动脚本及原生 HTML 拖动区。SDK 安装包将此示例放在 `frameless/` 目录。

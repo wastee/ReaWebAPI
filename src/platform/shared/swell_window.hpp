@@ -21,6 +21,7 @@ public:
   void restore_placement(const Json& value);
   void set_background(unsigned color);
   std::function<void()> resize;
+  std::function<void()> configure_floating;
   std::function<void(LPARAM)> context_menu;
 private:
   HWND window_ = nullptr;

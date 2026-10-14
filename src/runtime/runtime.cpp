@@ -210,7 +210,8 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
     return s.capture_keyboard;
   }
   if (method == "ReaWeb_OpenDev") return open_dev(args[0].get<std::string>(), s.entry.parent_path());
-  if (method == "ReaWeb_OpenEx") return open_impl(args[0].get<std::string>(), s.entry.parent_path(), "", s.app->launcher_source, args[1].value("hidden", false));
+  if (method == "ReaWeb_OpenEx") return open_impl(args[0].get<std::string>(), s.entry.parent_path(), "", s.app->launcher_source,
+    args[1].value("hidden", false), args[1].value("frameless", false), args[1].value("resizable", true));
   if (method == "ReaWeb_BeginUndo" || method == "ReaWeb_EndUndo") return transaction_call(id, method, args);
   if (is_file_method(method) || method == "ReaWeb_SetIcon" || method == "ReaWeb_ClipboardReadText" ||
       method == "ReaWeb_ClipboardWriteText" || method == "ReaWeb_OpenExternal")
@@ -513,6 +514,7 @@ void Runtime::tick() {
         auto query = data; query["method"] = "ReaWeb_GetCapabilities"; query["args"] = Json::array();
         response = s->bridge->dispatch_request(query);
         response["result"]["webRuntime"] = web_runtime(*s);
+        response["result"]["runtime"]["window"] = s->window->window_capabilities();
         response["result"]["windowId"] = s->id;
         response["result"]["projectEpoch"] = project_epoch_;
       } else {
@@ -530,7 +532,10 @@ void Runtime::tick() {
         if (undo_owner_ && project_call) s->bridge->validate_managed_call(method, data.at("args"));
         if (start_async(*s, request)) { ++s->processed; continue; }
         response = s->bridge->dispatch_request(data);
-        if (method == "ReaWeb_GetCapabilities" && response.contains("result")) response["result"]["webRuntime"] = web_runtime(*s);
+        if (method == "ReaWeb_GetCapabilities" && response.contains("result")) {
+          response["result"]["webRuntime"] = web_runtime(*s);
+          response["result"]["runtime"]["window"] = s->window->window_capabilities();
+        }
       }
     } catch (const Error& e) { response = error_response(data, e.code, e.what(), e.details); }
     catch (const std::exception& e) { response = error_response(data, "INVALID_REQUEST", e.what()); }

@@ -1,12 +1,14 @@
 #include "platform/linux/linux_channel.hpp"
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
+#include "platform/shared/drag_regions.hpp"
 #include <gtk/gtk.h>
 #include <gtk/gtkx.h>
 #include <gdk/gdkx.h>
 #include <webkit2/webkit2.h>
 #include <glib-unix.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <cstring>
 #include <memory>
 #include "platform/linux/gtk_drag.hpp"
@@ -16,6 +18,9 @@
 
 namespace reaweb {
 namespace {
+bool window_moves_supported() {
+  return gdk_x11_screen_supports_net_wm_hint(gdk_screen_get_default(), gdk_atom_intern_static_string("_NET_WM_MOVERESIZE"));
+}
 void open_external(const std::string& url) {
   validate_external_url(url);
   GError* error = nullptr;
@@ -49,6 +54,8 @@ class Page {
   gint64 last_parent_configure_ = 0;
   bool filter_installed_ = false;
   GdkRGBA background_{1, 1, 1, 1};
+  DragRegions drag_regions_;
+  bool frameless_ = false, resizable_ = true, docked_ = false;
   // The host learns a new size from REAPER's message loop, so it can only tell
   // this process about a resize as often as that loop runs. While the user drags
   // an edge, the window manager resizes the parent far more often than that.
@@ -146,8 +153,65 @@ class Page {
     }
   }
 public:
+  bool frame_event(GdkEvent* event) {
+    if (!frameless_ || docked_ || failed_ || !parent_ || !visible_ || !mapped_ ||
+        (event->type != GDK_BUTTON_PRESS && event->type != GDK_2BUTTON_PRESS)) return false;
+    auto& button = event->button;
+    if (button.button != 1 || button.send_event) return false;
+    auto widget = gtk_get_event_widget(event);
+    if (!widget || (widget != plug_ && !gtk_widget_is_ancestor(widget, plug_))) return false;
+    auto device = gdk_event_get_device(event);
+    GdkModifierType state{};
+    if (!device) return false;
+    gdk_device_get_state(device, gtk_widget_get_window(plug_), nullptr, &state);
+    if (!(state & GDK_BUTTON1_MASK)) return false;
+    auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
+    const int scale = std::max(1, gtk_widget_get_scale_factor(plug_));
+    const int root_x = std::lround(button.x_root * scale), root_y = std::lround(button.y_root * scale);
+    int host_x = 0, host_y = 0; ::Window child = 0;
+    XTranslateCoordinates(display, parent_, DefaultRootWindow(display), 0, 0, &host_x, &host_y, &child);
+    XWindowAttributes attributes{};
+    if (!XGetWindowAttributes(display, parent_, &attributes)) return false;
+    const int x = root_x - host_x, y = root_y - host_y, edge = 6 * scale;
+    if (x < 0 || y < 0 || x >= attributes.width || y >= attributes.height) return false;
+    const bool left = x < edge, right = x >= attributes.width - edge;
+    const bool top = y < edge, bottom = y >= attributes.height - edge;
+    int direction = -1;
+    if (resizable_) direction = top ? (left ? 0 : right ? 2 : 1) : bottom ? (left ? 6 : right ? 4 : 5) : left ? 7 : right ? 3 : -1;
+    if (direction < 0 && (widget == GTK_WIDGET(view_) || gtk_widget_is_ancestor(widget, GTK_WIDGET(view_)))) {
+      int vx = 0, vy = 0;
+      gtk_widget_translate_coordinates(GTK_WIDGET(view_), plug_, 0, 0, &vx, &vy);
+      int px = 0, py = 0; gdk_window_get_origin(gtk_widget_get_window(plug_), &px, &py);
+      const double zoom = webkit_web_view_get_zoom_level(view_);
+      if (drag_regions_.hit((button.x_root - px - vx) / zoom, (button.y_root - py - vy) / zoom,
+          gtk_widget_get_allocated_width(GTK_WIDGET(view_)) / zoom, gtk_widget_get_allocated_height(GTK_WIDGET(view_)) / zoom)) direction = 8;
+    }
+    if (direction < 0) return false;
+    XEvent message{};
+    message.xclient.type = ClientMessage; message.xclient.display = display;
+    message.xclient.window = parent_; message.xclient.format = 32;
+    if (event->type == GDK_2BUTTON_PRESS) {
+      if (direction != 8 || !resizable_) return true;
+      message.xclient.message_type = XInternAtom(display, "_NET_WM_STATE", False);
+      message.xclient.data.l[0] = 2;
+      message.xclient.data.l[1] = XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+      message.xclient.data.l[2] = XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+      message.xclient.data.l[3] = 1;
+    } else {
+      message.xclient.message_type = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
+      message.xclient.data.l[0] = root_x; message.xclient.data.l[1] = root_y;
+      message.xclient.data.l[2] = direction; message.xclient.data.l[3] = 1; message.xclient.data.l[4] = 1;
+      gdk_device_ungrab(device, button.time);
+      XUngrabPointer(display, button.time);
+    }
+    XSendEvent(display, DefaultRootWindow(display), False, SubstructureRedirectMask | SubstructureNotifyMask, &message);
+    XFlush(display);
+    return true;
+  }
   Page(LinuxChannel& channel, WebKitWebContext* context, const Json& request)
     : channel_(channel), id_(request.at("id").get<int>()), uri_(request.at("uri").get<std::string>()) {
+    frameless_ = request.value("frameless", false); resizable_ = request.value("resizable", true);
+    if (frameless_ && !window_moves_supported()) throw Error("HOST_UNAVAILABLE", "Frameless windows require an X11 window manager with _NET_WM_MOVERESIZE support");
     intercept_reload_ = request.value("lifecycleReload", false);
     navigation_uri_ = uri_;
     manager_ = webkit_user_content_manager_new();
@@ -160,6 +224,7 @@ public:
       auto message = jsc_value_to_string(value);
       try {
         if (strlen(message) > message_limit) self->fail("JavaScript message limit exceeded");
+        else if (self->frameless_ && self->drag_regions_.message(message)) {}
         else if (!page_background_message(message, [self](unsigned color) { self->set_background(color); }))
           self->channel_.send({{"id", self->id_}, {"op", "message"}, {"message", message}});
       } catch (const std::exception& error) { self->fail(error.what()); }
@@ -170,7 +235,8 @@ public:
       throw std::runtime_error("Could not register WebKitGTK bridge");
     }
     const auto source = request.at("script").get<std::string>() +
-      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);");
+      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);") +
+      (frameless_ ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : "");
     auto script = webkit_user_script_new(source.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(manager_, script);
@@ -236,6 +302,7 @@ public:
       if (event == WEBKIT_LOAD_STARTED) {
         auto self = static_cast<Page*>(data);
         self->loaded_ = true;
+        self->drag_regions_.clear();
         try { self->channel_.send({{"id", self->id_}, {"op", "navigating"}}); }
         catch (const std::exception& error) { self->fail(error.what()); }
       }
@@ -355,6 +422,7 @@ public:
       devtools_->owner(0);
       channel_.send({{"id", id_}, {"op", "parked"}});
     } else if (op == "geometry") {
+      docked_ = request.value("docked", false);
       if (dock_menu_) {
         dock_menu_->set_docked(request.value("docked", false));
         dock_menu_->set_app_name(request.value("appName", std::string()));
@@ -464,7 +532,7 @@ struct Process {
     context = webkit_web_context_new_with_website_data_manager(manager);
     register_app_resources(context);
     g_object_unref(manager);
-    channel.send({{"op", "ready"}, {"protocol", 1}, {"version", REAWEB_VERSION}, {"browserVersion",
+    channel.send({{"op", "ready"}, {"protocol", 1}, {"version", REAWEB_VERSION}, {"frameless", window_moves_supported()}, {"browserVersion",
       std::to_string(webkit_get_major_version()) + "." + std::to_string(webkit_get_minor_version()) + "." + std::to_string(webkit_get_micro_version())}});
   }
   ~Process() { pages.clear(); g_object_unref(context); }
@@ -601,6 +669,11 @@ int main(int argc, char** argv) {
   if (argc != 2 || !gtk_init_check(nullptr, nullptr) || !GDK_IS_X11_DISPLAY(gdk_display_get_default())) return 1;
   try {
     reaweb::Process process(argv[1]);
+    gdk_event_handler_set(+[](GdkEvent* event, gpointer data) {
+      auto self = static_cast<reaweb::Process*>(data);
+      for (const auto& page : self->pages) if (page.second->frame_event(event)) return;
+      gtk_main_do_event(event);
+    }, &process, nullptr);
     // Read host commands as soon as the socket becomes readable. The timer
     // remains only as a retry path for non-blocking output and housekeeping.
     auto input_source = g_unix_fd_add_full(G_PRIORITY_HIGH, process.fd(),
@@ -616,6 +689,7 @@ int main(int argc, char** argv) {
       return G_SOURCE_CONTINUE;
     }, &process);
     gtk_main();
+    gdk_event_handler_set(+[](GdkEvent* event, gpointer) { gtk_main_do_event(event); }, nullptr, nullptr);
     g_source_remove(input_source);
     g_source_remove(timer);
     return 0;
