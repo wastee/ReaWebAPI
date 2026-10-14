@@ -2,8 +2,8 @@
 
 ## English
 
-- Fix initial blank-window flashes on Windows and macOS, preserving page backgrounds and explicit hide/close requests during startup.
+- Fix incorrect title-bar and border rendering on Windows when undocking a window opened in a saved docked state.
 
 ## 简体中文
 
-- 修复 Windows 和 macOS 新窗口启动时的空白闪烁，保留页面背景及初始化期间的显式隐藏、关闭请求。
+- 修复 Windows 窗口以保存的停靠状态打开后，取消停靠时标题栏和边框显示异常的问题。

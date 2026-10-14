@@ -7,6 +7,17 @@
 using namespace reaweb;
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
 
+static void check_floating_frame(HWND hwnd) {
+  CHECK(!(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD));
+  CHECK((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW) == WS_OVERLAPPEDWINDOW);
+  BOOL rendered = FALSE;
+  CHECK(SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_NCRENDERING_ENABLED, &rendered, sizeof(rendered))));
+  CHECK(rendered);
+  auto region = CreateRectRgn(0, 0, 0, 0);
+  const auto type = GetWindowRgn(hwnd, region); DeleteObject(region);
+  CHECK(type == ERROR);
+}
+
 int main(int argc, char** argv) {
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   try {
@@ -28,7 +39,8 @@ int main(int argc, char** argv) {
     struct Destroy { HWND hwnd; ~Destroy() { DestroyWindow(hwnd); } } destroy{host};
     ShowWindow(host, SW_SHOW); SetForegroundWindow(host);
     const int count = argc > 1 ? std::stoi(argv[1]) : 20;
-    const bool docked = argc > 2 && std::string(argv[2]) == "--dock";
+    const bool undock_pending = argc > 2 && std::string(argv[2]) == "--undock-pending";
+    const bool initially_docked = undock_pending || (argc > 2 && std::string(argv[2]) == "--dock");
     int captures = 0;
     for (int variant = 0; variant < 4; ++variant) for (int run = 0; run < count; ++run) {
       const auto path = root / (std::to_string(variant) + "-" + std::to_string(run)); fs::create_directories(path);
@@ -45,13 +57,25 @@ int main(int argc, char** argv) {
       options.on_error = [&](std::string message) { std::cerr << message << '\n'; error = std::move(message); };
       auto window = platform->open(std::move(options));
       const auto hwnd = static_cast<HWND>(window->native_handle());
-      if (docked) { window->prepare_dock(); SetWindowLongPtrW(hwnd, GWL_STYLE, WS_CHILD | WS_VISIBLE); SetParent(hwnd, host); }
+      bool docked = initially_docked;
+      const auto dock = [&] {
+        window->prepare_dock();
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_CHILD | WS_VISIBLE); SetParent(hwnd, host);
+      };
+      if (docked) dock();
       SetWindowPos(hwnd, HWND_TOPMOST, 100, 100, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
       CHECK(!window->visible()); window->show_after_create(); CHECK(!window->visible());
       DWORD cloaked = 0;
       if (!docked) CHECK(SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked);
       else {
         auto region = CreateRectRgn(0,0,0,0); const auto type = GetWindowRgn(hwnd,region); DeleteObject(region);
+        CHECK(type == NULLREGION);
+      }
+      if (undock_pending) {
+        window->restore_floating(); docked = false;
+        CHECK(window->presentation_pending()); CHECK(!window->visible());
+        auto region = CreateRectRgn(0, 0, 0, 0);
+        const auto type = GetWindowRgn(hwnd, region); DeleteObject(region);
         CHECK(type == NULLREGION);
       }
       const auto started = std::chrono::steady_clock::now();
@@ -88,8 +112,15 @@ int main(int argc, char** argv) {
         Sleep(1);
       }
       CHECK(error.empty());
+      if (docked) window->restore_floating();
+      check_floating_frame(hwnd);
+      for (int cycle = 0; cycle < 3; ++cycle) {
+        dock(); window->tick();
+        window->restore_floating(); window->tick();
+        check_floating_frame(hwnd);
+      }
       std::cout << "variant=" << variant << " run=" << run << " samples=" << samples << '\n';
     }
-    std::cout << "PASS: native first-visible frames, cold profiles=" << count*4 << " captures=" << captures << '\n';
+    std::cout << "PASS: native first-visible frames and dock/float frame restoration, cold profiles=" << count*4 << " captures=" << captures << '\n';
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

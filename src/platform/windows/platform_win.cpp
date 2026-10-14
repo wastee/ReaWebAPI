@@ -648,6 +648,9 @@ public:
     SetParent(hwnd_, nullptr);
     SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN);
     SetWindowLongPtrW(hwnd_, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(options_.parent));
+    // Clearing the startup region while docked leaves DWM non-client rendering disabled.
+    // Refresh it as a top-level window, unless the first frame still needs the empty region.
+    if (!startup_region_) SetWindowRgn(hwnd_, nullptr, FALSE);
     icon_.refresh(hwnd_);
     restore_placement({{"x", floating_rect_.left}, {"y", floating_rect_.top},
       {"width", floating_rect_.right - floating_rect_.left}, {"height", floating_rect_.bottom - floating_rect_.top}, {"maximized", maximized_}});
