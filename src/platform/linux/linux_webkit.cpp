@@ -7,7 +7,6 @@
 #include <webkit2/webkit2.h>
 #include <glib-unix.h>
 #include <X11/Xlib.h>
-#include <cairo-xlib.h>
 #include <cstring>
 #include <memory>
 #include "platform/linux/gtk_drag.hpp"
@@ -50,65 +49,6 @@ class Page {
   gint64 last_parent_configure_ = 0;
   bool filter_installed_ = false;
   GdkRGBA background_{1, 1, 1, 1};
-  unsigned startup_generation_ = 0;
-  bool startup_prepared_ = false, startup_attached_ = false;
-  cairo_surface_t* startup_frame_ = nullptr;
-  bool startup_clear_ = false;
-  void prime_startup(GtkWidget* widget) {
-    auto window = gtk_widget_get_window(widget);
-    if (!window || !startup_frame_) return;
-    auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(widget));
-    const auto xid = gdk_x11_window_get_xid(window);
-    XWindowAttributes attributes{};
-    if (!XGetWindowAttributes(display, xid, &attributes)) return;
-    auto pixmap = XCreatePixmap(display, xid, attributes.width, attributes.height, attributes.depth);
-    auto surface = cairo_xlib_surface_create(display, pixmap, attributes.visual, attributes.width, attributes.height);
-    auto dc = cairo_create(surface);
-    cairo_scale(dc, double(attributes.width) / cairo_image_surface_get_width(startup_frame_),
-      double(attributes.height) / cairo_image_surface_get_height(startup_frame_));
-    cairo_set_source_surface(dc, startup_frame_, 0, 0); cairo_paint(dc);
-    cairo_destroy(dc); cairo_surface_destroy(surface);
-    XSetWindowBackgroundPixmap(display, xid, pixmap); XClearWindow(display, xid); XFreePixmap(display, pixmap);
-  }
-  std::shared_ptr<Page*> lifetime_ = std::make_shared<Page*>(this);
-  void prepare_startup() {
-    if (startup_prepared_ || failed_) return;
-    using Request = std::pair<std::weak_ptr<Page*>, unsigned>;
-    webkit_web_view_get_snapshot(view_, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE, nullptr,
-      +[](GObject* object, GAsyncResult* result, gpointer data) {
-        std::unique_ptr<Request> request(static_cast<Request*>(data));
-        GError* error = nullptr;
-        auto surface = webkit_web_view_get_snapshot_finish(WEBKIT_WEB_VIEW(object), result, &error);
-        if (auto alive = request->first.lock(); alive && surface && !error) {
-          auto self = *alive;
-          if (!self->failed_ && request->second == self->startup_generation_) {
-            self->startup_prepared_ = true;
-            try {
-              const int source_width = cairo_image_surface_get_width(surface), source_height = cairo_image_surface_get_height(surface);
-              if (source_width < 1 || source_height < 1)
-                throw std::runtime_error("Invalid initial WebKit frame size");
-              const double scale = std::min(1.0, 1024.0 / std::max(source_width, source_height));
-              const int width = std::max(1, int(source_width * scale)), height = std::max(1, int(source_height * scale));
-              std::unique_ptr<cairo_surface_t, decltype(&cairo_surface_destroy)> frame(
-                cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height), cairo_surface_destroy);
-              auto dc = cairo_create(frame.get());
-              cairo_set_source_rgb(dc, 1, 1, 1); cairo_paint(dc);
-              cairo_scale(dc, scale, scale);
-              cairo_set_source_surface(dc, surface, 0, 0); cairo_paint(dc);
-              cairo_destroy(dc); cairo_surface_flush(frame.get());
-              if (cairo_surface_status(frame.get()) != CAIRO_STATUS_SUCCESS) throw std::runtime_error("Cannot allocate the initial WebKit frame");
-              if (self->startup_frame_) cairo_surface_destroy(self->startup_frame_);
-              self->startup_frame_ = cairo_surface_reference(frame.get());
-              auto pixels = encode_binary(reinterpret_cast<const char*>(cairo_image_surface_get_data(frame.get())), size_t(width) * height * 4);
-              self->channel_.send({{"id", self->id_}, {"op", "present"}, {"width", width}, {"height", height}, {"pixels", std::move(pixels)}});
-            }
-            catch (const std::exception& failure) { self->fail(failure.what()); }
-          }
-        }
-        if (surface) cairo_surface_destroy(surface);
-        if (error) g_error_free(error);
-      }, new Request(lifetime_, startup_generation_));
-  }
   // The host learns a new size from REAPER's message loop, so it can only tell
   // this process about a resize as often as that loop runs. While the user drags
   // an edge, the window manager resizes the parent far more often than that.
@@ -220,7 +160,6 @@ public:
       auto message = jsc_value_to_string(value);
       try {
         if (strlen(message) > message_limit) self->fail("JavaScript message limit exceeded");
-        else if (std::strcmp(message, "__reawebPresent") == 0) self->prepare_startup();
         else if (!page_background_message(message, [self](unsigned color) { self->set_background(color); }))
           self->channel_.send({{"id", self->id_}, {"op", "message"}, {"message", message}});
       } catch (const std::exception& error) { self->fail(error.what()); }
@@ -296,8 +235,6 @@ public:
     g_signal_connect(view_, "load-changed", G_CALLBACK(+[](WebKitWebView*, WebKitLoadEvent event, gpointer data) {
       if (event == WEBKIT_LOAD_STARTED) {
         auto self = static_cast<Page*>(data);
-        ++self->startup_generation_;
-        if (!self->startup_attached_) self->startup_prepared_ = false;
         self->loaded_ = true;
         try { self->channel_.send({{"id", self->id_}, {"op", "navigating"}}); }
         catch (const std::exception& error) { self->fail(error.what()); }
@@ -315,31 +252,6 @@ public:
       cairo_paint(dc);
       return FALSE;
     }), this);
-    g_signal_connect(view_, "draw", G_CALLBACK(+[](GtkWidget* widget, cairo_t* dc, gpointer data) -> gboolean {
-      auto self = static_cast<Page*>(data);
-      if (!self->startup_frame_) return FALSE;
-      cairo_save(dc);
-      cairo_scale(dc, double(gtk_widget_get_allocated_width(widget)) / cairo_image_surface_get_width(self->startup_frame_),
-        double(gtk_widget_get_allocated_height(widget)) / cairo_image_surface_get_height(self->startup_frame_));
-      cairo_set_source_surface(dc, self->startup_frame_, 0, 0); cairo_paint(dc); cairo_restore(dc);
-      if (self->startup_clear_) {
-        self->startup_clear_ = false;
-        using Lifetime = std::weak_ptr<Page*>;
-        g_idle_add_full(G_PRIORITY_LOW, +[](gpointer data) -> gboolean {
-          if (auto alive = static_cast<Lifetime*>(data)->lock()) {
-            auto self = *alive;
-            if (self->startup_frame_) { cairo_surface_destroy(self->startup_frame_); self->startup_frame_ = nullptr; }
-            for (auto widget : {self->plug_, GTK_WIDGET(self->view_)})
-              if (auto window = gtk_widget_get_window(widget)) gdk_window_set_background_rgba(window, &self->background_);
-            gtk_widget_queue_draw(self->plug_);
-            gtk_widget_queue_draw(GTK_WIDGET(self->view_));
-            try { self->channel_.send({{"id", self->id_}, {"op", "presented"}}); } catch (...) {}
-          }
-          return G_SOURCE_REMOVE;
-        }, new Lifetime(self->lifetime_), +[](gpointer data) { delete static_cast<Lifetime*>(data); });
-      }
-      return TRUE;
-    }), this);
     // GtkPlug emits delete-event when parked on the X11 root. The native host owns closing.
     g_signal_connect(plug_, "delete-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer) -> gboolean { return TRUE; }), nullptr);
     devtools_ = std::make_unique<GtkDevTools>(view_, plug_, [this](Json state) {
@@ -352,9 +264,6 @@ public:
       [this] { return devtools_->menu_state(); });
     dock_menu_->set_app_name(request.value("appName", std::string()));
     gtk_widget_realize(plug_);
-    GtkAllocation initial{0, 0, 860, 640};
-    gtk_widget_show_all(gtk_bin_get_child(GTK_BIN(plug_)));
-    gtk_widget_size_allocate(plug_, &initial);
     // A global filter: events of the foreign parent window have no GdkWindow in
     // this process, so only GDK's display-wide filter list sees them.
     gdk_window_add_filter(nullptr, &Page::filterEvent, this);
@@ -394,8 +303,6 @@ public:
     XFlush(display);
   }
   ~Page() {
-    lifetime_.reset();
-    if (startup_frame_) { cairo_surface_destroy(startup_frame_); startup_frame_ = nullptr; }
     failed_ = true;
     watchParent(0, false);
     if (filter_installed_) { gdk_window_remove_filter(nullptr, &Page::filterEvent, this); filter_installed_ = false; }
@@ -512,10 +419,6 @@ public:
         }
       }
       const bool requested_visible = request.at("visible").get<bool>();
-      if (requested_visible && startup_frame_ && !startup_attached_) {
-        // X11 clears newly mapped windows before GTK receives its first draw.
-        prime_startup(plug_); prime_startup(GTK_WIDGET(view_));
-      }
       if (requested_visible) {
         if (!visible_) {
           gtk_widget_show_all(plug_);
@@ -533,34 +436,6 @@ public:
       geometry_initialized_ = true;
       XFlush(display);
       gdk_x11_display_error_trap_pop_ignored(gtk_widget_get_display(plug_));
-      if (requested_visible && startup_prepared_ && !startup_attached_) {
-        startup_attached_ = true;
-        using Lifetime = std::weak_ptr<Page*>;
-        g_timeout_add_full(G_PRIORITY_DEFAULT, 15000, +[](gpointer data) -> gboolean {
-          if (auto alive = static_cast<Lifetime*>(data)->lock()) {
-            auto self = *alive;
-            if (!self->failed_ && self->startup_frame_ && !self->startup_clear_)
-              self->fail("WebKitGTK did not finish presenting the initial frame within 15 seconds");
-          }
-          return G_SOURCE_REMOVE;
-        }, new Lifetime(lifetime_), +[](gpointer data) { delete static_cast<Lifetime*>(data); });
-        webkit_web_view_get_snapshot(view_, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE, nullptr,
-          +[](GObject* object, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<Lifetime> lifetime(static_cast<Lifetime*>(data));
-            GError* error = nullptr;
-            auto surface = webkit_web_view_get_snapshot_finish(WEBKIT_WEB_VIEW(object), result, &error);
-            if (auto alive = lifetime->lock()) {
-              auto self = *alive;
-              if (surface && !error) {
-                self->startup_clear_ = true;
-                gtk_widget_queue_draw(self->plug_);
-                gtk_widget_queue_draw(GTK_WIDGET(self->view_));
-              } else self->fail(error ? error->message : "Cannot capture the mapped WebKit frame");
-            }
-            if (surface) cairo_surface_destroy(surface);
-            if (error) g_error_free(error);
-          }, new Lifetime(lifetime_));
-      }
     } else if (op == "focus" && parent_) {
       const bool focused = request.value("focused", true);
       set_host_focus(focused);

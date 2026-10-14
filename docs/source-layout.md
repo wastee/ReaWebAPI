@@ -71,9 +71,9 @@ These are source responsibility groups, not five independent libraries. `reaweb_
 
 ## API boundaries / API 边界
 
-`shared/startup.hpp` owns first-presentation visibility intent and navigation generations. Windows keeps the HWND cloaked while WebView2 prepares a capture, using an empty window region when docking before the first frame. macOS waits for a WKWebView snapshot before ordering the window. Linux transfers a bounded page snapshot to SWELL and primes X11 backgrounds before GTK mapping, then releases it after the first draw. Document loading requests a native capture, independently of the Runtime handshake. These are internal hooks and add no public creation options.
+`shared/startup.hpp` owns first-presentation visibility intent and navigation generations on Windows and macOS. Windows keeps the HWND cloaked while WebView2 prepares a capture, using an empty window region when docking before the first frame. macOS waits for a WKWebView snapshot before ordering the window. On these platforms, document loading requests a native capture, independently of the Runtime handshake. Linux retains its v0.3.8.10 display, resize and docking paths without startup snapshots. These are internal hooks and add no public creation options.
 
-`shared/startup.hpp` 管理首次展示的可见意图和导航代次。Windows 在 WebView2 准备快照时通过 DWM 隐藏 HWND，首帧前进入 Docker 时改用空窗口区域。macOS 取得 WKWebView 快照后显示窗口。Linux 向 SWELL 传递有大小限制的页面快照，并在 GTK 映射前填充 X11 背景，首轮绘制后释放快照。文档加载完成触发原生快照，与 Runtime 握手独立。这些内部钩子不增加公开创建选项。
+`shared/startup.hpp` 管理 Windows 和 macOS 首次展示的可见意图和导航代次。Windows 在 WebView2 准备快照时通过 DWM 隐藏 HWND，首帧前进入 Docker 时改用空窗口区域。macOS 取得 WKWebView 快照后显示窗口。这两个平台在文档加载完成后触发原生快照，与 Runtime 握手独立。Linux 保留 v0.3.8.10 的显示、缩放和停靠流程，不使用启动快照。这些内部钩子不增加公开创建选项。
 
 External Clients add an optional localhost protocol inside the same extension. `ReaperApiCore` owns shared native calls, handles and Batch. `Runtime` schedules windows and External Sessions using the same service registry, monitor manager and stream hub. The External transport handles sockets and JSON only. See [External Clients](external-clients.md).
 

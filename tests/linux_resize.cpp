@@ -81,7 +81,6 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   resource = fs::u8path(reinterpret_cast<const char*(*)()>(host->GetFunc("GetResourcePath"))());
   if (!fs::exists(resource / "resize-test.enabled")) return 0;
   const auto page = resource / "Scripts/resize-test/index.html"; fs::create_directories(page.parent_path());
-  std::ofstream(page.parent_path() / "app.json") << R"({"id":"resize-acceptance"})";
   std::ofstream(page) << R"(<!doctype html><title>Resize acceptance</title>
 <style>html{background:#182838}body{margin:0;overflow:hidden}#state{display:none}
 #marker{position:fixed;left:8px;top:8px;width:24px;height:24px;background:#00ff00}</style>

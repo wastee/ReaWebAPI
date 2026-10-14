@@ -14,6 +14,7 @@
 !/docs/
 /docs/*
 !/docs/*.md
+/docs/VALIDATION.md
 !/web/
 !/api/
 /api/*

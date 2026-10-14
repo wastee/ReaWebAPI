@@ -22,7 +22,7 @@ JavaScript Runtime 使用下列 15 个命名空间。730 项标准 REAPER 镜像
 
 ## Window
 
-新窗口在原生首帧准备完成后自动显示。等待期间 `getState().visible` 为 false，与 `reaper.lifecycle.ready` 独立。此时调用 `hide()` 会阻止自动显示，直到调用 `show()` 或 `focus()`。关闭窗口会取消待显示状态，包括生命周期清理期间。最终可见状态变化通过现有 `windowstatechange` 事件报告。
+Windows 和 macOS 新窗口在原生首帧准备完成后自动显示。等待期间 `getState().visible` 为 false，与 `reaper.lifecycle.ready` 独立。此时调用 `hide()` 会阻止自动显示，直到调用 `show()` 或 `focus()`。关闭窗口会取消待显示状态，包括生命周期清理期间。最终可见状态变化通过现有 `windowstatechange` 事件报告。Linux 保留 v0.3.8.10 的窗口显示行为，不设首帧等待阶段。
 
 ```js
 await reaper.window.setSize(900, 700);

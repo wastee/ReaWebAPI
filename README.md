@@ -12,7 +12,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - 15 Runtime namespaces for windows, events, files, native dialogs, drag and drop, audio, Undo and application services.
 - Stable `reaweb://<appId>` origins with native local resources, modules, Workers and persistent App storage, without per-App TCP listeners.
 - Docked and floating WebViews retain browser content during resizing, with the native background following the page's opaque HTML/body background color.
-- New windows prepare their initial rendered page before becoming visible on Windows, macOS and Linux. Existing Apps need no startup changes.
+- New windows prepare their initial rendered page before becoming visible on Windows and macOS. Existing Apps need no startup changes.
 - Windows/Linux [DevTools](docs/devtools.md) with a resizable right-hand panel, floating mode and saved layout preferences. Ctrl+Shift+I toggles visibility. Windows offers a borderless embedded panel, native floating window and page context-menu controls.
 - macOS [Web Inspector](docs/devtools.md#macos) supports a right-hand embedded panel, native floating window and saved layout preferences. Option+Command+I and the page context menu control the same inspection session.
 - WebView context menus provide docking and DevTools controls. Docker tab menus add reload, App folder and close actions. PNG, ICO and SVG window icons from HTML favicons or `reaper.window.setIcon(path)` survive docking and reloads, with visibility applied immediately by `reaper.window.setIconVisible(boolean)`, including the default startup icon. Floating Docker title bars follow the active WebView's icon settings on Windows, macOS and Linux.
@@ -64,7 +64,7 @@ All Apps share `ReaWebAPI/WebViewData/`. App identities, private data and window
 
 ## Build
 
-Requires CMake 3.24+, a C++17 toolchain and Python 3.10+. Tests use Node.js. Linux development dependencies are `pkg-config`, `libwebkit2gtk-4.1-dev`, `libcairo2-dev` and `libx11-dev`.
+Requires CMake 3.24+, a C++17 toolchain and Python 3.10+. Tests use Node.js. Linux development dependencies are `pkg-config`, `libwebkit2gtk-4.1-dev` and `libx11-dev`.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
