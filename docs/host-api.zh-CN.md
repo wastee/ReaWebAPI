@@ -31,7 +31,7 @@
 | 方法 | 完成后的值 | 行为 |
 | --- | --- | --- |
 | `reaper.window.openDev(url)` | 数字窗口 ID | 受信任的 loopback HTTP 开发服务器，参见[前端资源约定](frontend.zh-CN.md) |
-| `reaper.window.open(path)` | 数字窗口 ID | 打开本地 HTML，相对路径从调用页面所在目录解析 |
+| `reaper.window.open(path, options?)` | 数字窗口 ID | 打开本地 HTML，相对路径从调用页面所在目录解析 |
 | `reaper.window.close()` | `boolean` | 请求关闭，文档销毁可能使尚未完成的 Promise 被拒绝，包括关闭请求本身 |
 | `reaper.window.focus()` | `boolean` | 聚焦当前窗口 |
 | `reaper.debug.openDevTools()` | `boolean` | 幂等请求显示 DevTools。macOS 原生控制不可用时以 `DEVTOOLS_UNAVAILABLE` 错误拒绝 Promise。详见 [DevTools](devtools.zh-CN.md) |
@@ -182,6 +182,8 @@ const results = await reaper.transaction.batch([
 | --- | --- |
 | `reaper.ReaWeb_OpenDev(url)` | 正数窗口 ID，失败返回 0 |
 | `reaper.ReaWeb_Open(path, instanceKey?, id?, multiple?)` | 正数窗口 ID，失败为 `0` |
+| `reaper.ReaWeb_OpenEx(path, optionsJson)` | 正数窗口 ID，失败为 `0` |
+| `reaper.ReaWeb_Show(id)` | 布尔值，显示但不强制聚焦 |
 | `reaper.ReaWeb_Close(id)` | 布尔值 |
 | `reaper.ReaWeb_IsOpen(id)` | 布尔值 |
 | `reaper.ReaWeb_IsReady(id)` | 文档握手完成后为 true |
@@ -198,7 +200,7 @@ Lua 相对 HTML 路径从 REAPER 的 `Scripts/` 目录解析，模板使用启�
 
 [v0.1.8 Runtime namespaces](runtime-api.md) · [v0.1.8 命名空间接口](runtime-api.zh-CN.md)
 
-JavaScript 使用 `reaper.window.open(path)` 和 `reaper.lifecycle.ready`。Lua 在网页尚未启动时通过 `reaper.ReaWeb_Open(path)` 启动窗口；Lua 原生扩展函数独立于浏览器 SDK。730 项标准 REAPER 镜像名称保持不变。
+JavaScript 使用 `reaper.window.open(path, options?)` 和 `reaper.lifecycle.ready`。Lua 在网页尚未启动时通过 `reaper.ReaWeb_Open(path)` 启动窗口；Lua 原生扩展函数独立于浏览器 SDK。730 项标准 REAPER 镜像名称保持不变。
 
 `reaper.events.off(name, callback)` 可按回调引用取消该事件的全部匹配订阅。使用 `reaper.events.on('native-drop', callback)` 订阅原生拖放事件，返回 files/text/x/y，不合并、不提供初始快照。详见 [Runtime API](runtime-api.zh-CN.md)。
 
@@ -216,7 +218,7 @@ local extra = reaper.ReaWeb_Open(directory .. "index.html", instanceKey, nil, tr
 
 Runtime 对 `(instanceKey, id)` 两个字符串分别进行区分大小写的精确匹配。nil 或空字符串 `id` 表示默认窗口。实例匹配将 key 作为不透明标识，不做路径规范化，也不移除 source 的 `@` 前缀。App 身份解析在缺少 `app.json.id` 时单独使用 Lua source 的文件名，不读取 Lua 调用栈。在启动脚本中获取 source，再传给需要的辅助函数。后续调用应保持相同写法。复制到不同目录的启动脚本具有不同 key。正在关闭或初始化失败的窗口不参与复用，会话销毁时释放实例身份。
 
-JavaScript 的 `reaper.window.open(path)` 和 `ReaWeb_OpenDev(url)` 行为不变。原生 C/C++ 调用方须使用 v0.3.5 签名 `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)`，省略的选项传 `nullptr`。单参数 Lua 调用要求 App 定义 `app.json.id`。缺少该字段时须将启动脚本 source 作为 `instanceKey`，包括 `multiple = true` 的调用。
+JavaScript 的 `reaper.window.open(path, options?)` 和 `ReaWeb_OpenDev(url)` 行为不变。原生 C/C++ 调用方须使用 v0.3.5 签名 `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)`，省略的选项传 `nullptr`。单参数 Lua 调用要求 App 定义 `app.json.id`。缺少该字段时须将启动脚本 source 作为 `instanceKey`，包括 `multiple = true` 的调用。
 
 ## Lua 消息桥接
 
@@ -244,3 +246,25 @@ local function loop()
 end
 loop()
 ```
+
+### 隐藏启动
+
+v0.3.8.15 起，`ReaWeb_OpenEx(path, optionsJson)` 接收 JSON 对象字符串，可选字段仅为 `instanceKey:string`、`id:string`、`multiple:boolean` 和 `hidden:boolean`。默认值沿用 `ReaWeb_Open`，`hidden` 默认为 `false`。未知字段、类型错误、null、空字符串或无效 JSON 返回 `0`，通过 `ReaWeb_GetLastError()` 获取错误。缺省或空身份字符串沿用原有实例规则。
+
+```lua
+assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
+local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","hidden":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+-- 在 App 发出自定义 ui-ready 消息后显示。
+assert(reaper.ReaWeb_Show(id), reaper.ReaWeb_GetLastError())
+```
+
+隐藏启动允许页面加载、Runtime 握手和 Lua/JS 通信，原生窗口保持不可见且不聚焦。`ReaWeb_Show(id)` 显示窗口但不强制聚焦，`ReaWeb_Focus(id)` 显示并聚焦。macOS 上显式 Focus 还会激活处于后台的 REAPER。无效或已关闭 ID 明确失败。主动 Show/Focus 可以在首帧准备完成前显示窗口，Close 优先于待执行的展示。
+
+`hidden` 仅影响新实例。`hidden:true` 命中相同实例时保留当前可见性和焦点。普通 Open 或 `hidden:false` 的 OpenEx 会显示并聚焦复用的窗口，不重新加载。`multiple:true` 始终新建。
+
+隐藏启动选项不写入持久化状态，重载保留当前显示意图。已有 Docker 位置在后台加载期间保持待接入状态，首次 Show/Focus 时恢复。`isDocked()` 包含此待接入状态，在首次显示前关闭仍保留原停靠配置。此操作不隐藏其他 Docker 标签或 REAPER 主窗口。接入失败会报告错误，可重试，不退化为可见的浮动启动。
+
+`ReaWeb_IsReady` 仅表示文档 Runtime 握手完成，不代表首帧或业务数据已就绪。需要时使用 App 自定义的 `ui-ready` 消息。隐藏页面的定时器和渲染可能受浏览器节流，Show 不保证 GPU 已完成首帧合成。
+
+原生插件通过 `GetFunc` 获取 `ReaWeb_OpenEx` 的 `int (*)(const char*, const char*)` 和 `ReaWeb_Show` 的 `bool (*)(int)`。原有四参数 `ReaWeb_Open` ABI 不变。JavaScript 在传入 `{hidden:true}` 前检查 `(await reaper.system.getCapabilities()).runtime.window?.hiddenStart`。旧版本继续使用普通 Open，或明确报告不支持隐藏启动。

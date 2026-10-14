@@ -29,3 +29,5 @@
 纯 JavaScript 应用使用 REAPER Mirror 和 Runtime API。需要由 Lua 管理工程逻辑时，参见 [Lua 后端 + WebView 示例](../web/lua-backend/README.md)。平台安装包将其放在 `Scripts/ReaWebAPI/Example/lua-backend`，SDK 提供 `lua-backend/`。
 
 [Native Stream 示例](../web/native-stream/README.md) · [Native Stream ABI 与平台契约](../docs/native-streams.zh-CN.md)。SDK 包含 `native/reaweb_stream.h`, `native/reaweb_tasks.h` 和 `native/stream_extension.cpp`。
+
+[Hidden startup / 隐藏启动示例](hidden-start/README.md)

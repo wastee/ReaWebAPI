@@ -46,14 +46,16 @@ struct FakeWindow : Window {
   void start_drag(const Json& payload, Reply reply) override { dragged = payload; if (defer_drag) drag_reply = std::move(reply); else reply({{"result", drag_result}}); }
   int reloads = 0;
   int focuses = 0;
-  void focus() override { ++focuses; wants_visible = true; if (!deferred) shown = true; }
+  void focus() override { if (!presentation_cancelled) { ++focuses; wants_visible = shown = true; const bool pending = deferred; deferred = false; if (pending && options.on_present) options.on_present(); } }
+  void show() override { if (!presentation_cancelled) { deferred = false; wants_visible = shown = true; } }
   std::vector<Json> responses;
   int sequence = 0;
   std::string document = "first";
   void set_title(const std::string& title) override { options.title = title; }
   Json bounds = {{"x", 40}, {"y", 50}, {"width", 860}, {"height", 640}, {"maximized", false}};
   explicit FakeWindow(WindowOptions value) : options(std::move(value)) {
-    deferred = defer_next_presentation; defer_next_presentation = false; shown = !deferred;
+    deferred = defer_next_presentation || options.hidden; defer_next_presentation = false;
+    wants_visible = !options.hidden; shown = !deferred;
   }
   void evaluate(const std::string& script) override {
     const auto start = script.find('(') + 1;
@@ -160,14 +162,12 @@ int main() {
       CHECK(runtime.is_ready(id) && !window->visible());
       result(runtime, *window, window->send("ReaWeb_SetBounds", {{{"width", 900}}}));
       CHECK(window->wants_visible && !window->visible());
-      runtime.set_docked(id, true); runtime.focus(id);
+      runtime.set_docked(id, true);
       CHECK(activations == 0 && window->wants_visible);
       result(runtime, *window, window->send("ReaWeb_SetVisible", {false}));
       CHECK(!window->wants_visible);
       result(runtime, *window, window->send("ReaWeb_SetVisible", {true}));
-      CHECK(activations == 0 && window->wants_visible);
-      window->deferred = false; window->shown = true; window->options.on_present();
-      CHECK(activations == 1);
+      CHECK(activations == 1 && window->wants_visible && window->visible());
       runtime.close(id);
 
       defer_next_presentation = true;
@@ -179,6 +179,59 @@ int main() {
       CHECK(pending->presentation_cancelled && !pending->visible());
       until(runtime, [&] { return !runtime.is_open(closing); });
       CHECK(pending->reloads == 0);
+    }
+    windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
+    {
+      int activations = 0;
+      auto background_docks = docks; background_docks.activate = [&](void*) { ++activations; };
+      Runtime runtime(host, root / "HiddenProfile", [](const std::string&) {}, background_docks);
+      for (const auto* invalid : {"", "null", "[]", "{", "{\"hidden\":1}", "{\"multiple\":null}",
+           "{\"instanceKey\":false}", "{\"id\":0}", "{\"unknown\":true}", "{\"id\":\"a\\u0000b\"}"}) {
+        bool rejected = false;
+        try { runtime.open_ex(entry.u8string(), invalid); }
+        catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
+        CHECK(rejected);
+      }
+      const auto options = R"({"instanceKey":"hidden-launcher","id":"main","hidden":true})";
+      const auto id = runtime.open_ex(entry.u8string(), options);
+      auto window = windows.back().lock();
+      CHECK(window->options.hidden && !window->shown && window->focuses == 0);
+      CHECK(runtime.open_ex("missing.html", options) == id && window->focuses == 0);
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(runtime.is_ready(id) && !window->shown);
+      CHECK(runtime.send(id, "preload"));
+      result(runtime, *window, window->send("ReaWeb_HostSend", {"ui-ready"}));
+      CHECK(runtime.receive(id) == "ui-ready" && !window->shown);
+      CHECK(runtime.set_docked(id, true) && runtime.is_docked(id));
+      CHECK(!docked.count(window.get()) && activations == 0);
+      window->send("ReaWeb_Reload");
+      until(runtime, [&] { return window->reloads == 1; });
+      CHECK(!window->shown && window->reloads == 1);
+      window->document = "reloaded";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      const auto child = result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"hidden", true}}}))["result"].get<int>();
+      CHECK(child != id && windows.back().lock()->options.hidden && !windows.back().lock()->shown);
+      CHECK(result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"multiple", true}}}))["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(runtime.show(id) && window->shown && window->focuses == 0 && docked.count(window.get()));
+      CHECK(runtime.open_ex("missing.html", options) == id && window->shown && window->focuses == 0);
+      result(runtime, *window, window->send("ReaWeb_SetVisible", {false}));
+      CHECK(runtime.open_instance("missing.html", "hidden-launcher", "main") == id && window->shown && window->focuses == 1);
+      result(runtime, *window, window->send("ReaWeb_SetVisible", {false}));
+      CHECK(runtime.open_ex("missing.html", R"({"instanceKey":"hidden-launcher","id":"main","hidden":false})") == id && window->shown);
+      const auto many = runtime.open_ex(entry.u8string(), R"({"instanceKey":"hidden-launcher","id":"main","hidden":true,"multiple":true})");
+      CHECK(many != id && !windows.back().lock()->shown);
+      runtime.close(many); runtime.close(child); runtime.close(id);
+      until(runtime, [&] { return runtime.diagnostics(id).value("stage", "") == "closed"; });
+      window.reset();
+      const auto restored = runtime.open_ex(entry.u8string(), options);
+      auto pending = windows.back().lock();
+      CHECK(runtime.is_docked(restored) && !docked.count(pending.get()) && !pending->shown);
+      CHECK(runtime.show(restored) && docked.count(pending.get()) && pending->shown);
+      runtime.close(restored);
+      CHECK(!runtime.focus(restored));
+      bool closed_rejected = false;
+      try { runtime.show(restored); } catch (const Error& error) { closed_rejected = error.code == "WINDOW_CLOSED"; }
+      CHECK(closed_rejected);
     }
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {

@@ -159,6 +159,7 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   int pending_origin_x_ = 0, pending_origin_y_ = 0;
   LONG_PTR saved_style_ = 0;
   bool style_saved_ = false;
+  bool initial_hidden_ = false, cancelled_ = false, wants_visible_ = true;
 public:
   bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
@@ -180,7 +181,7 @@ public:
     geometry_["height"] = height;
     return true;
   }
-  LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id) {
+  LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id), initial_hidden_(options.hidden), wants_visible_(!options.hidden) {
     auto on_close = std::move(options.on_close);
     options.on_close = [this, on_close = std::move(on_close)]() mutable {
       immediate_resize_enabled_ = false;
@@ -260,6 +261,7 @@ public:
     window_->set_background(process_->backgrounds.at(id_));
     const bool is_docked = docked();
     icon_.refresh(icon_target(is_docked), is_docked);
+    if (!wants_visible_) { immediate_resize_enabled_ = false; return; }
     using GetXid = unsigned long (*)(void*);
     static auto get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
     if (!get_xid) get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_drawable_get_xid"));
@@ -396,9 +398,25 @@ public:
     }
     window_->restore_floating();
     if (!normal_.is_null()) restore_placement(normal_);
-    if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
+    if (maximized_ && !initial_hidden_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
   }
-  void focus() override { window_->focus(); }
+  void focus() override { if (!cancelled_) { show(); window_->focus(); } }
+  void cancel_pending_show() override { cancelled_ = true; }
+  void show() override {
+    if (cancelled_) return;
+    const bool restore_maximized = initial_hidden_ && maximized_;
+    initial_hidden_ = false; set_visible(true);
+    if (restore_maximized) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
+  }
+  void without_focus(const std::function<void()>& action) override {
+    const auto foreground = GetForegroundWindow(), focus = GetFocus();
+    const auto restore = [&] {
+      if (foreground && IsWindow(foreground) && GetForegroundWindow() != foreground) SetForegroundWindow(foreground);
+      if (focus && IsWindow(focus) && GetFocus() != focus) SetFocus(focus);
+    };
+    try { action(); } catch (...) { restore(); throw; }
+    restore();
+  }
   void set_title(const std::string& title) override { window_->set_title(title); }
   std::vector<int> icon_sizes() const override {
     const auto scale = LinuxIcon::scale(SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow"));
@@ -426,12 +444,24 @@ public:
   void clear_icon() override { icon_.clear(icon_target(), docked()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(icon_target(), visible, docked()); }
   void set_visible(bool visible) override {
-    if (!visible) immediate_resize_enabled_ = false;
+    const bool previous = wants_visible_;
+    if (visible && !wants_visible_) started_ = std::chrono::steady_clock::now();
+    wants_visible_ = visible;
+    if (!visible) {
+      immediate_resize_enabled_ = false;
+      // SWELL may destroy a hidden floating X11 host. Park its foreign child first.
+      if (!geometry_.is_null()) {
+        geometry_ = Json(); pending_origin_valid_ = false;
+        try { process_->park(id_); }
+        catch (...) { wants_visible_ = previous; throw; }
+      }
+    }
     window_->set_visible(visible);
   }
+  bool visibility_requested() const override { return initial_hidden_ ? wants_visible_ : visible(); }
   void show_after_create() override {
     immediate_resize_enabled_ = false;
-    window_->set_visible(true);
+    if (!initial_hidden_ && !cancelled_) window_->set_visible(true);
   }
   Json bounds() const override { return window_->placement(); }
   void reload() override { process_->send({{"id", id_}, {"op", "reload"}}); }
@@ -440,6 +470,7 @@ public:
   bool visible() const override { return window_->visible() && !(native_state() & 2); }
   bool focused() const override { return window_->focused(); }
   Json placement() const override {
+    if (initial_hidden_ && !normal_.is_null()) return normal_;
     const bool maximized = (native_state() & 4) != 0;
     if (!maximized) normal_ = window_->placement();
     auto value = normal_.is_null() ? window_->placement() : normal_;
@@ -450,7 +481,7 @@ public:
     normal_ = value;
     window_->restore_placement(value);
     maximized_ = value.value("maximized", false);
-    if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
+    if (maximized_ && window_->visible()) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
   }
   Json diagnostics() const override {
     auto inspector = devtools_state();

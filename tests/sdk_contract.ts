@@ -85,6 +85,11 @@ async function runtimeContract(track: MediaTrackHandle, take: MediaItem_TakeHand
   // @ts-expect-error Window icons require a local path string.
   await reaper.window.setIcon(new Uint8Array());
   const windowId: number = await reaper.window.open('other/index.html');
+  const hiddenId: number = await reaper.window.open('other/index.html', {hidden:true});
+  // @ts-expect-error Hidden startup requires a boolean.
+  reaper.window.open('other/index.html', {hidden:1});
+  // @ts-expect-error JS child windows do not accept Lua instance keys.
+  reaper.window.open('other/index.html', {instanceKey:'child'});
   // @ts-expect-error The old entry name was removed; use window.open.
   reaper.ReaWebOpen('legacy/index.html');
   // @ts-expect-error Flat Runtime compatibility aliases are intentionally absent.

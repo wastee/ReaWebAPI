@@ -25,6 +25,17 @@ int main() {
     StartupPresentation cancelled_ready;
     cancelled_ready.prepared(cancelled_ready.navigate()); cancelled_ready.cancel();
     CHECK(!cancelled_ready.present());
+    StartupPresentation preload(true);
+    preload.prepared(preload.navigate());
+    CHECK(!preload.wanted() && !preload.present() && !preload.expired());
+    preload.show(); CHECK(preload.present() && !preload.focus_requested());
+    StartupPresentation early(true);
+    early.navigate(); early.show(true); early.request(false);
+    CHECK(!early.present());
+    early.show(); CHECK(early.present() && !early.focus_requested());
+    StartupPresentation cancelled_hidden(true);
+    cancelled_hidden.cancel(); cancelled_hidden.show(true);
+    CHECK(!cancelled_hidden.present() && !cancelled_hidden.wanted());
     std::cout << "PASS: hide/show, reload generations and close races\n";
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

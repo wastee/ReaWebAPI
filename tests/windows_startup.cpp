@@ -39,6 +39,71 @@ int main(int argc, char** argv) {
     struct Destroy { HWND hwnd; ~Destroy() { DestroyWindow(hwnd); } } destroy{host};
     ShowWindow(host, SW_SHOW); SetForegroundWindow(host);
     const int count = argc > 1 ? std::stoi(argv[1]) : 20;
+    if (argc > 2 && std::string(argv[2]) == "--hidden") {
+      for (int run = 0; run < count; ++run) {
+        const auto path = root / ("hidden-" + std::to_string(run)); fs::create_directories(path);
+        const auto entry = path / "index.html";
+        std::ofstream(entry) << "<!doctype html><style>html{background:#182838}</style><p>Preloaded</p>";
+        auto platform = make_platform(path / "profile");
+        bool ready = false;
+        std::string error;
+        WindowOptions options;
+        options.entry = entry; options.title = "Hidden acceptance"; options.parent = host; options.hidden = true;
+        options.script = "window.chrome.webview.postMessage('ui-ready');";
+        options.on_message = [&](std::string message) { if (message == "ui-ready") ready = true; };
+        options.on_error = [&](std::string message) { error = std::move(message); };
+        SetForegroundWindow(host); SetFocus(host);
+        auto window = platform->open(std::move(options));
+        const auto hwnd = static_cast<HWND>(window->native_handle());
+        const auto pump = [&] {
+          MSG msg{};
+          while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+          platform->pump(); window->tick();
+          CHECK(error.empty());
+        };
+        const auto started = GetTickCount64();
+        while (!ready || GetTickCount64() - started < 1000) {
+          pump(); CHECK(!IsWindowVisible(hwnd) && !window->visible());
+          CHECK(GetForegroundWindow() == host);
+          CHECK(GetTickCount64() - started < 20000); Sleep(2);
+        }
+        window->show(); CHECK(window->visible() && GetForegroundWindow() == host);
+        window->focus(); CHECK(window->visible() && GetForegroundWindow() == hwnd);
+        window->set_visible(false); CHECK(!window->visible());
+        window->focus(); CHECK(window->visible());
+        window->set_visible(false); window->cancel_pending_show(); window->show(); pump(); CHECK(!window->visible());
+        window.reset(); platform.reset(); CHECK(!IsWindow(hwnd));
+      }
+      for (int intent = 0; intent < 3; ++intent) {
+        const auto path = root / ("early-" + std::to_string(intent)); fs::create_directories(path);
+        const auto entry = path / "index.html"; std::ofstream(entry) << "<!doctype html><p>Early intent</p>";
+        auto platform = make_platform(path / "profile");
+        bool ready = false;
+        WindowOptions options; options.entry = entry; options.hidden = true; options.parent = host;
+        options.script = "window.chrome.webview.postMessage('ready');";
+        options.on_message = [&](std::string message) { ready |= message == "ready"; };
+        options.on_error = [](std::string message) { throw std::runtime_error(message); };
+        SetForegroundWindow(host); SetFocus(host);
+        auto window = platform->open(std::move(options));
+        const auto hwnd = static_cast<HWND>(window->native_handle());
+        if (intent == 2) { window->cancel_pending_show(); window.reset(); }
+        else {
+          if (intent == 0) { window->show(); CHECK(GetForegroundWindow() == host); }
+          else window->focus();
+          CHECK(window->visible()); window->set_visible(false);
+        }
+        const auto started = GetTickCount64();
+        while (GetTickCount64() - started < 1000 || (intent != 2 && !ready)) {
+          MSG msg{};
+          while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+          platform->pump(); if (window) window->tick();
+          CHECK(!IsWindowVisible(hwnd) && GetForegroundWindow() != hwnd);
+          CHECK(GetTickCount64() - started < 20000); Sleep(2);
+        }
+      }
+      std::cout << "PASS: hidden native creation, JS preloading, no mapping/focus, Show/Focus and close, cold profiles=" << count << ", early-intent races=3\n";
+      return 0;
+    }
     const bool undock_pending = argc > 2 && std::string(argv[2]) == "--undock-pending";
     const bool initially_docked = undock_pending || (argc > 2 && std::string(argv[2]) == "--dock");
     int captures = 0;

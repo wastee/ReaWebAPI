@@ -27,7 +27,7 @@ Lua 后端与 WebView UI 之间的消息。Text messages between a Lua backend a
 
 | API | 返回 / Result | 用途 |
 | --- | --- | --- |
-| `reaper.window.open(path)` | `Promise<number>` | 打开本地 HTML，返回新窗口 ID |
+| `reaper.window.open(path, options?)` | `Promise<number>` | 打开本地 HTML，返回新窗口 ID |
 | `reaper.window.openDev(url)` | `Promise<number>` | 打开受信任的本机 HTTP 开发服务器 |
 | `reaper.window.getSize()` | `Promise<Size>` | 读取当前窗口外部尺寸及模式、单位 |
 | `reaper.window.setSize(width, height)` | `Promise<ReaWebBounds>` | 设置浮动窗口外部尺寸 |
@@ -221,3 +221,5 @@ const childId = await reaper.window.open("other/index.html");
 | `reaper.system.schedule(callback, options)` | `Promise<ReaWebDispose>` | One-shot or repeating native timer |
 
 See [Native Streams](native-streams.md) for buffer layouts, limits and lifecycle.
+
+`window.open` accepts `{hidden?: boolean}` since v0.3.8.15, defaults to visible startup, and still returns `Promise<number>`. Check `capabilities.runtime.window?.hiddenStart`. Lua adds `ReaWeb_OpenEx(path, optionsJson)` and `ReaWeb_Show(windowId)`. See [Hidden startup](host-api.md#hidden-startup) / [隐藏启动](host-api.zh-CN.md#隐藏启动).

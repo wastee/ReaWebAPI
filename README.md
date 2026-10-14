@@ -88,3 +88,5 @@ Native Streams share track sampling across analysis views and support `aggregate
 Aggregate RMS/LUFS history continues accumulating when routed folders, buses or upstream tracks contain no media.
 
 The built-in Meter provides Sample/True Peak, separate sample/True Peak clip counts, per-channel and global peak maxima, RMS-M/I, LUFS-M/S/I and LRA bounds, with reset and mono calibration. Meter supports 1–32 source channels, exact integer clip counts and selectable integrated history. Analysis is independent of publication rate.
+
+Native [hidden startup](docs/host-api.md#hidden-startup) supports background preloading on Windows, macOS and Linux. See the [example](runtime/hidden-start/README.md).

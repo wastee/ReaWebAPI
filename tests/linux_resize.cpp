@@ -38,8 +38,10 @@ void tick() {
     send = reinterpret_cast<decltype(send)>(host->GetFunc("ReaWeb_Send"));
     receive = reinterpret_cast<decltype(receive)>(host->GetFunc("ReaWeb_Receive"));
     SetWindowPos(host->hwnd_main, nullptr, 40, 40, 1200, 860, SWP_NOZORDER);
-    id = open_window((resource / "Scripts/resize-test/index.html").c_str(), "resize-acceptance", nullptr, nullptr);
+    id = open_window((resource / "Scripts/resize-test/index.html").c_str(), "resize-acceptance.lua", nullptr, nullptr);
     std::ofstream(resource / "resize-test.log", std::ios::app) << "opened=" << id << '\n';
+    if (!id) std::ofstream(resource / "resize-test.log", std::ios::app)
+      << reinterpret_cast<const char*(*)()>(host->GetFunc("ReaWeb_GetLastError"))() << '\n';
   }
   if (!window) {
     EnumWindows(+[](HWND handle, LPARAM) -> BOOL {

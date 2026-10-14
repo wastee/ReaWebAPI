@@ -614,7 +614,7 @@
     return call('ReaWeb_HostSend', [text]);
   } });
   api.window = Object.freeze({
-    open: host('ReaWeb_Open'), openDev: host('ReaWeb_OpenDev'),
+    open: (path, options) => options === undefined ? call('ReaWeb_Open', [path]) : call('ReaWeb_OpenEx', [path, options]), openDev: host('ReaWeb_OpenDev'),
     getSize: async () => { const b = await call('ReaWeb_GetBounds', []); return { width: b.width, height: b.height, mode: b.mode, units: b.units }; },
     setSize: (width, height) => call('ReaWeb_SetBounds', [{ width, height }]),
     getPosition: async () => { const b = await call('ReaWeb_GetBounds', []); return { x: b.x, y: b.y, mode: b.mode, units: b.units }; },

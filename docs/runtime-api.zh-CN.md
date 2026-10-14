@@ -235,3 +235,5 @@ await reaper.host.send({ type: 'setVolume', value: 0.5 });
 消息保持 FIFO，不合并、不提供初始快照、不回放。队列归当前文档所有，关闭或重载时清空。单条消息最多 1 MiB UTF-8，每方向最多 256 条，窗口双向合计最多 16 MiB。参见 [Lua 契约](host-api.zh-CN.md#lua-消息桥接)与 [Lua 后端示例](../web/lua-backend/README.md)。纯 JavaScript 的 Mirror/Runtime 开发方式保持可用。
 
 Native Streams and platform additions: [English](native-streams.md) · [中文](native-streams.zh-CN.md).
+
+`reaper.window.open(path, {hidden:true})` 预加载新的子窗口。`show()` 显示但不强制聚焦，`focus()` 显示并聚焦，返回类型保持不变。能力检测、Dock 恢复和就绪语义参见[隐藏启动](host-api.zh-CN.md#隐藏启动)。

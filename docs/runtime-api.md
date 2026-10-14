@@ -190,3 +190,5 @@ await reaper.host.send({ type: 'setVolume', value: 0.5 });
 Messages are FIFO, without coalescing, initial snapshots or replay. The current document owns both queues. Close/reload clears them. Limits: 1 MiB UTF-8 per message, 256 pending messages per direction, 16 MiB total queued payload per window. See the [Lua contract](host-api.md#lua-message-bridge) and [Lua backend example](../web/lua-backend/README.md). The existing pure JavaScript Mirror/Runtime workflow remains available.
 
 Native Streams and platform additions: [English](native-streams.md) · [中文](native-streams.zh-CN.md).
+
+`reaper.window.open(path, {hidden:true})` preloads a new child window. `show()` displays without forcing focus and `focus()` displays and focuses. Both retain their existing return types. See [hidden startup](host-api.md#hidden-startup) for capabilities, Dock restoration and readiness.

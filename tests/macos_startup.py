@@ -16,7 +16,7 @@ class Page(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(('127.0.0.1',0),Page)
 threading.Thread(target=server.serve_forever,daemon=True).start()
 for repeat in range(int(os.environ.get('STARTUP_FROM','0')),int(os.environ.get('STARTUP_RUNS','20'))):
-    for variant in range(4):
+    for variant in map(int, os.environ.get('STARTUP_VARIANTS', '0,1,2,3').split(',')):
         profile = Path(tempfile.mkdtemp(prefix=f'startup-{variant}-{repeat}-',dir=root))
         plugins = profile / 'UserPlugins'; plugins.mkdir()
         for source in [root/'build-arm64/reaper_reawebapi-arm64.dylib',root/'build-arm64/tests/reaper_startup_test.dylib']:

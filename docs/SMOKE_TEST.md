@@ -168,3 +168,12 @@ python3 tests/linux_navigation.py build/tests/linux_navigation
 - Drag standard native files/text from OS and REAPER into Studio, including Unicode paths and multiple files. Confirm files/text/x/y, no initial replay, and no duplicate notification after off/on or reload. REAPER proprietary drag formats are outside this contract.
 - Use events.off with the same callback reference, duplicate registrations and an absent callback. Check debug.log and dragDrop callbacks.
 - Optional automated native checks: build the Windows `windows_native_drag` target and run it from the build directory; on Linux run `WEBKIT_DISABLE_DMABUF_RENDERER=1 python3 tests/linux_native_drag.py` (PyGObject GTK 3, libXtst and X11 needed). These create temporary windows and restore the pointer afterward. They are deliberately excluded from unattended CTest. macOS requires real REAPER/AppKit testing.
+## Hidden startup
+
+Run `python tests/hidden_start_smoke.py --reaper <executable> --extension <binary> --output <new-profile> --count 20` on Windows, macOS and Linux. Add `--hold-seconds 180` to exercise prolonged background loading. The isolated host checks Runtime readiness, Lua/JS messages, Show/Focus, instance reuse, saved Docker restoration, Hide, Reload and Close.
+
+During the hold period, switch to another application. Verify that Show leaves it active and Focus returns to REAPER with the WebView focused.
+
+On Windows, build `windows_startup` and run `windows_startup 20 --hidden` for native visibility/focus checks. Keep real screen recordings and frame inspection separate from API/state assertions. Windows 10 and Windows 11 require separate host runs. Linux requires X11/XWayland, and input-driven resize tests require an isolated display.
+
+On macOS, build `macos_startup` in `build-arm64`, then run `STARTUP_VARIANTS=4 STARTUP_RUNS=20 python3 tests/macos_startup.py`. It uses cold isolated profiles to check native hidden creation, background JS, Show without focus, Focus, Hide and Close before initialization. A logged-in graphical session is required.

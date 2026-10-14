@@ -162,3 +162,5 @@ WebView2 取决于已安装运行时，WKWebView 跟随系统更新，WebKitGTK 
 主要实现：`src/web/web_resources.*` 负责资源服务，`src/runtime/runtime.*` 管理 App 来源和共享 profile 生命周期，三个平台文件负责原生 profile 与页面加载，`runtime/reaper.d.ts` 定义能力元数据。测试覆盖原生资源边界、全部 730 项镜像 ABI 映射及实际浏览器行为。
 
 原生行为参考：[WebView2 本地内容](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content)、[WebKitGTK 持久化 cookie](https://webkitgtk.org/reference/webkit2gtk/2.42.5/method.CookieManager.set_persistent_storage.html)。Linux 已明确开启原生 cookie 持久化。
+
+隐藏启动沿用相同资源加载和 Runtime 通道，原生窗口保持不可见。就绪仍表示文档握手，与渲染和业务数据独立。参见[隐藏启动](host-api.zh-CN.md#隐藏启动)和[预加载示例](../runtime/hidden-start/README.md)。

@@ -31,7 +31,7 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | Method | Resolved value | Behavior |
 | --- | --- | --- |
 | `reaper.window.openDev(url)` | Window ID | Trusted loopback HTTP development server; see [frontend resources](frontend.md) |
-| `reaper.window.open(path)` | Window ID, `number` | Opens a local HTML file. Relative paths are based on the calling HTML directory |
+| `reaper.window.open(path, options?)` | Window ID, `number` | Opens a local HTML file. Relative paths are based on the calling HTML directory |
 | `reaper.window.close()` | `boolean` | Requests close. Document teardown can reject outstanding Promises, including an unsettled close call |
 | `reaper.window.focus()` | `boolean` | Focuses the current window |
 | `reaper.debug.openDevTools()` | `boolean` | Requests showing DevTools (idempotent). On macOS, unavailable native controls reject with `DEVTOOLS_UNAVAILABLE`. See [DevTools](devtools.md) |
@@ -182,6 +182,8 @@ These native extension functions are called synchronously from Lua. First use `r
 | --- | --- |
 | `reaper.ReaWeb_OpenDev(url)` | Positive window ID, or 0 |
 | `reaper.ReaWeb_Open(path, instanceKey?, id?, multiple?)` | Positive window ID, or `0` on failure |
+| `reaper.ReaWeb_OpenEx(path, optionsJson)` | Positive window ID, or `0` on failure |
+| `reaper.ReaWeb_Show(id)` | Boolean, show without forced focus |
 | `reaper.ReaWeb_Close(id)` | Boolean |
 | `reaper.ReaWeb_IsOpen(id)` | Boolean |
 | `reaper.ReaWeb_IsReady(id)` | Boolean, true after document handshake |
@@ -198,7 +200,7 @@ Lua relative HTML paths resolve from REAPER's `Scripts/` directory. The starter 
 
 [v0.1.8 Runtime namespaces](runtime-api.md) · [v0.1.8 命名空间接口](runtime-api.zh-CN.md)
 
-JavaScript opens pages with `reaper.window.open(path)` and waits on `reaper.lifecycle.ready`. Lua bootstrap uses `reaper.ReaWeb_Open(path)` because the browser has not started yet; the table above contains Lua-only native functions. The 730 standard REAPER mirror names are unchanged.
+JavaScript opens pages with `reaper.window.open(path, options?)` and waits on `reaper.lifecycle.ready`. Lua bootstrap uses `reaper.ReaWeb_Open(path)` because the browser has not started yet; the table above contains Lua-only native functions. The 730 standard REAPER mirror names are unchanged.
 
 `reaper.events.off(name, callback)` removes all matching registrations of that callback. Subscribe to `native-drop` through `reaper.events.on('native-drop', callback)`; it carries files/text/x/y and has neither coalescing nor an initial snapshot. See [Runtime API](runtime-api.md).
 
@@ -216,7 +218,7 @@ local extra = reaper.ReaWeb_Open(directory .. "index.html", instanceKey, nil, tr
 
 Runtime compares `(instanceKey, id)` as separate, case-sensitive strings. Nil or empty `id` selects the default window. Instance matching treats keys as opaque and does not normalize paths or remove the `@` prefix. App identity separately uses the Lua source filename when `app.json.id` is absent. Runtime does not inspect the Lua stack. Capture the launcher source in the launcher itself and pass it through any helper. Use the same spelling on subsequent calls. Copied launchers in different directories have different keys. Closing or failed windows are excluded from reuse, and destroying the session releases its identity.
 
-JavaScript `reaper.window.open(path)` and `ReaWeb_OpenDev(url)` retain their existing behavior. Native C/C++ consumers must use the v0.3.5 signature `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)` and pass `nullptr` for omitted options. One-argument Lua calls require `app.json.id`. Without it, pass the launching Lua source as `instanceKey` even when `multiple = true`.
+JavaScript `reaper.window.open(path, options?)` and `ReaWeb_OpenDev(url)` retain their existing behavior. Native C/C++ consumers must use the v0.3.5 signature `int ReaWeb_Open(const char* path, const char* instanceKey, const char* id, const bool* multiple)` and pass `nullptr` for omitted options. One-argument Lua calls require `app.json.id`. Without it, pass the launching Lua source as `instanceKey` even when `multiple = true`.
 
 ## Lua message bridge
 
@@ -244,3 +246,25 @@ local function loop()
 end
 loop()
 ```
+
+### Hidden startup
+
+Since v0.3.8.15, `ReaWeb_OpenEx(path, optionsJson)` accepts a JSON object string with optional `instanceKey:string`, `id:string`, `multiple:boolean` and `hidden:boolean`. Defaults match `ReaWeb_Open`, with `hidden:false`. Unknown fields, wrong types, null, empty or invalid JSON fail with `0` and `ReaWeb_GetLastError()`. Omitted or empty identity strings retain the existing instance rules.
+
+```lua
+assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
+local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","hidden":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+-- Show after the App sends its own ui-ready message.
+assert(reaper.ReaWeb_Show(id), reaper.ReaWeb_GetLastError())
+```
+
+Hidden startup loads the page and permits Runtime handshake and Lua/JS messaging without showing or focusing the native window. `ReaWeb_Show(id)` displays it without forcing focus. `ReaWeb_Focus(id)` displays and focuses it. On macOS, explicit Focus also activates REAPER if it is in the background. Invalid or closed IDs fail. Explicit Show/Focus may reveal the window before the first rendered frame is ready. Close takes precedence over pending presentation.
+
+`hidden` affects new instances only. Reusing a matching instance with `hidden:true` preserves its current visibility and focus. Ordinary Open or OpenEx with `hidden:false` displays and focuses the reused instance without reloading it. `multiple:true` always creates another window.
+
+Hidden startup is not persisted. Reload retains the current visibility intent. A saved Docker destination remains pending while the page loads off-screen and is attached on Show/Focus. `isDocked()` includes that pending destination. Closing before Show retains the saved Dock state. Other Docker tabs and the REAPER main window are not hidden by this operation. Failed attachment is reported and can be retried, without falling back to a visible floating startup.
+
+`ReaWeb_IsReady` means the document Runtime handshake completed, not that a frame was painted or business data is ready. Use an App-defined `ui-ready` message when needed. Hidden browsers can throttle timers and rendering, and Show does not guarantee a completed GPU frame.
+
+Native plugins discover `int (*)(const char*, const char*)` for `ReaWeb_OpenEx` and `bool (*)(int)` for `ReaWeb_Show` through `GetFunc`. The existing four-argument `ReaWeb_Open` ABI is unchanged. JavaScript checks `(await reaper.system.getCapabilities()).runtime.window?.hiddenStart` before passing `{hidden:true}`. On older versions, keep using ordinary Open or report that hidden startup is unavailable.

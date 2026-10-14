@@ -252,7 +252,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
     icon_window_ = native;
   }
 public:
-  MacWindow(WindowOptions options, WKWebsiteDataStore* data, WKProcessPool* pool) {
+  MacWindow(WindowOptions options, WKWebsiteDataStore* data, WKProcessPool* pool) : startup_(options.hidden) {
     delegate_ = [ReaWebDelegate new];
     delegate_->options = std::move(options);
     delegate_->entryURI = delegate_->options.url.empty() ? file_uri(delegate_->options.entry) : delegate_->options.url;
@@ -401,7 +401,9 @@ public:
     if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
   }
   void focus() override {
-    if (startup_.pending()) { startup_.request(true); startup_key_ = NSApp.keyWindow; return; }
+    if (closed() || startup_.cancelled()) return;
+    if (startup_.pending()) { startup_.show(true); startup_key_ = NSApp.keyWindow; tick(); }
+    [NSApp activateIgnoringOtherApps:YES];
     window_->focus(); [webview_.window makeFirstResponder:webview_];
   }
   void tick() override {
@@ -412,7 +414,8 @@ public:
     }
     if (startup_.present()) {
       window_->set_visible(true);
-      if (NSApp.active && NSApp.keyWindow == startup_key_) {
+      if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
+      if (startup_.focus_requested() && NSApp.active && NSApp.keyWindow == startup_key_) {
         if (delegate_->options.on_present) delegate_->options.on_present();
         if (!(delegate_->options.is_docked && delegate_->options.is_docked())) focus();
       }
@@ -442,6 +445,22 @@ public:
     startup_.request(visible);
     window_->set_visible(visible && !startup_.pending());
   }
+  void show() override {
+    if (closed() || startup_.cancelled()) return;
+    if (startup_.pending()) { startup_.show(); tick(); }
+    else set_visible(true);
+  }
+  void without_focus(const std::function<void()>& action) override {
+    NSWindow* key = NSApp.keyWindow;
+    NSRunningApplication* active = NSWorkspace.sharedWorkspace.frontmostApplication;
+    const auto restore = [&] {
+      if (key && NSApp.keyWindow != key) [key makeKeyWindow];
+      if (active && active.processIdentifier != NSProcessInfo.processInfo.processIdentifier && NSApp.active)
+        [active activateWithOptions:0];
+    };
+    try { action(); } catch (...) { restore(); throw; }
+    restore();
+  }
   bool visibility_requested() const override { return startup_.pending() ? startup_.wanted() : visible(); }
   bool presentation_pending() const override { return startup_.pending(); }
   void cancel_pending_show() override { startup_.cancel(); }
@@ -455,6 +474,7 @@ public:
       [(NSView*)responder isDescendantOf:webview_];
   }
   Json placement() const override {
+    if (startup_.pending() && !startup_.wanted() && !normal_.is_null()) return normal_;
     if (!webview_.window.zoomed) normal_ = window_->placement();
     auto value = webview_.window.zoomed && !normal_.is_null() ? normal_ : window_->placement();
     if (!value.is_null()) value["maximized"] = webview_.window.zoomed != NO;
@@ -463,7 +483,8 @@ public:
   void restore_placement(const Json& value) override {
     normal_ = value;
     window_->restore_placement(value);
-    if (value.value("maximized", false) && !webview_.window.zoomed) [webview_.window zoom:nil];
+    maximized_ = value.value("maximized", false);
+    if (maximized_ && window_->visible() && !webview_.window.zoomed) [webview_.window zoom:nil];
   }
   Json diagnostics() const override {
     return {{"backend", "WKWebView"}, {"browserVersion", [[[NSBundle bundleForClass:[WKWebView class]] objectForInfoDictionaryKey:@"CFBundleVersion"] UTF8String] ?: "system"}, {"devtools", devtools_->diagnostics()}};

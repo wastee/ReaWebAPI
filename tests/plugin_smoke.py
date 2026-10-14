@@ -383,7 +383,7 @@ entry.restype = C.c_int
 info = Info(0x20E, owner_window, register, get_func)
 assert entry(None, C.byref(info)) == 1
 try:
-    assert len(registrations) == 67, list(registrations)
+    assert len(registrations) == 73, list(registrations)
     assert b'prefpage' in registrations
     for name in (b'ReaWeb_RegisterService', b'ReaWeb_UnregisterService', b'ReaWeb_CompleteServiceCall', b'ReaWeb_EmitServiceEvent'):
         assert b'API_' + name in registrations
@@ -399,6 +399,15 @@ try:
     is_open = C.CFUNCTYPE(C.c_bool, C.c_int)(registrations[b'API_ReaWeb_IsOpen'])
     close_window = C.CFUNCTYPE(C.c_bool, C.c_int)(registrations[b'API_ReaWeb_Close'])
     get_error = C.CFUNCTYPE(C.c_char_p)(registrations[b'API_ReaWeb_GetLastError'])
+    open_ex = C.CFUNCTYPE(C.c_int, C.c_char_p, C.c_char_p)(registrations[b'API_ReaWeb_OpenEx'])
+    show_window = C.CFUNCTYPE(C.c_bool, C.c_int)(registrations[b'API_ReaWeb_Show'])
+    for options in (None, b'', b'null', b'[]', b'{', b'{"hidden":1}', b'{"unknown":true}', b'{"id":false}'):
+        assert open_ex(b'missing.html', options) == 0 and b'option' in get_error().lower()
+    assert not show_window(999) and b'no longer open' in get_error()
+    open_ex_vararg = C.CFUNCTYPE(C.c_void_p, C.POINTER(C.c_void_p), C.c_int)(registrations[b'APIvararg_ReaWeb_OpenEx'])
+    assert not open_ex_vararg(None, 0)
+    show_vararg = C.CFUNCTYPE(C.c_void_p, C.POINTER(C.c_void_p), C.c_int)(registrations[b'APIvararg_ReaWeb_Show'])
+    assert not show_vararg(None, 0)
     timer = C.CFUNCTYPE(None)(registrations[b'timer'])
     dev_open = C.CFUNCTYPE(C.c_int, C.c_char_p)(registrations[b'API_ReaWeb_OpenDev'])
     assert dev_open(b'https://example.com/') == 0

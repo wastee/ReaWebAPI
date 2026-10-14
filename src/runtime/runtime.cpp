@@ -151,9 +151,8 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   }
   if (method == "ReaWeb_SetVisible") {
     if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected visibility boolean");
-    s.window->set_visible(args[0].get<bool>());
-    if (args[0].get<bool>() && !s.window->presentation_pending() && is_docked(id) && dock_.activate)
-      dock_.activate(s.window->native_handle());
+    if (args[0].get<bool>()) show(id);
+    else s.window->set_visible(false);
     return window_state(s);
   }
   if (method == "ReaWeb_GetTheme") return theme_colors(host_);
@@ -211,6 +210,7 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
     return s.capture_keyboard;
   }
   if (method == "ReaWeb_OpenDev") return open_dev(args[0].get<std::string>(), s.entry.parent_path());
+  if (method == "ReaWeb_OpenEx") return open_impl(args[0].get<std::string>(), s.entry.parent_path(), "", s.app->launcher_source, args[1].value("hidden", false));
   if (method == "ReaWeb_BeginUndo" || method == "ReaWeb_EndUndo") return transaction_call(id, method, args);
   if (is_file_method(method) || method == "ReaWeb_SetIcon" || method == "ReaWeb_ClipboardReadText" ||
       method == "ReaWeb_ClipboardWriteText" || method == "ReaWeb_OpenExternal")

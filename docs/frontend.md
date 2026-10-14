@@ -162,3 +162,5 @@ In the tested WSLg environment, WebKitGTK's DMA-BUF renderer stalled animation f
 Implementation: `src/web/web_resources.*` handles local resources; `src/runtime/runtime.*` owns App origins and the shared profile lifetime; `src/platform/windows/platform_win.cpp`, `src/platform/macos/platform_mac.mm` and `src/platform/linux/linux_webkit.cpp` select native profiles and load the entry; `runtime/reaper.d.ts` describes the runtime metadata. Tests cover the native resource boundary, all 730 mirror ABI mappings and actual browser behavior.
 
 Native behavior references: [WebView2 local content](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content), [WebKitGTK persistent cookies](https://webkitgtk.org/reference/webkit2gtk/2.42.5/method.CookieManager.set_persistent_storage.html). Native cookie persistence is explicitly enabled on Linux.
+
+Hidden startup loads the same resources and Runtime without showing the native window. Readiness remains a document handshake, independent of rendering or App data. See [hidden startup](host-api.md#hidden-startup) and the [preload example](../runtime/hidden-start/README.md).

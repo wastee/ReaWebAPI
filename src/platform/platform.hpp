@@ -31,6 +31,7 @@ struct WindowOptions {
   std::function<std::string()> app_name;
   std::shared_ptr<WebResources> resources;
   std::function<void()> on_present;
+  bool hidden = false;
 };
 class Window {
 public:
@@ -68,6 +69,8 @@ public:
   virtual void restore_placement(const Json&) {}
   virtual Json bounds() const { return placement(); }
   virtual void set_visible(bool) { throw Error("HOST_UNAVAILABLE", "Window visibility control unavailable"); }
+  virtual void show() { set_visible(true); }
+  virtual void without_focus(const std::function<void()>& action) { action(); }
   virtual void reload() { evaluate("window.location.reload();"); }
   virtual void set_drop_enabled(bool enabled) { if (enabled) throw Error("HOST_UNAVAILABLE", "Native drop unavailable"); }
   virtual void start_drag(const Json&, Reply) { throw Error("HOST_UNAVAILABLE", "Native drag unavailable"); }

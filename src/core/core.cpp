@@ -85,6 +85,14 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
   if (methods_.size() != api_schema().at("bindings").size())
     throw Error("SCHEMA_MISMATCH", "Native API registry does not match the embedded schema");
   add("ReaWeb_Open", 1, 1, [this](const Json& a) { return controls_.open(string_arg(a[0])); });
+  add("ReaWeb_OpenEx", 2, 2, [this](const Json& a) {
+    string_arg(a[0]);
+    if (!a[1].is_object()) throw Error("INVALID_ARGUMENT", "Expected window open options");
+    for (const auto& field : a[1].items())
+      if (field.key() != "hidden" || !field.value().is_boolean())
+        throw Error("INVALID_ARGUMENT", "Only the boolean hidden option is supported");
+    return controls_.host_call("ReaWeb_OpenEx", a);
+  });
   add("ReaWeb_Close", 0, 0, [this](const Json&) { controls_.close(); return true; });
   add("ReaWeb_DevTools", 0, 0, [this](const Json&) { controls_.devtools(); return true; });
   add("ReaWeb_SetDocked", 1, 1, [this](const Json& a) {
@@ -104,6 +112,7 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
                                                   "clipboard", "dragDrop", "app", "system", "transaction", "host", "stream"}},
         {"host", {{"maxMessageBytes", host_message_limit}, {"maxPendingMessages", host_queue_limit}, {"maxQueuedBytes", host_queue_bytes},
           {"serviceABI", 1}, {"serviceTimeoutMs", 30000}, {"builtinServices", {"runtime"}}}},
+        {"window", {{"hiddenStart", true}}},
         {"reservedNamespaces", Json::array()},
         {"stream", {{"abi", 1}, {"transport", "websocket-binary"}, {"maxStreams", 128}, {"maxConsumers", 64}, {"maxBytes", 16 * 1024 * 1024},
           {"kinds", {"frame", "audio", "spectrum", "meter", "waveform", "binary", "midi"}}}},

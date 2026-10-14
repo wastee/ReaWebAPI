@@ -7,21 +7,34 @@ int Runtime::open(const std::string& path, const fs::path& base) {
   return open_impl(path, base, "");
 }
 
-int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple) {
+int Runtime::open_ex(const std::string& path, const std::string& options) {
+  const auto value = Json::parse(options, nullptr, false);
+  if (!value.is_object()) throw Error("INVALID_ARGUMENT", "optionsJson must be a JSON object string");
+  for (const auto& field : value.items()) {
+    const auto& key = field.key();
+    if ((key == "instanceKey" || key == "id") ? !field.value().is_string() :
+        (key == "multiple" || key == "hidden") ? !field.value().is_boolean() : true)
+      throw Error("INVALID_ARGUMENT", "Unknown or invalid open option: " + key);
+  }
+  return open_instance(path, value.value("instanceKey", ""), value.value("id", ""),
+    value.value("multiple", false), value.value("hidden", false));
+}
+
+int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple, bool hidden) {
   check_thread();
   if (instance_key.find('\0') != std::string::npos || name.find('\0') != std::string::npos)
     throw Error("INVALID_ARGUMENT", "Instance key and window name must not contain NUL");
-  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key);
+  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key, hidden);
   const auto key = std::make_pair(instance_key, name);
   // The identity lives with the session, so destruction cannot leave a stale registry entry.
   for (const auto& item : sessions_) {
     auto& session = *item.second;
-    if (session.instance == key && !session.failed && is_open(session.id)) {
-      focus(session.id);
+    if (session.instance == key && !session.failed && session.lifecycle_action != "close" && is_open(session.id)) {
+      if (!hidden) focus(session.id);
       return session.id;
     }
   }
-  const auto id = open_impl(path, {}, "", instance_key);
+  const auto id = open_impl(path, {}, "", instance_key, hidden);
   sessions_.at(id)->instance = key;
   return id;
 }
@@ -30,7 +43,7 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
   return open_impl("", base, validate_dev_url(url));
 }
 
-int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source) {
+int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden) {
   check_thread();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
@@ -70,6 +83,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   const auto id = ++next_id_;
   auto session = std::make_shared<Session>();
   session->id = id;
+  session->background_start = hidden;
   session->entry = entry;
   session->app = app;
   std::set<int> slots;
@@ -166,7 +180,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, app->resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }});
+    }, hidden});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);
@@ -176,7 +190,10 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       session->window->restore_devtools(session->saved_state.value("devtools", Json()));
       const auto dock_id = session->saved_state.value("dockId", -1);
       if (dock_.remember && dock_id >= 0) dock_.remember(session->ident, dock_id);
-      if (session->saved_state.value("docked", false)) set_docked(id, true);
+      if (session->saved_state.value("docked", false)) {
+        if (hidden) session->pending_dock = true;
+        else set_docked(id, true);
+      }
     }
   } catch (const std::exception& e) {
     session->last_error = std::string("Window state was not restored: ") + e.what();
@@ -216,9 +233,33 @@ bool Runtime::close(int id) {
 bool Runtime::focus(int id) {
   check_thread();
   if (!is_open(id)) return false;
-  auto& window = *sessions_.at(id)->window;
+  auto& session = *sessions_.at(id);
+  if (session.lifecycle_action == "close") return false;
+  attach_pending_dock(session);
+  auto& window = *session.window;
   if (!window.presentation_pending() && is_docked(id) && dock_.activate) dock_.activate(window.native_handle());
   window.focus();
+  return true;
+}
+
+void Runtime::attach_pending_dock(Session& session) {
+  session.background_start = false;
+  if (!session.pending_dock) return;
+  session.pending_dock = false;
+  try { set_docked(session.id, true); }
+  catch (...) { session.pending_dock = true; session.background_start = true; throw; }
+}
+
+bool Runtime::show(int id) {
+  check_thread();
+  if (!is_open(id)) throw Error("WINDOW_CLOSED", "Window is no longer open");
+  auto& session = *sessions_.at(id);
+  if (session.lifecycle_action == "close") throw Error("WINDOW_CLOSED", "Window is closing");
+  session.window->without_focus([&] {
+    attach_pending_dock(session);
+    session.window->show();
+    if (is_docked(id) && dock_.activate) dock_.activate(session.window->native_handle());
+  });
   return true;
 }
 
@@ -236,7 +277,9 @@ bool Runtime::captures_keyboard(void* handle, const std::function<bool(void*, vo
 bool Runtime::is_docked(int id) const {
   check_thread();
   auto it = sessions_.find(id);
-  if (it == sessions_.end() || !dock_.index) return false;
+  if (it == sessions_.end()) return false;
+  if (it->second->pending_dock) return true;
+  if (!dock_.index) return false;
   auto handle = it->second->window->native_handle();
   return handle && dock_.index(handle) >= 0;
 }
@@ -249,6 +292,7 @@ bool Runtime::set_docked(int id, bool docked) {
   if (!handle || !dock_.index || !dock_.add || !dock_.remove || !dock_.activate)
     throw Error("DOCK_UNAVAILABLE", "REAPER docking APIs are unavailable");
   if (docked == is_docked(id)) return docked;
+  if (session.background_start) { session.pending_dock = docked; return docked; }
   const bool reparents = session.window->dock_reparents_window();
   // Docking hides the native window while the Docker takes it over, so remember
   // its visibility and restore it afterwards. Backends whose native window stays

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hidden startup</title>
+<style>html{background:#182838;color:#edf3fa;font:16px system-ui}body{max-width:42rem;margin:4rem auto;padding:2rem}button{font:inherit;padding:.6rem 1rem}</style>
+<h1>Hidden startup</h1>
+<p id="status">Preloading App information…</p>
+<button id="focus" disabled>Focus this window</button>
+<script type="module">
+await reaper.lifecycle.ready;
+const [platform, name] = await Promise.all([reaper.system.getPlatform(), reaper.app.getName()]);
+document.getElementById('status').textContent = `${name} preloaded on ${platform}. Lua shows this window after receiving ui-ready.`;
+const button = document.getElementById('focus');
+button.disabled = false;
+button.addEventListener('click', () => reaper.window.focus());
+await reaper.host.send('ui-ready');
+</script>
+</html>

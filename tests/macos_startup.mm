@@ -13,6 +13,9 @@ reaper_plugin_info_t* host;
 fs::path resource;
 int id = 0, samples = 0, variant = 0;
 DWORD started;
+int hidden_stage = 0;
+DWORD hidden_ready = 0;
+__weak NSWindow* hidden_key;
 void tick();
 void finish(const std::string& text) {
   std::ofstream(resource / "startup-test.log", std::ios::app) << text << '\n';
@@ -30,6 +33,57 @@ WKWebView* find_view() {
   }
   return nil;
 }
+void hidden_tick() {
+  const auto open = reinterpret_cast<int(*)(const char*, const char*)>(host->GetFunc("ReaWeb_OpenEx"));
+  const auto close = reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_Close"));
+  const auto path = (resource / "Scripts/startup-test/index.html").string();
+  if (!id) {
+    hidden_key = NSApp.keyWindow;
+    id = open(path.c_str(), "{\"instanceKey\":\"startup-test.lua\",\"hidden\":true}");
+    if (!id) throw std::runtime_error("Hidden OpenEx failed");
+  }
+  auto view = find_view();
+  if (hidden_stage == 0) {
+    if (view && view.window.visible) throw std::runtime_error("Hidden window was ordered on screen");
+    if (NSApp.keyWindow != hidden_key) throw std::runtime_error("Hidden startup changed the key window");
+    const auto receive = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_Receive"));
+    if (std::string(receive(id)) == "hidden-ready") hidden_ready = GetTickCount();
+    if (!hidden_ready || GetTickCount() - hidden_ready < 1000) return;
+    const bool active = NSApp.active;
+    hidden_key = NSApp.keyWindow;
+    if (!reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_Show"))(id))
+      throw std::runtime_error("Show failed");
+    if (!view.window.visible || NSApp.active != active || NSApp.keyWindow != hidden_key)
+      throw std::runtime_error("Show did not preserve key window");
+    if (!reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_Focus"))(id))
+      throw std::runtime_error("Focus failed");
+    hidden_stage = 4;
+  } else if (hidden_stage == 4) {
+    auto responder = view.window.firstResponder;
+    if (!NSApp.active || !view.window.keyWindow || ![responder isKindOfClass:NSView.class] ||
+        ![(NSView*)responder isDescendantOf:view]) return;
+    [view evaluateJavaScript:@"reaper.window.hide().then(() => reaper.host.send('hidden-again'))" completionHandler:nil];
+    hidden_stage = 1;
+  } else if (hidden_stage == 1) {
+    const auto receive = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_Receive"));
+    if (std::string(receive(id)) != "hidden-again") return;
+    if (view.window.visible) throw std::runtime_error("Hide did not hide the native window");
+    if (!close(id)) throw std::runtime_error("Hidden close failed");
+    hidden_stage = 2;
+  } else if (hidden_stage == 2) {
+    if (reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_IsOpen"))(id)) return;
+    id = open(path.c_str(), "{\"instanceKey\":\"startup-test.lua\",\"hidden\":true}");
+    if (!id || !close(id)) throw std::runtime_error("Close before initialization failed");
+    hidden_ready = GetTickCount();
+    hidden_stage = 3;
+  } else {
+    if (view && view.window.visible) throw std::runtime_error("Closed hidden window became visible");
+    if (GetTickCount() - hidden_ready < 1000) return;
+    if (reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_IsOpen"))(id))
+      throw std::runtime_error("Closed hidden window remained open");
+    finish("PASS: hidden native startup, background JS, Show without focus, Focus, Hide and early Close");
+  }
+}
 void tick() {
   try {
     if (GetTickCount() - started > 20000) throw std::runtime_error("First visible frame timed out");
@@ -44,6 +98,10 @@ void tick() {
       return;
     }
     if (!IsWindowVisible(host->hwnd_main)) return;
+    if (variant == 4) {
+      if (host->GetFunc("ReaWeb_OpenEx")) hidden_tick();
+      return;
+    }
     if (!id) {
       if (!host->GetFunc("ReaWeb_Open")) return;
       if (variant == 3) {
@@ -91,6 +149,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   const auto page = resource / "Scripts/startup-test/index.html"; fs::create_directories(page.parent_path());
   const auto background = variant == 1 ? "#e8d8c8" : variant == 2 ? "linear-gradient(120deg,#182838,#486878)" : "#182838";
   std::ofstream(page) << "<!doctype html><style>html{min-height:100%;background:" << background
-    << "}body{margin:0}#marker{width:100px;height:100px;background:#00ff00}</style><div id=marker></div>";
+    << "}body{margin:0}#marker{width:100px;height:100px;background:#00ff00}</style><div id=marker></div>"
+    << (variant == 4 ? "<script>reaper.lifecycle.ready.then(() => reaper.host.send('hidden-ready'))</script>" : "");
   started = GetTickCount(); host->Register("timer", reinterpret_cast<void*>(tick)); return 1;
 }

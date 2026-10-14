@@ -96,3 +96,7 @@ Namespace names do not require one C++ file each. `reaper.dialog.*` wraps the `G
 - Run the existing API, native ABI, Runtime, Python/SDK and packaging checks after structural changes. Keep validation records locally; see the [developer guide](development.md) for build instructions.
 
 Native Streams and platform additions: [English](native-streams.md) · [中文](native-streams.zh-CN.md).
+
+`src/runtime/window.cpp` validates OpenEx options, reuses instances and defers saved Docker attachment during hidden startup. Platform windows receive the initial hidden intent before native presentation. Windows/macOS reuse `shared/startup.hpp` for first-frame gating and explicit Show/Focus.
+
+`src/runtime/window.cpp` 校验 OpenEx 选项、复用实例并延迟隐藏启动的 Docker 接入。平台窗口在原生展示前接收隐藏意图，Windows/macOS 复用 `shared/startup.hpp` 处理首帧门控和主动 Show/Focus。

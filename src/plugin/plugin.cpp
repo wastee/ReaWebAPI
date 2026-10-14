@@ -70,6 +70,10 @@ int ReaWeb_Open(const char* path, const char* instance_key, const char* name, co
   return guarded([&] { return runtime->open_instance(path ? path : "", instance_key ? instance_key : "",
     name ? name : "", multiple && *multiple); }, 0);
 }
+int ReaWeb_OpenEx(const char* path, const char* options_json) {
+  return guarded([&] { return runtime->open_ex(path ? path : "", options_json ? options_json : ""); }, 0);
+}
+bool ReaWeb_Show(int id) { return guarded([&] { return runtime->show(id); }, false); }
 int ReaWeb_OpenDev(const char* url) { return guarded([&] { return runtime->open_dev(url ? url : ""); }, 0); }
 bool ReaWeb_Close(int id) { return guarded([&] { return runtime->close(id); }, false); }
 bool ReaWeb_IsOpen(int id) { return guarded([&] { return runtime->is_open(id); }, false); }
@@ -148,6 +152,11 @@ void* open_vararg(void** args, int count) {
 }
 void* dev_vararg(void** args, int count) {
   return reinterpret_cast<void*>(static_cast<intptr_t>(ReaWeb_OpenDev(count >= 1 ? static_cast<const char*>(args[0]) : nullptr)));
+}
+void* open_ex_vararg(void** args, int count) {
+  return reinterpret_cast<void*>(static_cast<intptr_t>(ReaWeb_OpenEx(
+    count >= 1 ? static_cast<const char*>(args[0]) : nullptr,
+    count >= 2 ? static_cast<const char*>(args[1]) : nullptr)));
 }
 template<bool (*Fn)(int)> void* id_vararg(void** args, int count) {
   const auto id = count >= 1 ? static_cast<int>(reinterpret_cast<intptr_t>(args[0])) : 0;
@@ -378,6 +387,10 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       "int\0const char*,const char*,const char*,const bool*\0path,instanceKeyInOptional,idInOptional,multipleInOptional\0Open local HTML. Relative paths resolve under resource/Scripts. An instanceKey reuses and focuses its window, optionally scoped by id. Omit the key or set multiple=true to create a new window. Returns a window id, or 0 on failure.\0");
     add_api("ReaWeb_Close", reinterpret_cast<void*>(ReaWeb_Close), reinterpret_cast<void*>(id_vararg<ReaWeb_Close>),
       "bool\0int\0windowId\0Close a ReaWebAPI window.\0");
+    add_api("ReaWeb_OpenEx", reinterpret_cast<void*>(ReaWeb_OpenEx), reinterpret_cast<void*>(open_ex_vararg),
+      "int\0const char*,const char*\0path,optionsJson\0Open local HTML with JSON options: instanceKey, id, multiple, hidden. Hidden applies only to new windows. Returns a window id, or 0 on failure.\0");
+    add_api("ReaWeb_Show", reinterpret_cast<void*>(ReaWeb_Show), reinterpret_cast<void*>(id_vararg<ReaWeb_Show>),
+      "bool\0int\0windowId\0Show a ReaWebAPI window without forcing focus. Returns false for an invalid or closed id.\0");
     add_api("ReaWeb_IsOpen", reinterpret_cast<void*>(ReaWeb_IsOpen), reinterpret_cast<void*>(id_vararg<ReaWeb_IsOpen>),
       "bool\0int\0windowId\0Return whether the window is open or initializing.\0");
     add_api("ReaWeb_DevTools", reinterpret_cast<void*>(ReaWeb_DevTools), reinterpret_cast<void*>(id_vararg<ReaWeb_DevTools>),

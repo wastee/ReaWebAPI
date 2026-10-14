@@ -245,7 +245,7 @@ public:
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
   }
-  WinWindow(WindowOptions options, HINSTANCE instance) : options_(std::move(options)), uri_(options_.url.empty() ? file_uri(options_.entry) : options_.url) {
+  WinWindow(WindowOptions options, HINSTANCE instance) : options_(std::move(options)), uri_(options_.url.empty() ? file_uri(options_.entry) : options_.url), startup_(options_.hidden) {
     // REAPER's Docker must be able to find focus inside the embedded inspector.
     hwnd_ = CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, window_class, wide(options_.title).c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
       CW_USEDEFAULT, CW_USEDEFAULT, 860, 640, static_cast<HWND>(options_.parent), nullptr, instance, this);
@@ -263,7 +263,7 @@ public:
     // A cloaked window keeps composing without exposing its empty native surface.
     const auto cloak_result = DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked));
     if (FAILED(cloak_result)) { DestroyWindow(hwnd_); check(cloak_result, "Cloak initial window"); }
-    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    if (!options_.hidden) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   }
   ~WinWindow() override {
     cursor_.finish();
@@ -292,6 +292,8 @@ public:
           self->controller_ = controller;
           check(controller->get_CoreWebView2(&self->webview_), "get_CoreWebView2");
           self->configure();
+          if (self->visible() && GetFocus() == self->hwnd_)
+            self->controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         } catch (const std::exception& e) { self->fail(e.what()); }
         return S_OK;
       }).Get());
@@ -481,9 +483,14 @@ public:
           fail("WebView2 could not present the initial window"); return;
         }
       }
-      ShowWindow(hwnd_, maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
+      if (maximized_) {
+        WINDOWPLACEMENT placement{sizeof(placement)};
+        GetWindowPlacement(hwnd_, &placement); placement.showCmd = SW_SHOWMAXIMIZED;
+        SetWindowPlacement(hwnd_, &placement);
+      }
+      ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
       RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-      if (GetForegroundWindow() == startup_foreground_) {
+      if (startup_.focus_requested() && GetForegroundWindow() == startup_foreground_) {
         if (options_.on_present) options_.on_present();
         if (!(GetWindowLongPtrW(hwnd_, GWL_STYLE) & WS_CHILD)) focus();
       }
@@ -496,8 +503,10 @@ public:
     if (controller_ && next != visible_) { controller_->put_IsVisible(next); visible_ = next; }
   }
   void focus() override {
-    if (closed_ || !hwnd_) return;
-    if (startup_.pending()) { startup_.request(true); startup_foreground_ = GetForegroundWindow(); return; }
+    if (closed_ || !hwnd_ || startup_.cancelled()) return;
+    if (startup_.pending()) { startup_.show(true); startup_foreground_ = GetForegroundWindow(); tick(); }
+    if (closed_ || startup_.cancelled()) return;
+    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     SetForegroundWindow(GetAncestor(hwnd_, GA_ROOT));
     SetFocus(hwnd_);
@@ -521,6 +530,20 @@ public:
     if (!visible) cursor_.finish();
     if (startup_.pending()) return;
     ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+  }
+  void show() override {
+    if (closed_ || startup_.cancelled()) return;
+    if (startup_.pending()) { startup_.show(); tick(); }
+    else set_visible(true);
+  }
+  void without_focus(const std::function<void()>& action) override {
+    const auto foreground = GetForegroundWindow(), focus = GetFocus();
+    const auto restore = [&] {
+      if (foreground && IsWindow(foreground) && GetForegroundWindow() != foreground) SetForegroundWindow(foreground);
+      if (focus && IsWindow(focus) && GetFocus() != focus) SetFocus(focus);
+    };
+    try { action(); } catch (...) { restore(); throw; }
+    restore();
   }
   bool visibility_requested() const override { return startup_.pending() ? startup_.wanted() : visible(); }
   bool presentation_pending() const override { return startup_.pending(); }
@@ -594,6 +617,9 @@ public:
       {"controllerVisible", visible_}, {"devtools", devtools_->diagnostics()}};
   }
   Json placement() const override {
+    if (startup_.pending() && !startup_.wanted() && floating_rect_.right > floating_rect_.left && floating_rect_.bottom > floating_rect_.top)
+      return {{"x", floating_rect_.left}, {"y", floating_rect_.top},
+        {"width", floating_rect_.right - floating_rect_.left}, {"height", floating_rect_.bottom - floating_rect_.top}, {"maximized", maximized_}};
     if (!hwnd_) return nullptr;
     RECT rect = floating_rect_;
     bool maximized = maximized_;
@@ -610,6 +636,7 @@ public:
     return {{"x", rect.left}, {"y", rect.top}, {"width", rect.right - rect.left}, {"height", rect.bottom - rect.top}, {"maximized", maximized}};
   }
   void restore_placement(const Json& value) override {
+    const bool shown = IsWindowVisible(hwnd_) != FALSE;
     RECT rect{value.at("x").get<LONG>(), value.at("y").get<LONG>(), 0, 0};
     const auto width = value.at("width").get<LONG>(), height = value.at("height").get<LONG>();
     rect.right = rect.left + width; rect.bottom = rect.top + height;
@@ -622,9 +649,9 @@ public:
     rect.right = rect.left + w; rect.bottom = rect.top + h;
     floating_rect_ = rect;
     maximized_ = value.value("maximized", false);
-    if (IsZoomed(hwnd_) || IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
+    if (shown && (IsZoomed(hwnd_) || IsIconic(hwnd_))) ShowWindow(hwnd_, SW_RESTORE);
     SetWindowPos(hwnd_, nullptr, rect.left, rect.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    ShowWindow(hwnd_, maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
+    if (shown) ShowWindow(hwnd_, maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
   }
   void* native_handle() const override { return hwnd_; }
   void prepare_dock() override {
@@ -654,8 +681,9 @@ public:
     icon_.refresh(hwnd_);
     restore_placement({{"x", floating_rect_.left}, {"y", floating_rect_.top},
       {"width", floating_rect_.right - floating_rect_.left}, {"height", floating_rect_.bottom - floating_rect_.top}, {"maximized", maximized_}});
+    if (startup_.pending() && startup_.wanted()) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     if (controller_) controller_->NotifyParentWindowPositionChanged();
-    focus();
+    if (!startup_.pending()) focus();
   }
 };
 

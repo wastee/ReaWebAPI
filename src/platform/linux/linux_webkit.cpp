@@ -244,6 +244,7 @@ public:
       channel_.send({{"id", id_}, {"op", "drop"}, {"payload", payload}});
     });
     plug_ = gtk_plug_new(0);
+    gtk_window_set_focus_on_map(GTK_WINDOW(plug_), FALSE);
     g_object_ref_sink(plug_);
     gtk_widget_set_app_paintable(plug_, TRUE);
     gtk_widget_set_redraw_on_allocate(plug_, FALSE);
