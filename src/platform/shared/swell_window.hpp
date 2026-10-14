@@ -11,7 +11,7 @@ public:
   void* handle() const { return window_; }
   bool closed() const;
   void prepare_dock();
-  void restore_floating();
+  void restore_floating(bool show = true);
   void focus();
   void set_title(const std::string& title);
   void set_visible(bool visible);
@@ -20,6 +20,11 @@ public:
   Json placement() const;
   void restore_placement(const Json& value);
   void set_background(unsigned color);
+#ifdef __linux__
+  void set_startup_frame(int width, int height, std::string pixels);
+  void show_startup_frame(bool maximized);
+  void clear_startup_frame();
+#endif
   std::function<void()> resize;
   std::function<void(LPARAM)> context_menu;
 private:
@@ -28,6 +33,10 @@ private:
   RECT floating_{};
   bool closed_ = false;
   unsigned background_ = 0xffffff;
+#ifdef __linux__
+  int startup_width_ = 0, startup_height_ = 0;
+  std::string startup_pixels_;
+#endif
   std::function<void()> focus_;
   std::function<void()> close_;
   static INT_PTR procedure(HWND, UINT, WPARAM, LPARAM);

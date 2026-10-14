@@ -13,6 +13,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - 15 个 Runtime 命名空间，涵盖窗口、事件、文件、原生对话框、拖放、音频、Undo 和应用服务。
 - 稳定的 `reaweb://<appId>` 来源，原生加载本地资源、模块和 Worker，持久化 App 存储，不创建每 App TCP listener。
 - 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。
+- Windows、macOS 和 Linux 在页面首帧准备完成后显示新窗口，现有 App 无需修改启动代码。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。
 - WebView 右键菜单提供停靠和 DevTools 控制。Docker 页签菜单另提供刷新、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
@@ -62,7 +63,7 @@ Lua 通过 `reaper.ReaWeb_Open(path, instanceKey)` 打开应用。传入 `debug.
 
 ## 构建
 
-需要 CMake 3.24+、C++17 工具链和 Python 3.10+，测试使用 Node.js。Linux 开发依赖为 `pkg-config`、`libwebkit2gtk-4.1-dev` 和 `libx11-dev`。
+需要 CMake 3.24+、C++17 工具链和 Python 3.10+，测试使用 Node.js。Linux 开发依赖为 `pkg-config`、`libwebkit2gtk-4.1-dev`、`libcairo2-dev` 和 `libx11-dev`。
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON

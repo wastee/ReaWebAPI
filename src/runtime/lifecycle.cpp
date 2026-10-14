@@ -55,6 +55,7 @@ void Runtime::complete_lifecycle(Session& s) {
     if (undo_owner_ == s.id) finish_undo();
     s.audio.clear();
     s.closing = true; s.closing_since = Clock::now();
+    s.window->cancel_pending_show();
     clear_messages(s);
   } else {
     s.allow_reload = true;

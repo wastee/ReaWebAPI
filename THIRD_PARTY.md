@@ -7,7 +7,7 @@
 - REAPER `analysis/loudness_meter`, Copyright (C) 2021 and later Cockos Incorporated: LGPL. The built-in Meter adapts its True Peak, RMS-I, K-weighted loudness and LRA algorithms. See `src/runtime/licenses/loudness_meter.txt`, `COPYING.LESSER` and `COPYING`.
 - [Microsoft.Web.WebView2 1.0.2903.40](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40): Microsoft WebView2 SDK license. The Windows module links its static loader; the Evergreen browser runtime is installed separately.
 - [cpp-httplib 0.56.0](https://github.com/yhirose/cpp-httplib/tree/v0.56.0), Yuji Hirose and contributors: MIT. Used for local-resource MIME lookup, byte-range parsing and read-only memory mapping. No production App HTTP listener.
-- macOS links the system Cocoa/WebKit frameworks. The Linux helper dynamically links system GTK 3, WebKitGTK 4.1 and Xlib. These libraries are not bundled.
+- macOS links the system Cocoa/WebKit frameworks. The Linux extension dynamically links system Cairo and Xlib. Its helper additionally links GTK 3 and WebKitGTK 4.1. These libraries are not bundled.
 - [LunaSVG 3.5.0](https://github.com/sammycage/lunasvg/tree/v3.5.0) and its pinned PlutoVG submodule, Samuel Habteselassie: MIT. Used for in-memory SVG window icons. PlutoVG includes Sean Barrett’s stb image/font code under MIT and rasterizer/stroker code under the FreeType Project License. This software is based in part on the work of the [FreeType Team](https://freetype.org/).
 
 Dependency notices are included under `ReaWebAPI/licenses/` in platform installation bundles. Exact source revisions and the WebView2 package SHA-256 are pinned in `CMakeLists.txt`.

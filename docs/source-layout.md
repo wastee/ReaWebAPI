@@ -47,6 +47,7 @@ src/
 │  ├─ linux/linux_webkit.cpp
 │  ├─ linux/linux_channel.hpp
 │  ├─ linux/gtk_drag.hpp
+│  ├─ shared/startup.hpp
 │  └─ shared/swell_window.cpp / swell_window.hpp
 ├─ web/
 │  └─ web_resources.cpp / web_resources.hpp
@@ -69,6 +70,10 @@ These are source responsibility groups, not five independent libraries. `reaweb_
 这五层是源码职责划分，不强行对应五个独立库。`reaweb_core` 构建通用桥接和可移植服务，`reaweb_runtime` 构建会话、窗口、事件和生命周期调度，`reawebapi` 加入插件入口与选定的平台后端。Runtime 测试和 Windows 原生拖放测试与扩展共用同一份 `reaweb_runtime`；Linux WebKit helper 仍是独立进程。
 
 ## API boundaries / API 边界
+
+`shared/startup.hpp` owns first-presentation visibility intent and navigation generations. Windows keeps the HWND cloaked while WebView2 prepares a capture, using an empty window region when docking before the first frame. macOS waits for a WKWebView snapshot before ordering the window. Linux transfers a bounded page snapshot to SWELL and primes X11 backgrounds before GTK mapping, then releases it after the first draw. Document loading requests a native capture, independently of the Runtime handshake. These are internal hooks and add no public creation options.
+
+`shared/startup.hpp` 管理首次展示的可见意图和导航代次。Windows 在 WebView2 准备快照时通过 DWM 隐藏 HWND，首帧前进入 Docker 时改用空窗口区域。macOS 取得 WKWebView 快照后显示窗口。Linux 向 SWELL 传递有大小限制的页面快照，并在 GTK 映射前填充 X11 背景，首轮绘制后释放快照。文档加载完成触发原生快照，与 Runtime 握手独立。这些内部钩子不增加公开创建选项。
 
 External Clients add an optional localhost protocol inside the same extension. `ReaperApiCore` owns shared native calls, handles and Batch. `Runtime` schedules windows and External Sessions using the same service registry, monitor manager and stream hub. The External transport handles sockets and JSON only. See [External Clients](external-clients.md).
 

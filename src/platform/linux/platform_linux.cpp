@@ -1,4 +1,5 @@
 #include "platform/shared/swell_window.hpp"
+#include "platform/shared/startup.hpp"
 #include "platform/linux/linux_channel.hpp"
 #include "platform/shared/devtools.hpp"
 #include "platform/shared/window_menu.hpp"
@@ -42,6 +43,8 @@ public:
   std::map<int, WindowOptions> listeners;
   std::map<int, Json> inspectors;
   std::map<int, unsigned> backgrounds;
+  std::map<int, Json> presentable;
+  std::set<int> presented;
   explicit LinuxProcess(const fs::path& data) {
     if (!getenv("DISPLAY")) throw std::runtime_error("ReaWebAPI requires an X11 or XWayland display on Linux");
     auto executable = helper_path().string();
@@ -104,6 +107,8 @@ public:
         auto it = listeners.find(message.at("id").get<int>());
         if (it == listeners.end()) return;
         if (op == "background") { backgrounds[it->first] = message.at("color").get<unsigned>(); return; }
+        if (op == "present") { presentable[it->first] = message; return; }
+        if (op == "presented") { presented.insert(it->first); return; }
         if (op == "devtools-state") { inspectors[it->first] = message.at("state"); return; }
         if (op == "message") it->second.on_message(message.at("message").get<std::string>());
         else if (op == "dock-toggle" && it->second.on_dock_toggle) it->second.on_dock_toggle();
@@ -159,6 +164,8 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   int pending_origin_x_ = 0, pending_origin_y_ = 0;
   LONG_PTR saved_style_ = 0;
   bool style_saved_ = false;
+  StartupPresentation startup_;
+  HWND startup_foreground_ = GetForegroundWindow();
 public:
   bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
@@ -181,6 +188,11 @@ public:
     return true;
   }
   LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id) {
+    auto on_navigation = std::move(options.on_navigation);
+    options.on_navigation = [this, on_navigation = std::move(on_navigation)] {
+      if (startup_.pending()) { startup_.navigate(); process_->presentable.erase(id_); }
+      if (on_navigation) on_navigation();
+    };
     auto on_close = std::move(options.on_close);
     options.on_close = [this, on_close = std::move(on_close)]() mutable {
       immediate_resize_enabled_ = false;
@@ -246,6 +258,8 @@ public:
     process_->listeners.erase(id_);
     process_->inspectors.erase(id_);
     process_->backgrounds.erase(id_);
+    process_->presentable.erase(id_);
+    process_->presented.erase(id_);
     try {
       // Detach before SWELL destroys the X11 parent, preserving other pages.
       process_->park(id_);
@@ -258,6 +272,22 @@ public:
       return;
     }
     window_->set_background(process_->backgrounds.at(id_));
+    if (process_->presented.erase(id_)) window_->clear_startup_frame();
+    if (auto it = process_->presentable.find(id_); it != process_->presentable.end()) {
+      const auto& frame = it->second;
+      window_->set_startup_frame(frame.at("width"), frame.at("height"), decode_binary(frame.at("pixels")));
+      process_->presentable.erase(it);
+      startup_.prepared(startup_.generation());
+    }
+    if (startup_.expired()) {
+      process_->listeners.at(id_).on_error("WebKitGTK initial frame did not become available within 15 seconds"); return;
+    }
+    if (startup_.present()) {
+      window_->show_startup_frame(maximized_ && !docked());
+      const auto& options = process_->listeners.at(id_);
+      if (GetForegroundWindow() == startup_foreground_ && options.on_present) options.on_present();
+    }
+    if (startup_.pending()) return;
     const bool is_docked = docked();
     icon_.refresh(icon_target(is_docked), is_docked);
     using GetXid = unsigned long (*)(void*);
@@ -359,7 +389,7 @@ public:
   void prepare_dock() override {
     immediate_resize_enabled_ = false;
     last_resize_sync_ = {};
-    normal_ = placement(); maximized_ = (native_state() & 4) != 0;
+    normal_ = placement(); maximized_ = normal_.value("maximized", false);
     if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_RESTORE);
     window_->prepare_dock();
     // REAPER's GTK Docker reparents this window, and SWELL's GDK backend only
@@ -394,11 +424,14 @@ public:
       SetWindowLong(static_cast<HWND>(window_->handle()), GWL_STYLE, saved_style_);
       style_saved_ = false;
     }
-    window_->restore_floating();
+    window_->restore_floating(!startup_.pending());
     if (!normal_.is_null()) restore_placement(normal_);
-    if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
+    if (maximized_ && !startup_.pending()) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
   }
-  void focus() override { window_->focus(); }
+  void focus() override {
+    if (startup_.pending()) { startup_.request(true); startup_foreground_ = GetForegroundWindow(); return; }
+    window_->focus();
+  }
   void set_title(const std::string& title) override { window_->set_title(title); }
   std::vector<int> icon_sizes() const override {
     const auto scale = LinuxIcon::scale(SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow"));
@@ -426,21 +459,27 @@ public:
   void clear_icon() override { icon_.clear(icon_target(), docked()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(icon_target(), visible, docked()); }
   void set_visible(bool visible) override {
+    startup_.request(visible);
     if (!visible) immediate_resize_enabled_ = false;
+    if (startup_.pending() && visible) return;
     window_->set_visible(visible);
   }
+  bool visibility_requested() const override { return startup_.pending() ? startup_.wanted() : visible(); }
+  bool presentation_pending() const override { return startup_.pending(); }
+  void cancel_pending_show() override { startup_.cancel(); }
   void show_after_create() override {
     immediate_resize_enabled_ = false;
-    window_->set_visible(true);
+    if (!startup_.pending()) window_->set_visible(startup_.wanted());
+    else window_->set_visible(false);
   }
   Json bounds() const override { return window_->placement(); }
   void reload() override { process_->send({{"id", id_}, {"op", "reload"}}); }
   void set_drop_enabled(bool enabled) override { process_->send({{"id", id_}, {"op", "drop-enabled"}, {"enabled", enabled}}); }
   void start_drag(const Json& payload, Reply reply) override { process_->desktop("ReaWeb_Drag", payload, std::move(reply), id_); }
-  bool visible() const override { return window_->visible() && !(native_state() & 2); }
+  bool visible() const override { return !startup_.pending() && window_->visible() && !(native_state() & 2); }
   bool focused() const override { return window_->focused(); }
   Json placement() const override {
-    const bool maximized = (native_state() & 4) != 0;
+    const bool maximized = startup_.pending() ? maximized_ : (native_state() & 4) != 0;
     if (!maximized) normal_ = window_->placement();
     auto value = normal_.is_null() ? window_->placement() : normal_;
     if (!value.is_null()) value["maximized"] = maximized;
@@ -450,7 +489,7 @@ public:
     normal_ = value;
     window_->restore_placement(value);
     maximized_ = value.value("maximized", false);
-    if (maximized_) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
+    if (maximized_ && !startup_.pending()) ShowWindow(static_cast<HWND>(window_->handle()), SW_SHOWMAXIMIZED);
   }
   Json diagnostics() const override {
     auto inspector = devtools_state();

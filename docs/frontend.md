@@ -26,6 +26,8 @@ The Windows backend forwards a non-client movement notification to the focused W
 
 ## Plain Web Apps
 
+Initial display waits for page loading and a native page snapshot. This avoids exposing an empty native/WebView surface while initial HTML and styles load. Linux retains that snapshot through the first GTK draw. Gradients, background images and the final CSS canvas color are preserved. Asynchronous App data loaded after the document's `load` event remains the App's responsibility. Initialization failures or a missing initial frame after 15 seconds close the pending window and report an error.
+
 Docked and floating WebViews synchronize their native resize background with an opaque CSS canvas background on `html`, or on `body` when propagated to the canvas. Root/body attribute changes, stylesheet loads and style-node changes, viewport resizing and system color-scheme changes refresh this color. Transparent or translucent canvas backgrounds retain the browser's white fallback. Background images and gradients remain browser-rendered. No App-side resize handler is required.
 
 Use ordinary HTML, CSS and JavaScript directories. No bundler or npm is required:

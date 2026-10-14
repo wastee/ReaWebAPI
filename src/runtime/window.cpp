@@ -163,7 +163,10 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       if (auto s = weak.lock())
         return s->title != s->default_title || s->title_explicit ? s->title : s->app->info.at("name").get<std::string>();
       return std::string();
-    }, app->resources});
+    }, app->resources, [this, weak] {
+      if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
+        dock_.activate(s->window->native_handle());
+    }});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);
@@ -179,9 +182,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     session->last_error = std::string("Window state was not restored: ") + e.what();
     log_(session->last_error);
   }
-  // A backend may create the native window hidden so Docker registration can
-  // happen before the first native show, and reveal it here. The default hook
-  // does nothing, so other backends keep their existing behavior.
+  // Complete native registration before a backend may present its first frame.
   session->window->show_after_create();
   return id;
 }
@@ -202,6 +203,9 @@ bool Runtime::close(int id) {
   if (undo_owner_ == id) finish_undo();
   auto it = sessions_.find(id);
   if (it == sessions_.end()) return false;
+  if (it->second->window->presentation_pending() && it->second->lifecycle_action == "reload")
+    it->second->lifecycle_action = "close";
+  it->second->window->cancel_pending_show();
   if (!it->second->closing && lifecycle(*it->second, "close")) return true;
   if (!it->second->closing) it->second->closing_since = Clock::now();
   it->second->closing = true;
@@ -213,7 +217,7 @@ bool Runtime::focus(int id) {
   check_thread();
   if (!is_open(id)) return false;
   auto& window = *sessions_.at(id)->window;
-  if (is_docked(id) && dock_.activate) dock_.activate(window.native_handle());
+  if (!window.presentation_pending() && is_docked(id) && dock_.activate) dock_.activate(window.native_handle());
   window.focus();
   return true;
 }
@@ -249,7 +253,7 @@ bool Runtime::set_docked(int id, bool docked) {
   // Docking hides the native window while the Docker takes it over, so remember
   // its visibility and restore it afterwards. Backends whose native window stays
   // untouched keep their own handling.
-  const bool was_visible = reparents ? session.window->visible() : true;
+  const bool was_visible = reparents ? session.window->visibility_requested() : true;
   if (docked) {
     persist(session);
     if (reparents) {
@@ -268,7 +272,7 @@ bool Runtime::set_docked(int id, bool docked) {
       session.icon_dirty = true; refresh_icon(session);
       throw Error("DOCK_FAILED", "REAPER did not accept the window into its Docker");
     }
-    dock_.activate(handle);
+    if (!session.window->presentation_pending()) dock_.activate(handle);
     if (reparents && was_visible) session.window->set_visible(true);
   } else {
     const auto index = dock_.index(handle);

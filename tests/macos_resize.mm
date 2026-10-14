@@ -76,7 +76,11 @@ void evaluate(NSString* script) {
   pending = true; checked = false;
   [view evaluateJavaScript:script completionHandler:^(::id value, NSError* error) {
     if (error) failure = error.description.UTF8String;
-    else if (![value respondsToSelector:@selector(boolValue)] || ![value boolValue]) failure = "Page state/viewport check failed";
+    else if (![value respondsToSelector:@selector(boolValue)] || ![value boolValue]) {
+      failure = std::string("Page state/viewport check failed: ") + [[value description] UTF8String];
+      [view evaluateJavaScript:@"JSON.stringify({width:innerWidth,height:innerHeight,token:window.resizeToken,frames:window.animationFrames,state:document.querySelector('#state').value})"
+        completionHandler:^(::id details, NSError*) { log(std::string("viewport=") + [[details description] UTF8String]); }];
+    }
     pending = false; checked = true;
   }];
 }
@@ -218,7 +222,8 @@ void tick() {
       dock_index = reinterpret_cast<decltype(dock_index)>(host->GetFunc("DockIsChildOfDock"));
       dock_position = reinterpret_cast<decltype(dock_position)>(host->GetFunc("DockGetPosition"));
       id = open_window((resource / "Scripts/resize-test/index.html").c_str(), "resize-acceptance", nullptr, nullptr);
-      require(id != 0, "Cannot open resize page"); return;
+      if (!id) throw std::runtime_error(reinterpret_cast<const char*(*)()>(host->GetFunc("ReaWeb_GetLastError"))());
+      return;
     }
     if (!window) {
       window = find_window(); if (!window) return;
@@ -228,7 +233,9 @@ void tick() {
     if (pending) return;
     switch (phase) {
       case 0:
+        if (!view.window.visible || view.hiddenOrHasHiddenAncestor) return;
         if (!background(0x182838)) return;
+        [NSApp activateIgnoringOtherApps:YES]; [view.window makeKeyAndOrderFront:nil];
         require(view.superview.wantsLayer, "Native WebView container is not layer backed");
         evaluate(@"window.resizeToken==='retained'"); advance(); break;
       case 1:
@@ -270,6 +277,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   if (!fs::exists(resource / "resize-test.enabled")) return 0;
   std::ifstream(resource / "resize-test.enabled") >> expected_position;
   const auto page = resource / "Scripts/resize-test/index.html"; fs::create_directories(page.parent_path());
+  std::ofstream(page.parent_path() / "app.json") << R"({"id":"resize-acceptance"})";
   std::ofstream(page) << R"(<!doctype html><title>Resize acceptance</title>
 <style>html{background:#182838}body{margin:0;overflow:hidden}#state{display:none}
 #marker{position:fixed;left:8px;top:8px;width:24px;height:24px;background:#00ff00}</style>

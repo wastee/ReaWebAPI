@@ -20,6 +20,8 @@ All fifteen namespaces provide implemented members: 77 methods and one Promise p
 
 ## Window and lifecycle
 
+New windows automatically become visible after their initial native frame is prepared. `getState().visible` stays false while presentation is pending, independently of `reaper.lifecycle.ready`. A pending `hide()` suppresses automatic display until `show()` or `focus()`. Closing cancels pending display, including during lifecycle cleanup. Existing `windowstatechange` events report the eventual visibility change.
+
 `reaper.window` provides `open(path)`, `openDev(url)`, `getSize`, `setSize(width,height)`, `getPosition`, `setPosition(x,y)`, `show`, `hide`, `getState`, `setTitle`, `setIcon`, `setIconVisible`, `focus`, `setDocked`, `isDocked`, `setKeyboardCapture`, `close` and `reload`. Use `setDocked(true)` to dock and `setDocked(false)` to undock; both return the actual docked state, so successful undocking returns false. New-window methods resolve to a window ID; controls act on the calling window without an ID. Bounds are outer window dimensions and screen coordinates in native desktop units, not CSS pixels. Size limits are 100–16384; coordinates are -1000000–1000000, clamped to the desktop work area. Docker geometry belongs to REAPER: setters reject with `WINDOW_DOCKED`. Hiding affects the App container, not the entire REAPER window.
 
 ```js

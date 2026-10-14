@@ -63,6 +63,7 @@ inline std::string page_background_script(const std::string& post) {
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', start, {once: true});
   else start();
   addEventListener('load', schedule, true);
+  addEventListener('load', () => { update(); post('__reawebPresent'); }, {once: true});
   addEventListener('pageshow', schedule);
   addEventListener('resize', schedule);
   for (const event of ['transitionend', 'animationend']) addEventListener(event, event => {

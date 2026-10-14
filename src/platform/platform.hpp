@@ -30,6 +30,7 @@ struct WindowOptions {
   std::function<bool()> is_docked;
   std::function<std::string()> app_name;
   std::shared_ptr<WebResources> resources;
+  std::function<void()> on_present;
 };
 class Window {
 public:
@@ -59,6 +60,9 @@ public:
   virtual void clear_icon() { throw Error("HOST_UNAVAILABLE", "Native window icons unavailable"); }
   virtual void set_icon_visible(bool) {}
   virtual bool visible() const { return !closed(); }
+  virtual bool visibility_requested() const { return visible(); }
+  virtual bool presentation_pending() const { return false; }
+  virtual void cancel_pending_show() {}
   virtual bool focused() const { return false; }
   virtual Json placement() const { return nullptr; }
   virtual void restore_placement(const Json&) {}

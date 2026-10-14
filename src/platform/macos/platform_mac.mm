@@ -1,6 +1,7 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
+#include "platform/shared/startup.hpp"
 #include "platform/shared/window_menu.hpp"
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -27,6 +28,7 @@ void open_external(const std::string& url) {
   std::string entryURI;
   std::string navigationURI;
   bool isClosed;
+  std::function<void()> navigationStarted;
 }
 @end
 
@@ -65,6 +67,7 @@ void open_external(const std::string& url) {
 }
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation {
   (void)webView; (void)navigation;
+  if (!isClosed && navigationStarted) navigationStarted();
   if (!isClosed && options.on_navigation) options.on_navigation();
 }
 - (void)webView:(WKWebView*)webView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
@@ -176,6 +179,31 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   ReaWebDelegate* delegate_;
   mutable Json normal_;
   bool maximized_ = false;
+  StartupPresentation startup_;
+  __weak NSWindow* startup_key_ = NSApp.keyWindow;
+  bool snapshot_pending_ = false;
+  unsigned snapshot_requested_ = ~0u;
+  void prepare_startup() {
+    snapshot_requested_ = startup_.generation();
+    if (!startup_.pending() || snapshot_pending_ || closed()) return;
+    snapshot_pending_ = true;
+    auto weak = weak_from_this();
+    const auto generation = startup_.generation();
+    auto configuration = [WKSnapshotConfiguration new];
+    configuration.afterScreenUpdates = YES;
+    [webview_ takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage* image, NSError* error) {
+      if (auto self = weak.lock(); self && !self->closed()) {
+        self->snapshot_pending_ = false;
+        if (generation != self->startup_.generation()) {
+          if (self->snapshot_requested_ == self->startup_.generation()) self->prepare_startup();
+        } else if (image && !error) self->startup_.prepared(generation);
+        else {
+          self->delegate_->isClosed = true;
+          self->delegate_->options.on_error("WKWebView could not prepare the initial frame");
+        }
+      }
+    }];
+  }
   NSImage* icon_ = nil;
   __weak NSWindow* icon_window_ = nil;
   bool icon_visible_ = true;
@@ -263,8 +291,10 @@ public:
     webview_.navigationDelegate = delegate_;
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close);
+    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true);
+    delegate_->navigationStarted = [this] { startup_.navigate(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
+      if (message == "__reawebPresent") { prepare_startup(); return; }
       if (!page_background_message(message, [this](unsigned color) {
         window_->set_background(color);
         auto background = [NSColor colorWithSRGBRed:((color >> 16) & 255) / 255.0
@@ -304,6 +334,7 @@ public:
     auto drag_reply = std::move(webview_->dragReply);
     if (drag_reply) try { drag_reply({{"result", false}}); } catch (...) {}
     delegate_->isClosed = true;
+    delegate_->navigationStarted = {};
     [webview_ stopLoading];
     webview_.navigationDelegate = nil;
     webview_.UIDelegate = nil;
@@ -366,11 +397,28 @@ public:
   }
   void restore_floating() override {
     icon_window_ = nil;
-    window_->restore_floating();
+    window_->restore_floating(!startup_.pending());
     if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
   }
-  void focus() override { window_->focus(); [webview_.window makeFirstResponder:webview_]; }
-  void tick() override { if (!closed()) { devtools_->tick(); apply_icon(); } }
+  void focus() override {
+    if (startup_.pending()) { startup_.request(true); startup_key_ = NSApp.keyWindow; return; }
+    window_->focus(); [webview_.window makeFirstResponder:webview_];
+  }
+  void tick() override {
+    if (closed()) return;
+    if (startup_.expired()) {
+      delegate_->isClosed = true;
+      delegate_->options.on_error("WKWebView initial frame did not become available within 15 seconds"); return;
+    }
+    if (startup_.present()) {
+      window_->set_visible(true);
+      if (NSApp.active && NSApp.keyWindow == startup_key_) {
+        if (delegate_->options.on_present) delegate_->options.on_present();
+        if (!(delegate_->options.is_docked && delegate_->options.is_docked())) focus();
+      }
+    }
+    devtools_->tick(); apply_icon();
+  }
   void set_title(const std::string& title) override { window_->set_title(title); icon_window_ = nil; apply_icon(); }
   std::vector<int> icon_sizes() const override {
     const auto scale = std::clamp(webview_.window ? webview_.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor, 1.0, 8.0);
@@ -390,10 +438,17 @@ public:
   }
   void clear_icon() override { icon_ = nil; icon_initialized_ = true; icon_window_ = nil; apply_icon(); }
   void set_icon_visible(bool visible) override { icon_visible_ = visible; apply_icon(); }
-  void set_visible(bool visible) override { window_->set_visible(visible); }
+  void set_visible(bool visible) override {
+    startup_.request(visible);
+    window_->set_visible(visible && !startup_.pending());
+  }
+  bool visibility_requested() const override { return startup_.pending() ? startup_.wanted() : visible(); }
+  bool presentation_pending() const override { return startup_.pending(); }
+  void cancel_pending_show() override { startup_.cancel(); }
+  void show_after_create() override { if (startup_.pending()) window_->set_visible(false); }
   Json bounds() const override { return window_->placement(); }
   void reload() override { [webview_ reload]; }
-  bool visible() const override { return window_->visible() && !webview_.hiddenOrHasHiddenAncestor && !webview_.window.miniaturized; }
+  bool visible() const override { return !startup_.pending() && window_->visible() && !webview_.hiddenOrHasHiddenAncestor && !webview_.window.miniaturized; }
   bool focused() const override {
     auto responder = webview_.window.firstResponder;
     return webview_.window.keyWindow && [responder isKindOfClass:[NSView class]] &&

@@ -1,4 +1,8 @@
 #include "platform/shared/swell_window.hpp"
+#ifdef __linux__
+#include <cairo-xlib.h>
+#include <dlfcn.h>
+#endif
 #include <swell/swell-dlggen.h>
 #include <algorithm>
 
@@ -17,6 +21,13 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
       const auto color = self->background_;
       auto brush = CreateSolidBrush(RGB((color >> 16) & 255, (color >> 8) & 255, color & 255));
       FillRect(dc, &paint.rcPaint, brush); DeleteObject(brush);
+#ifdef __linux__
+      if (!self->startup_pixels_.empty()) {
+        RECT rect{}; GetClientRect(window, &rect);
+        StretchBltFromMem(dc, 0, 0, rect.right, rect.bottom, self->startup_pixels_.data(),
+          self->startup_width_, self->startup_height_, self->startup_width_);
+      }
+#endif
       EndPaint(window, &paint);
     }
     return TRUE;
@@ -39,10 +50,7 @@ SwellWindow::SwellWindow(const std::string& title, void* parent, std::function<v
   window_ = CreateDialogParam(nullptr, MAKEINTRESOURCE(101), static_cast<HWND>(parent), procedure, reinterpret_cast<LPARAM>(this));
   if (!window_) throw std::runtime_error("Cannot create the REAPER WebView container");
   SetWindowText(window_, title.c_str());
-  // A backend that has to finish Docker registration before the first native
-  // show asks for a hidden window and reveals it later through
-  // show_after_create(). Showing it here and hiding it again would steal the
-  // foreground for one round trip. Every other backend shows it here.
+  // Backends can finish Docker registration and first-frame preparation before showing.
   if (!hidden) ShowWindow(window_, SW_SHOW);
 }
 SwellWindow::~SwellWindow() {
@@ -52,19 +60,65 @@ SwellWindow::~SwellWindow() {
   }
 }
 bool SwellWindow::closed() const { return closed_ || !window_ || !IsWindow(window_); }
+#ifdef __linux__
+void SwellWindow::set_startup_frame(int width, int height, std::string pixels) {
+  if (width < 1 || height < 1 || width > 4096 || height > 4096 || pixels.size() != size_t(width) * height * 4)
+    throw std::runtime_error("Invalid initial WebKit frame");
+  startup_width_ = width; startup_height_ = height; startup_pixels_ = std::move(pixels);
+}
+void SwellWindow::show_startup_frame(bool maximized) {
+  static auto default_display = reinterpret_cast<void*(*)()>(dlsym(RTLD_DEFAULT, "gdk_display_get_default"));
+  static auto xdisplay = reinterpret_cast<Display*(*)(void*)>(dlsym(RTLD_DEFAULT, "gdk_x11_display_get_xdisplay"));
+  static auto xid = reinterpret_cast<unsigned long(*)(void*)>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
+  if (!default_display || !xdisplay || !xid) throw std::runtime_error("Cannot prepare the initial X11 window");
+  auto display = xdisplay(default_display());
+  // Keep the WM from mapping the new SWELL surface before its background is ready.
+  XGrabServer(display);
+  struct Unlock { Display* display; ~Unlock() { XUngrabServer(display); XFlush(display); } } unlock{display};
+  ShowWindow(window_, maximized ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
+  if (auto native = SWELL_GetOSWindow(window_, "GdkWindow")) {
+    const auto target = xid(native);
+    XWindowAttributes attributes{};
+    if (XGetWindowAttributes(display, target, &attributes) && !startup_pixels_.empty()) {
+      auto pixmap = XCreatePixmap(display, target, attributes.width, attributes.height, attributes.depth);
+      auto surface = cairo_xlib_surface_create(display, pixmap, attributes.visual, attributes.width, attributes.height);
+      auto frame = cairo_image_surface_create_for_data(reinterpret_cast<unsigned char*>(startup_pixels_.data()),
+        CAIRO_FORMAT_RGB24, startup_width_, startup_height_, startup_width_ * 4);
+      auto dc = cairo_create(surface);
+      cairo_scale(dc, double(attributes.width) / startup_width_, double(attributes.height) / startup_height_);
+      cairo_set_source_surface(dc, frame, 0, 0); cairo_paint(dc);
+      cairo_destroy(dc); cairo_surface_destroy(frame); cairo_surface_destroy(surface);
+      XSetWindowBackgroundPixmap(display, target, pixmap); XClearWindow(display, target); XFreePixmap(display, pixmap);
+    }
+  }
+  UpdateWindow(window_);
+}
+void SwellWindow::clear_startup_frame() {
+  static auto get_display = reinterpret_cast<void*(*)(void*)>(dlsym(RTLD_DEFAULT, "gdk_window_get_display"));
+  static auto xdisplay = reinterpret_cast<Display*(*)(void*)>(dlsym(RTLD_DEFAULT, "gdk_x11_display_get_xdisplay"));
+  static auto xid = reinterpret_cast<unsigned long(*)(void*)>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
+  if (auto native = SWELL_GetOSWindow(window_, "GdkWindow"); native && get_display && xdisplay && xid) {
+    auto display = xdisplay(get_display(native));
+    XSetWindowBackgroundPixmap(display, xid(native), None); XFlush(display);
+  }
+  startup_pixels_.clear(); startup_pixels_.shrink_to_fit();
+}
+#endif
 void SwellWindow::set_background(unsigned color) {
   if (background_ == color) return;
   background_ = color;
   if (window_) InvalidateRect(window_, nullptr, FALSE);
 }
 void SwellWindow::prepare_dock() { GetWindowRect(window_, &floating_); }
-void SwellWindow::restore_floating() {
+void SwellWindow::restore_floating(bool show) {
   SetParent(window_, nullptr);
   SetWindowLong(window_, GWL_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner_));
   SetWindowPos(window_, nullptr, floating_.left, floating_.top,
     floating_.right - floating_.left, floating_.bottom - floating_.top, SWP_NOZORDER | SWP_NOACTIVATE);
-  ShowWindow(window_, SW_SHOW);
-  SetForegroundWindow(window_);
+  if (show) {
+    ShowWindow(window_, SW_SHOW);
+    SetForegroundWindow(window_);
+  }
   restore_placement(placement());
 }
 void SwellWindow::focus() {

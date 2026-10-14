@@ -1,7 +1,9 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
+#include "platform/shared/startup.hpp"
 #include <windows.h>
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -105,6 +107,31 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   WinDockRedraw dock_redraw_;
   WinCursor cursor_;
   COLORREF background_ = RGB(255, 255, 255);
+  StartupPresentation startup_;
+  HWND startup_foreground_ = GetForegroundWindow();
+  bool snapshot_pending_ = false;
+  unsigned snapshot_requested_ = ~0u;
+  bool startup_region_ = false;
+  void prepare_startup() {
+    snapshot_requested_ = startup_.generation();
+    if (!startup_.pending() || snapshot_pending_ || closed_) return;
+    ComPtr<IStream> stream;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) { fail("Cannot allocate the initial WebView2 capture"); return; }
+    snapshot_pending_ = true;
+    const auto generation = startup_.generation();
+    const auto hr = webview_->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream.Get(),
+      Callback<ICoreWebView2CapturePreviewCompletedHandler>([weak = weak_from_this(), stream, generation](HRESULT result) -> HRESULT {
+        if (auto self = weak.lock(); self && !self->closed_) {
+          self->snapshot_pending_ = false;
+          if (generation != self->startup_.generation()) {
+            if (self->snapshot_requested_ == self->startup_.generation()) self->prepare_startup();
+          } else if (SUCCEEDED(result)) { self->startup_.prepared(generation); self->tick(); }
+          else self->fail("WebView2 could not prepare the initial frame");
+        }
+        return S_OK;
+      }).Get());
+    if (FAILED(hr)) { snapshot_pending_ = false; fail("WebView2 could not capture the initial frame"); }
+  }
   void set_background(unsigned color) {
     const auto next = RGB((color >> 16) & 255, (color >> 8) & 255, color & 255);
     if (background_ == next) return;
@@ -232,7 +259,11 @@ public:
     catch (...) { DestroyWindow(hwnd_); throw; }
     // A REAPER-owned floating window stays above its owner when focus returns to REAPER.
     SetWindowLongPtrW(hwnd_, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(options_.parent));
-    ShowWindow(hwnd_, SW_SHOW);
+    const BOOL cloaked = TRUE;
+    // A cloaked window keeps composing without exposing its empty native surface.
+    const auto cloak_result = DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked));
+    if (FAILED(cloak_result)) { DestroyWindow(hwnd_); check(cloak_result, "Cloak initial window"); }
+    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   }
   ~WinWindow() override {
     cursor_.finish();
@@ -346,6 +377,7 @@ public:
           if (same_document(utf8(source), self->uri_) && SUCCEEDED(args->TryGetWebMessageAsString(&message))) {
             const auto text = utf8(message);
             if (text == WinCursor::message) self->cursor_.typed();
+            else if (text == "__reawebPresent") self->prepare_startup();
             else if (page_background_message(text, [self](unsigned color) { self->set_background(color); })) {}
             else if (text.rfind("{\"__reawebNativeDrop\":", 0) == 0) self->native_drop(args, text);
             else self->options_.on_message(text);
@@ -365,6 +397,7 @@ public:
         }
         else if (self->options_.on_reload && self->options_.on_reload()) args->put_Cancel(TRUE);
         else {
+          self->startup_.navigate();
           self->cursor_.finish();
           if (self->options_.on_navigation) self->options_.on_navigation();
         }
@@ -428,6 +461,7 @@ public:
   void restore_devtools(const Json& value) override { devtools_->restore(value); }
   bool closed() const override { return closed_; }
   bool visible() const override {
+    if (startup_.pending()) return false;
     auto root = hwnd_ ? GetAncestor(hwnd_, GA_ROOT) : nullptr;
     return hwnd_ && IsWindowVisible(hwnd_) && (!root || !IsIconic(root));
   }
@@ -436,15 +470,34 @@ public:
     return hwnd_ && (focus == hwnd_ || IsChild(hwnd_, focus));
   }
   void tick() override {
+    if (!closed_ && startup_.expired()) { fail("WebView2 initial frame did not become available within 15 seconds"); return; }
+    if (!closed_ && startup_.present()) {
+      if (startup_region_) {
+        if (!SetWindowRgn(hwnd_, nullptr, TRUE)) { fail("Cannot present the initial docked window"); return; }
+        startup_region_ = false;
+      } else {
+        const BOOL cloaked = FALSE;
+        if (FAILED(DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked)))) {
+          fail("WebView2 could not present the initial window"); return;
+        }
+      }
+      ShowWindow(hwnd_, maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
+      RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+      if (GetForegroundWindow() == startup_foreground_) {
+        if (options_.on_present) options_.on_present();
+        if (!(GetWindowLongPtrW(hwnd_, GWL_STYLE) & WS_CHILD)) focus();
+      }
+    }
     if (!closed_) cursor_.tick();
     if (!closed_) dock_redraw_.sync(hwnd_);
     if (!closed_) icon_.refresh(hwnd_, icon_host());
     if (!closed_ && devtools_) devtools_->tick(webview_.Get());
-    const bool next = visible();
+    const bool next = startup_.pending() || visible();
     if (controller_ && next != visible_) { controller_->put_IsVisible(next); visible_ = next; }
   }
   void focus() override {
     if (closed_ || !hwnd_) return;
+    if (startup_.pending()) { startup_.request(true); startup_foreground_ = GetForegroundWindow(); return; }
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     SetForegroundWindow(GetAncestor(hwnd_, GA_ROOT));
     SetFocus(hwnd_);
@@ -464,9 +517,14 @@ public:
   void clear_icon() override { icon_.clear(hwnd_, icon_host()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(hwnd_, visible, icon_host()); }
   void set_visible(bool visible) override {
+    startup_.request(visible);
     if (!visible) cursor_.finish();
+    if (startup_.pending()) return;
     ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
   }
+  bool visibility_requested() const override { return startup_.pending() ? startup_.wanted() : visible(); }
+  bool presentation_pending() const override { return startup_.pending(); }
+  void cancel_pending_show() override { startup_.cancel(); }
   void reload() override { if (webview_) webview_->Reload(); }
   Json bounds() const override {
     RECT rect{}; if (!hwnd_ || !GetWindowRect(hwnd_, &rect)) return nullptr;
@@ -570,6 +628,17 @@ public:
   }
   void* native_handle() const override { return hwnd_; }
   void prepare_dock() override {
+    if (startup_.pending() && !startup_region_) {
+      // DWM cannot uncloak an HWND after it becomes a non-layered child.
+      auto region = CreateRectRgn(0, 0, 0, 0);
+      if (!region || !SetWindowRgn(hwnd_, region, FALSE)) {
+        if (region) DeleteObject(region);
+        throw std::runtime_error("Cannot prepare the initial docked window");
+      }
+      startup_region_ = true;
+      const BOOL cloaked = FALSE;
+      check(DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked)), "Prepare initial docking");
+    }
     const auto saved = placement();
     maximized_ = saved.value("maximized", false);
     if (maximized_) ShowWindow(hwnd_, SW_RESTORE);

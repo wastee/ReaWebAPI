@@ -144,7 +144,7 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
       bounds[field.key()] = field.value();
     }
     bounds["maximized"] = false;
-    const bool visible = s.window->visible();
+    const bool visible = s.window->visibility_requested();
     s.window->restore_placement(bounds);
     if (!visible) s.window->set_visible(false);
     return host_call(id, "ReaWeb_GetBounds", Json::array());
@@ -152,7 +152,8 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   if (method == "ReaWeb_SetVisible") {
     if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected visibility boolean");
     s.window->set_visible(args[0].get<bool>());
-    if (args[0].get<bool>() && is_docked(id) && dock_.activate) dock_.activate(s.window->native_handle());
+    if (args[0].get<bool>() && !s.window->presentation_pending() && is_docked(id) && dock_.activate)
+      dock_.activate(s.window->native_handle());
     return window_state(s);
   }
   if (method == "ReaWeb_GetTheme") return theme_colors(host_);

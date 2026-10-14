@@ -13,10 +13,12 @@ int platform_count = 0;
 int platform_pumps = 0;
 std::vector<fs::path> profiles;
 std::string waiting_on;
+bool defer_next_presentation = false;
 struct FakeWindow : Window {
   WindowOptions options;
   bool is_closed = false;
   bool shown = true;
+  bool deferred = false, wants_visible = true, presentation_cancelled = false;
   bool drop_enabled = false, drag_result = true;
   bool defer_drag = false;
   Reply drag_reply;
@@ -44,13 +46,15 @@ struct FakeWindow : Window {
   void start_drag(const Json& payload, Reply reply) override { dragged = payload; if (defer_drag) drag_reply = std::move(reply); else reply({{"result", drag_result}}); }
   int reloads = 0;
   int focuses = 0;
-  void focus() override { ++focuses; shown = true; }
+  void focus() override { ++focuses; wants_visible = true; if (!deferred) shown = true; }
   std::vector<Json> responses;
   int sequence = 0;
   std::string document = "first";
   void set_title(const std::string& title) override { options.title = title; }
   Json bounds = {{"x", 40}, {"y", 50}, {"width", 860}, {"height", 640}, {"maximized", false}};
-  explicit FakeWindow(WindowOptions value) : options(std::move(value)) {}
+  explicit FakeWindow(WindowOptions value) : options(std::move(value)) {
+    deferred = defer_next_presentation; defer_next_presentation = false; shown = !deferred;
+  }
   void evaluate(const std::string& script) override {
     const auto start = script.find('(') + 1;
     auto message = Json::parse(script.substr(start, script.size() - start - 2));
@@ -62,7 +66,10 @@ struct FakeWindow : Window {
   Json placement() const override { return bounds; }
   void restore_placement(const Json& value) override { bounds = value; }
   bool visible() const override { return shown; }
-  void set_visible(bool value) override { shown = value; }
+  bool visibility_requested() const override { return deferred ? wants_visible : shown; }
+  bool presentation_pending() const override { return deferred; }
+  void cancel_pending_show() override { if (deferred) presentation_cancelled = true; }
+  void set_visible(bool value) override { wants_visible = value; shown = value && !deferred; }
   void reload() override {
     if (options.on_reload && options.on_reload()) return;
     ++reloads; if (options.on_navigation) options.on_navigation();
@@ -143,6 +150,37 @@ int main() {
     DockApi docks{nullptr,
       [&](void* h, const std::string&, const std::string& ident) { CHECK(ident.find("ReaWebAPI:") == 0); docked.insert(h); },
       [&](void* h) { docked.erase(h); }, [&](void* h) { return docked.count(h) ? 3 : -1; }, [](void*) {}};
+    {
+      int activations = 0;
+      auto startup_docks = docks; startup_docks.activate = [&](void*) { ++activations; };
+      Runtime runtime(host, root / "StartupProfile", [](const std::string&) {}, startup_docks);
+      defer_next_presentation = true;
+      const auto id = runtime.open(entry.u8string()); auto window = windows.back().lock();
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(runtime.is_ready(id) && !window->visible());
+      result(runtime, *window, window->send("ReaWeb_SetBounds", {{{"width", 900}}}));
+      CHECK(window->wants_visible && !window->visible());
+      runtime.set_docked(id, true); runtime.focus(id);
+      CHECK(activations == 0 && window->wants_visible);
+      result(runtime, *window, window->send("ReaWeb_SetVisible", {false}));
+      CHECK(!window->wants_visible);
+      result(runtime, *window, window->send("ReaWeb_SetVisible", {true}));
+      CHECK(activations == 0 && window->wants_visible);
+      window->deferred = false; window->shown = true; window->options.on_present();
+      CHECK(activations == 1);
+      runtime.close(id);
+
+      defer_next_presentation = true;
+      const auto closing = runtime.open(entry.u8string()); auto pending = windows.back().lock();
+      result(runtime, *pending, pending->send("__reawebHello", {1}));
+      result(runtime, *pending, pending->send("ReaWeb_LifecycleSubscribe", {true}));
+      CHECK(pending->options.on_reload());
+      runtime.close(closing);
+      CHECK(pending->presentation_cancelled && !pending->visible());
+      until(runtime, [&] { return !runtime.is_open(closing); });
+      CHECK(pending->reloads == 0);
+    }
+    windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {
       Runtime runtime(host, root, [&](const std::string& error) { errors.push_back(error); }, docks);
       const auto id = runtime.open("Tool/index.html"); auto first = windows.back().lock();
