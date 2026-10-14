@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +42,8 @@ class SdkTests(unittest.TestCase):
         self.assertEqual(set(headings), set(schema['functions']))
         self.assertEqual(len(headings), 730)
         files = {p.relative_to(ROOT).as_posix(): p.read_bytes() for directory in ('docs', 'runtime', 'api', 'web')
-                 for p in (ROOT / directory).rglob('*') if 'node_modules' not in p.parts and 'dist' not in p.parts and p.is_file() and p.suffix in ('.md', '.ts', '.js', '.json', '.lua', '.html', '.css')}
+                 for p in (ROOT / directory).rglob('*') if p != ROOT / 'docs/VALIDATION.md'
+                 and 'node_modules' not in p.parts and 'dist' not in p.parts and p.is_file() and p.suffix in ('.md', '.ts', '.js', '.json', '.lua', '.html', '.css')}
         files.update({n: (ROOT / n).read_bytes() for n in ('README.md', 'README.zh-CN.md', 'THIRD_PARTY.md', 'LICENSE.md', 'COPYING', 'COPYING.LESSER')})
         files.update({n: (ROOT / n).read_bytes() for n in ('src/public/reaweb_service.h', 'src/public/reaweb_stream.h', 'src/public/reaweb_tasks.h', 'tests/native_service_extension.cpp', 'tests/native_stream_extension.cpp')})
         check_links(files)
@@ -57,12 +59,26 @@ class SdkTests(unittest.TestCase):
         self.assertTrue(native <= set(schema['functions']))
         self.assertEqual(len(native), 456)
 
+    def test_sdk_does_not_require_local_validation(self):
+        read_bytes = Path.read_bytes
+
+        def read_without_validation(path):
+            if path == ROOT / 'docs/VALIDATION.md':
+                raise FileNotFoundError(path)
+            return read_bytes(path)
+
+        with patch.object(Path, 'read_bytes', read_without_validation):
+            files = payload(ROOT, '0.1.8.3', 'test-sdk')
+        self.assertNotIn('ReaWebAPI/docs/VALIDATION.md', files.keys())
+        check_links(files)
+
     def test_standalone_sdk_content_links_and_checksums(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = build_sdk(Path(directory), '0.1.8.3', 'test-sdk')
             self.assertEqual(archive.name, 'ReaWebAPI-SDK-v0.1.8.3.zip')
             with zipfile.ZipFile(archive) as z:
                 files = {name: z.read(name) for name in z.namelist()}
+                self.assertNotIn('ReaWebAPI/docs/VALIDATION.md', files.keys())
                 self.assertFalse(any(name.startswith('UserPlugins/') or name.endswith(('.dll', '.so', '.dylib')) for name in files))
                 metadata = json.loads(files['ReaWebAPI/SDK/BUILD.json'])
                 self.assertEqual(metadata['version'], '0.1.8.3')

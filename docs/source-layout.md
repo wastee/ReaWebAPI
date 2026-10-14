@@ -93,6 +93,6 @@ Namespace names do not require one C++ file each. `reaper.dialog.*` wraps the `G
 - Register new translation units explicitly in `CMakeLists.txt`. API generation and ABI test generation use the same qualified include paths.
 - API Sync reads `src/core/core.cpp`; SDK batch checks read `src/core/batch.hpp`. Keep those source checks synchronized when moving the registries.
 - Keep build-generated `api_schema.hpp`, `native_api.cpp` and `bridge_script.hpp` in the build directory.
-- Run the existing API, native ABI, Runtime, Python/SDK and packaging checks after structural changes. See `docs/VALIDATION.md` in the repository and the [developer guide](development.md).
+- Run the existing API, native ABI, Runtime, Python/SDK and packaging checks after structural changes. Keep validation records locally; see the [developer guide](development.md) for build instructions.
 
 Native Streams and platform additions: [English](native-streams.md) · [中文](native-streams.zh-CN.md).

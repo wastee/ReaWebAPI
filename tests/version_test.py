@@ -58,6 +58,8 @@ class VersionTests(unittest.TestCase):
             binary.write_bytes(b'TEST FIXTURE - NOT A NATIVE EXTENSION')
             shutil.copytree(ROOT / 'web', stage / 'Scripts/ReaWebAPI/Example')
             stage_sdk(stage, version)
+            # Reusing an old staging directory must not publish local validation notes.
+            (stage / 'ReaWebAPI/docs/VALIDATION.md').write_text('LOCAL VALIDATION NOTES', encoding='utf-8')
             result = subprocess.run([
                 sys.executable, str(ROOT / 'tools/package.py'), '--stage', str(stage),
                 '--platform', 'windows', '--arch', 'x64', '--revision', 'test-version',
@@ -67,6 +69,8 @@ class VersionTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in output.glob('*.zip')),
                              [f'ReaWebAPI-windows-x64-v{version}.zip'])
             with zipfile.ZipFile(output / f'ReaWebAPI-windows-x64-v{version}.zip') as archive:
+                self.assertNotIn('ReaWebAPI/docs/VALIDATION.md', archive.namelist())
+                self.assertNotIn(b'VALIDATION.md', archive.read('SHA256SUMS.txt'))
                 for name in ('ReaWebAPI/BUILD.json', 'ReaWebAPI/SDK/BUILD.json'):
                     metadata = json.loads(archive.read(name))
                     self.assertEqual(metadata['version'], version)

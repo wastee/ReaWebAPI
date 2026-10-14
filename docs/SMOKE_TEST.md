@@ -22,7 +22,7 @@
 - Build and install the optional `native_service_extension` in the isolated host. Check ping, send/changed, on/off, repeated disposal, missing method/service, pending timeout and unregister while pending. Re-register and subscribe again. An old handle must not reach the new registration.
 - Run `web/native-service/Coexist.lua` and use Lua echo while native features remain active. Run the existing Lua Backend Demo and check bidirectional messages and window behavior.
 
-Automated native tests exercise the same lifecycle and comparison contracts. See [Native Services](native-services.md) and [current validation](VALIDATION.md).
+Automated native tests exercise the same lifecycle and comparison contracts. See [Native Services](native-services.md). Validation records are maintained locally and are not included in the repository or release bundles.
 
 Run against a disposable REAPER project on each target architecture. CI core tests use a mock REAPER host and do not establish real-host UI compatibility.
 

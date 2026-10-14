@@ -53,7 +53,7 @@ def payload(root, version, revision):
                  'src/main.ts', 'src/worker.ts', 'src/style.css', 'public/data.json', 'public/app.json'):
         paths[f'ReaWebAPI/SDK/modern/{name}'] = root / 'runtime/modern' / name
     for name in ('README.md', 'README.zh-CN.md', 'development.md', 'development.zh-CN.md',
-                 'devtools.md', 'devtools.zh-CN.md', 'SMOKE_TEST.md', 'VALIDATION.md',
+                 'devtools.md', 'devtools.zh-CN.md', 'SMOKE_TEST.md',
                  'host-api.md', 'host-api.zh-CN.md', 'runtime-api.md', 'runtime-api.zh-CN.md', 'runtime-api-inventory.md', 'permission-design.md', 'api-reference.md', 'frontend.md', 'frontend.zh-CN.md', 'release-notes.md', 'source-layout.md'):
         paths[f'ReaWebAPI/docs/{name}'] = root / 'docs' / name
     for name in ('reaper_api.json', 'bindings.json'):
@@ -88,7 +88,10 @@ def payload(root, version, revision):
 
 
 def stage_sdk(stage, version, revision='local', root=ROOT):
-    for name, content in payload(root, version, revision).items():
+    files = payload(root, version, revision)
+    # Remove the old packaged copy when an install prefix is reused. Source notes stay local.
+    (stage / 'ReaWebAPI/docs/VALIDATION.md').unlink(missing_ok=True)
+    for name, content in files.items():
         path = stage / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
