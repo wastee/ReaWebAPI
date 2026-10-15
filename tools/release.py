@@ -74,8 +74,8 @@ def descriptor(version, demo_directory=None):
     entries = demo_entries(demo_directory)
     if not (demo_directory / 'ReaWebAPI_Demo.lua').is_file():
         raise ValueError('Missing Demo launcher: ReaWebAPI_Demo.lua')
-    lines = ['@description ReaWebAPI: JavaScript Runtime for REAPER', f'@version {version}', '@author zaibuyidao',
-             '@link https://github.com/zaibuyidao/ReaScripts/tree/master/ReaWebAPI', '@provides']
+    lines = ['@description ReaWebAPI: Web Runtime for REAPER', f'@version {version}', '@author zaibuyidao',
+             '@link https://github.com/zaibuyidao/ReaWebAPI', '@provides']
     for platform, name in native_files():
         url = f'https://raw.githubusercontent.com/zaibuyidao/ReaScripts/$commit/ReaWebAPI/extension/{name}'
         lines.append(f'  [{platform} extension] {name} {url}')
@@ -91,8 +91,8 @@ def descriptor(version, demo_directory=None):
             'native-service/reawebapi-native-service.lua',
             'native-service/Coexist.lua',
             'native-stream/reawebapi-native-stream.lua',
-            'frameless/Open.lua',
-            'frameless/Fixed.lua',
+            'frameless/reawebapi-frameless-resizable.lua',
+            'frameless/reawebapi-frameless-fixed.lua',
         ) else 'script nomain'
         url = f'https://raw.githubusercontent.com/zaibuyidao/ReaScripts/$commit/ReaWebAPI/web/{quote(name, safe="/")}'
         lines.append(f'  [{options}] web/{name} {url}')
@@ -124,11 +124,9 @@ def assemble(directory, version, revision):
                     raise ValueError(f'Missing or mismatched native asset: {name}')
                 assets.append(file)
         assets.append(bundle)
-    ext = directory / 'ReaWebAPI.ext'
-    ext.write_text(descriptor(version), encoding='utf-8', newline='\n')
     reapack = directory / f'ReaWebAPI-ReaPack-v{version}.zip'
     with zipfile.ZipFile(reapack, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.write(ext, ext.name)
+        archive.writestr('ReaWebAPI.ext', descriptor(version).encode('utf-8'))
         add_demo(archive, Path(__file__).resolve().parents[1] / 'web')
         for _, name in native_files():
             # Preserve executable permission even when Actions normalized downloaded files to 0644.
@@ -137,7 +135,7 @@ def assemble(directory, version, revision):
             info.external_attr = 0o100755 << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, (directory / name).read_bytes())
-    assets += [ext, reapack, build_sdk(directory, version, revision)]
+    assets += [reapack, build_sdk(directory, version, revision)]
     checksums = directory / 'SHA256SUMS.txt'
     checksums.write_text(''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n'
                                 for file in sorted(assets)), encoding='ascii')

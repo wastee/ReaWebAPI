@@ -74,14 +74,14 @@ for _, path in ipairs(launchers) do
     assert(not windows[2] and next(ext) == nil, 'Backend termination must release ownership')
   end
 end
-for _, name in ipairs({'Open.lua', 'Fixed.lua'}) do
+for _, name in ipairs({'reawebapi-frameless-resizable.lua', 'reawebapi-frameless-fixed.lua'}) do
   local called = false
   reaper = {
     APIExists = function(api) return api == 'ReaWeb_OpenEx' end,
     ReaWeb_OpenEx = function(path, options)
       assert(path:match('/frameless/index.html$'), path)
       assert(options:find('"frameless":true', 1, true), options)
-      assert(options:find('"resizable":' .. tostring(name == 'Open.lua'), 1, true), options)
+      assert(options:find('"resizable":' .. tostring(name == 'reawebapi-frameless-resizable.lua'), 1, true), options)
       assert(options:find(name, 1, true) and options:find('"instanceKey":"@', 1, true), options)
       called = true; return 1
     end,
@@ -89,5 +89,12 @@ for _, name in ipairs({'Open.lua', 'Fixed.lua'}) do
   }
   assert(loadfile(root .. '/web/frameless/' .. name))()
   assert(called, name)
+end
+do
+  local message
+  reaper = { MB = function(text) message = text end }
+  assert(loadfile(root .. '/web/frameless/launch.lua'))()
+  assert(message and message:find('reawebapi-frameless-resizable.lua', 1, true) and message:find('reawebapi-frameless-fixed.lua', 1, true),
+    'Running the shared helper directly must explain which launcher to use')
 end
 print('Lua launchers: singleton, focus, close, restart, backend cleanup and message encoding passed')

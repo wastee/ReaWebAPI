@@ -45,7 +45,7 @@ def payload(root, version, revision):
         paths[f'ReaWebAPI/SDK/runtime-demo/{name}'] = root / 'runtime/runtime-demo' / name
     for name in ('Open.lua', 'index.html', 'app.json', 'README.md'):
         paths[f'ReaWebAPI/SDK/hidden-start/{name}'] = root / 'runtime/hidden-start' / name
-    for name in ('Open.lua', 'Fixed.lua', 'launch.lua', 'index.html', 'app.js', 'style.css', 'app.json', 'README.md'):
+    for name in ('reawebapi-frameless-resizable.lua', 'reawebapi-frameless-fixed.lua', 'launch.lua', 'index.html', 'app.js', 'style.css', 'app.json', 'README.md'):
         paths[f'ReaWebAPI/SDK/frameless/{name}'] = root / 'web/frameless' / name
     for name in ('Open.lua', 'index.html', 'app.js', 'style.css', 'jsconfig.json', 'app.json'):
         paths[f'ReaWebAPI/SDK/starter/{name}'] = root / 'runtime/starter' / name

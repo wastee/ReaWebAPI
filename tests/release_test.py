@@ -32,8 +32,13 @@ class ReleaseTests(unittest.TestCase):
         self.temp.cleanup()
     def test_exact_reapack_layout(self):
         assets = release.assemble(self.directory, self.version, 'test-sha')
-        self.assertEqual(len(assets), 16)
+        self.assertEqual(len(assets), 15)
+        self.assertNotIn(self.directory / 'ReaWebAPI.ext', assets)
+        self.assertFalse((self.directory / 'ReaWebAPI.ext').exists())
         self.assertIn(self.directory / f'ReaWebAPI-SDK-v{self.version}.zip', assets)
+        checksums = (self.directory / 'SHA256SUMS.txt').read_text(encoding='ascii')
+        self.assertEqual({line.split('  ', 1)[1] for line in checksums.splitlines()},
+                         {asset.name for asset in assets if asset.name != 'SHA256SUMS.txt'})
         with zipfile.ZipFile(self.directory / f'ReaWebAPI-ReaPack-v{self.version}.zip') as bundle:
             demo = Path(__file__).parents[1] / 'web'
             demo_files = {f'web/{path.relative_to(demo).as_posix()}': path.read_bytes()
@@ -48,19 +53,22 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(bundle.read(f'extension/{name}'), (self.directory / name).read_bytes())
                 self.assertEqual(bundle.getinfo(f'extension/{name}').external_attr >> 16, 0o100755)
             descriptor = bundle.read('ReaWebAPI.ext').decode()
+            self.assertEqual([line for line in descriptor.splitlines() if line.startswith('@description ')],
+                             ['@description ReaWebAPI: Web Runtime for REAPER'])
+            self.assertEqual([line for line in descriptor.splitlines() if line.startswith('@link ')],
+                             ['@link https://github.com/zaibuyidao/ReaWebAPI'])
             self.assertNotIn('[data]', descriptor)
             entries = release.re.findall(r'^  \[script (main|nomain)\] (web/.+?) (https://\S+)$',
                                          descriptor, release.re.MULTILINE)
             self.assertEqual(len(entries), len(demo_files))
             self.assertEqual({target for _, target, _ in entries}, set(demo_files))
             self.assertCountEqual([target for mode, target, _ in entries if mode == 'main'],
-                             ['web/ReaWebAPI_Demo.lua', 'web/lua-backend/reawebapi-lua-backend.lua', 'web/native-service/reawebapi-native-service.lua', 'web/native-service/Coexist.lua', 'web/native-stream/reawebapi-native-stream.lua', 'web/frameless/Open.lua', 'web/frameless/Fixed.lua'])
+                             ['web/ReaWebAPI_Demo.lua', 'web/lua-backend/reawebapi-lua-backend.lua', 'web/native-service/reawebapi-native-service.lua', 'web/native-service/Coexist.lua', 'web/native-stream/reawebapi-native-stream.lua', 'web/frameless/reawebapi-frameless-fixed.lua', 'web/frameless/reawebapi-frameless-resizable.lua'])
             for _, target, url in entries:
                 self.assertEqual(unquote(url),
                                  'https://raw.githubusercontent.com/zaibuyidao/ReaScripts/$commit/ReaWebAPI/' + target)
                 self.assertEqual(bundle.read(target), demo_files[target])
             self.assertIn('-- @noindex', bundle.read('web/ReaWebAPI_Demo.lua').decode())
-            self.assertEqual((self.directory / 'ReaWebAPI.ext').read_text(encoding='utf-8'), descriptor)
             changelog = descriptor.split('@changelog\n', 1)[1]
             # Follow this checkout's notes instead of hard-coding one release's prose or bullet count.
             english_notes = release.version_notes(self.version).split('## 简体中文', 1)[0].split('## 更新', 1)[0]
@@ -148,6 +156,7 @@ class ReleaseTests(unittest.TestCase):
     def test_wrong_commit_blocks_release(self):
         with self.assertRaises(ValueError): release.assemble(self.directory, self.version, 'other-sha')
     def test_draft_uploaded_before_publish(self):
+        assets = release.assemble(self.directory, self.version, 'test-sha')
         calls = []
         def mock(*args):
             calls.append(args)
@@ -157,8 +166,10 @@ class ReleaseTests(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, args, stderr='HTTP 404')
             return ''
         with patch.object(release, 'gh', side_effect=mock):
-            release.publish('test/repo', self.version, 'test-sha', [self.directory / 'reaper_reawebapi-x64.dll'])
+            release.publish('test/repo', self.version, 'test-sha', assets)
         self.assertEqual([c[:2] for c in calls[3:]], [('release', 'create'), ('release', 'upload'), ('release', 'edit')])
+        self.assertEqual(calls[4][6:], tuple(str(asset) for asset in assets))
+        self.assertNotIn(str(self.directory / 'ReaWebAPI.ext'), calls[4])
         self.assertIn('--draft', calls[3])
         self.assertIn('--draft=false', calls[-1])
         self.assertEqual(calls[3][2], f'v{self.version}')

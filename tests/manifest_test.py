@@ -25,6 +25,12 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(validate(self.path)[1], self.root.resolve() / 'index.html')
         self.assertEqual(before, (self.path.read_bytes(), self.path.stat().st_mtime_ns))
 
+    def test_shipped_web_manifests(self):
+        web = Path(__file__).resolve().parents[1] / 'web'
+        for path in sorted(web.rglob('app.json')):
+            with self.subTest(app=path.relative_to(web).as_posix()):
+                validate(path)
+
     def test_invalid_fields_and_entry_paths(self):
         for fields in ({'permissions': []}, {'schemaVersion': True}, {'version': 'latest'}, {'name': ''},
                        {'entry': '../index.html'}, {'entry': 'C:/index.html'}, {'entry': '/index.html'}, {'entry': 'missing.html'}):
