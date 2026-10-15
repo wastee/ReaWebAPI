@@ -181,3 +181,7 @@ WebView2 取决于已安装运行时，WKWebView 跟随系统更新，WebKitGTK 
 ```
 
 Windows 使用 WebView2 原生非客户区。macOS 和 Linux 在按下前缓存经过裁剪的 DOM 矩形，直接消费原生鼠标事件，不通过异步 Runtime 调用开始拖动。交互期间应保持标题区布局稳定。布局快照采样间隔为 32 ms，拖动矩形和排除矩形各最多 512 个，超限时停用拖动。任意形状和动画命中区域不在此合同内。Docker 内停用拖动区，拖动区外的右键操作保留既有页面菜单行为。参见[示例](../web/frameless/README.md)。
+
+## 透明背景
+
+以 `{transparent:true}` 打开，并显式设置 `html, body { background:transparent; }`。宿主不改写 App CSS。可在透明页面留白内使用半透明面板、圆角和 CSS 阴影，无边框工具应保留可见关闭控件。视觉透明仍采用矩形鼠标命中区域。参见[透明 Demo](../web/transparent/README.md)及[原生要求](host-api.zh-CN.md#透明窗口)。

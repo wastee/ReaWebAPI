@@ -56,6 +56,32 @@ class Page {
   GdkRGBA background_{1, 1, 1, 1};
   DragRegions drag_regions_;
   bool frameless_ = false, resizable_ = true, docked_ = false;
+  bool transparent_ = false, page_ready_ = false, alpha_pending_ = false;
+  unsigned long alpha_parent_ = 0;
+  void prepare_alpha() {
+    if (!transparent_ || !page_ready_ || !parent_ || !mapped_ || alpha_pending_ || alpha_parent_ == parent_ || failed_) return;
+    alpha_pending_ = true;
+    const auto parent = parent_;
+    webkit_web_view_get_snapshot(view_, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE, nullptr,
+      +[](GObject* source, GAsyncResult* result, gpointer data) {
+        const auto parent = *static_cast<unsigned long*>(data);
+        delete static_cast<unsigned long*>(data);
+        GError* error = nullptr;
+        auto surface = webkit_web_view_get_snapshot_finish(WEBKIT_WEB_VIEW(source), result, &error);
+        auto self = static_cast<Page*>(g_object_get_data(source, "reaweb-alpha"));
+        if (self && !self->failed_) {
+          self->alpha_pending_ = false;
+          if (!surface || error) self->fail("TRANSPARENCY_FAILED: WebKitGTK could not prepare the Alpha frame");
+          else if (self->parent_ == parent && self->mapped_) {
+            self->alpha_parent_ = parent;
+            try { self->channel_.send({{"id", self->id_}, {"op", "alpha-frame"}, {"parent", parent}}); }
+            catch (const std::exception& failure) { self->fail(failure.what()); }
+          } else self->prepare_alpha();
+        }
+        if (surface) cairo_surface_destroy(surface);
+        if (error) g_error_free(error);
+      }, new unsigned long(parent));
+  }
   // The host learns a new size from REAPER's message loop, so it can only tell
   // this process about a resize as often as that loop runs. While the user drags
   // an edge, the window manager resizes the parent far more often than that.
@@ -121,6 +147,7 @@ class Page {
     gdk_x11_display_error_trap_pop_ignored(gtk_display);
   }
   void set_background(unsigned color) {
+    if (transparent_) return;
     background_ = {((color >> 16) & 255) / 255.0, ((color >> 8) & 255) / 255.0, (color & 255) / 255.0, 1};
     webkit_web_view_set_background_color(view_, &background_);
     gdk_window_set_background_rgba(gtk_widget_get_window(plug_), &background_);
@@ -211,6 +238,13 @@ public:
   Page(LinuxChannel& channel, WebKitWebContext* context, const Json& request)
     : channel_(channel), id_(request.at("id").get<int>()), uri_(request.at("uri").get<std::string>()) {
     frameless_ = request.value("frameless", false); resizable_ = request.value("resizable", true);
+    transparent_ = request.value("transparent", false);
+    if (transparent_) {
+      auto screen = gdk_screen_get_default();
+      if (!gdk_screen_is_composited(screen) || !gdk_screen_get_rgba_visual(screen))
+        throw Error("TRANSPARENCY_UNAVAILABLE", "Desktop Alpha requires an X11 compositor and RGBA visual");
+      background_ = {0, 0, 0, 0};
+    }
     if (frameless_ && !window_moves_supported()) throw Error("HOST_UNAVAILABLE", "Frameless windows require an X11 window manager with _NET_WM_MOVERESIZE support");
     intercept_reload_ = request.value("lifecycleReload", false);
     navigation_uri_ = uri_;
@@ -235,13 +269,17 @@ public:
       throw std::runtime_error("Could not register WebKitGTK bridge");
     }
     const auto source = request.at("script").get<std::string>() +
-      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);") +
+      (transparent_ ? "" : page_background_script("webkit.messageHandlers.reaweb.postMessage(message);")) +
       (frameless_ ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : "");
     auto script = webkit_user_script_new(source.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(manager_, script);
     webkit_user_script_unref(script);
     view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, "user-content-manager", manager_, nullptr));
+    if (transparent_) {
+      g_object_set_data(G_OBJECT(view_), "reaweb-alpha", this);
+      webkit_web_view_set_background_color(view_, &background_);
+    }
     const auto resource_root = request.value("resourceRoot", std::string());
     if (!resource_root.empty()) {
       const auto end = uri_.find('/', 9);
@@ -299,6 +337,9 @@ public:
       return FALSE;
     }), this);
     g_signal_connect(view_, "load-changed", G_CALLBACK(+[](WebKitWebView*, WebKitLoadEvent event, gpointer data) {
+      auto page = static_cast<Page*>(data);
+      if (event == WEBKIT_LOAD_STARTED) page->page_ready_ = false;
+      if (event == WEBKIT_LOAD_FINISHED) { page->page_ready_ = true; page->prepare_alpha(); }
       if (event == WEBKIT_LOAD_STARTED) {
         auto self = static_cast<Page*>(data);
         self->loaded_ = true;
@@ -311,13 +352,17 @@ public:
       channel_.send({{"id", id_}, {"op", "drop"}, {"payload", payload}});
     });
     plug_ = gtk_plug_new(0);
+    if (transparent_) gtk_widget_set_visual(plug_, gdk_screen_get_rgba_visual(gtk_widget_get_screen(plug_)));
     gtk_window_set_focus_on_map(GTK_WINDOW(plug_), FALSE);
     g_object_ref_sink(plug_);
     gtk_widget_set_app_paintable(plug_, TRUE);
     gtk_widget_set_redraw_on_allocate(plug_, FALSE);
     g_signal_connect(plug_, "draw", G_CALLBACK(+[](GtkWidget*, cairo_t* dc, gpointer data) -> gboolean {
+      const auto transparent = static_cast<Page*>(data)->transparent_;
+      if (transparent) { cairo_save(dc); cairo_set_operator(dc, CAIRO_OPERATOR_SOURCE); }
       gdk_cairo_set_source_rgba(dc, &static_cast<Page*>(data)->background_);
       cairo_paint(dc);
+      if (transparent) cairo_restore(dc);
       return FALSE;
     }), this);
     // GtkPlug emits delete-event when parked on the X11 root. The native host owns closing.
@@ -372,6 +417,7 @@ public:
   }
   ~Page() {
     failed_ = true;
+    g_object_set_data(G_OBJECT(view_), "reaweb-alpha", nullptr);
     watchParent(0, false);
     if (filter_installed_) { gdk_window_remove_filter(nullptr, &Page::filterEvent, this); filter_installed_ = false; }
     dock_menu_.reset();
@@ -418,6 +464,7 @@ public:
       XReparentWindow(display, xid, DefaultRootWindow(display), 0, 0);
       XSync(display, False);
       parent_ = 0;
+      alpha_parent_ = 0;
       geometry_initialized_ = false;
       devtools_->owner(0);
       channel_.send({{"id", id_}, {"op", "parked"}});
@@ -505,6 +552,7 @@ public:
       geometry_initialized_ = true;
       XFlush(display);
       gdk_x11_display_error_trap_pop_ignored(gtk_widget_get_display(plug_));
+      prepare_alpha();
     } else if (op == "focus" && parent_) {
       const bool focused = request.value("focused", true);
       set_host_focus(focused);

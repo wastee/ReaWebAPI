@@ -177,3 +177,15 @@ During the hold period, switch to another application. Verify that Show leaves i
 On Windows, build `windows_startup` and run `windows_startup 20 --hidden` for native visibility/focus checks. Keep real screen recordings and frame inspection separate from API/state assertions. Windows 10 and Windows 11 require separate host runs. Linux requires X11/XWayland, and input-driven resize tests require an isolated display.
 
 On macOS, build `macos_startup` in `build-arm64`, then run `STARTUP_VARIANTS=4 STARTUP_RUNS=20 python3 tests/macos_startup.py`. It uses cold isolated profiles to check native hidden creation, background JS, Show without focus, Focus, Hide and Close before initialization. A logged-in graphical session is required.
+
+## Transparent floating windows
+
+Run `python tests/transparent_smoke.py --reaper <executable> --extension <binary> --output <new-profile> --count 20` for transparent state, hidden startup, Lua/JS Dock rejection, instance reuse, reload and close. Runtime tests separately cover saved Dock preference preservation, menu rejection, invalid options and initialization failures.
+
+Use the transparent Demo against a changing native background. Check clear margins, half-alpha panels, rounded corners and shadows in desktop captures. Opaque CSS must remain opaque. Repeat with framed/frameless, hidden/visible and resizable/fixed windows. Transparent pixels must still receive mouse input. Confirm drag exclusions, controls, IME, file drag-and-drop, Inspector, DPI/display transitions and ordinary-window coexistence.
+
+- Windows: build `windows_transparent`, then run `build/tests/Release/windows_transparent.exe` and repeat with `--srgb`. This native backend test samples the desktop in four framed/hidden combinations and checks rectangular hit testing. Run the host smoke separately in REAPER.
+- macOS: build `macos_transparent`. Install its test module beside the extension in a dedicated REAPER resource directory, write `0` (frameless) or `1` (framed) to `transparent-test.enabled`, and launch that profile. Screen capture and input permissions are required. The test checks desktop Alpha against a changing background, transparent-region input, hidden startup, Dock rejection and Hide/Show/Reload, then writes `transparent-test.log` and exits.
+- Linux: run `tests/linux_transparent.py` with `REAWEB_TEST_ISOLATED_DISPLAY=1` and `REAWEB_TEST_REAPER` on a dedicated composited X11 display. It checks actual 32-bit hosts, desktop Alpha and input in real REAPER. Stop the compositor and repeat with `REAWEB_TEST_NO_COMPOSITOR=1` to verify explicit rejection. Record the window manager, compositor, WebKitGTK and rendering backend. Native Wayland is unsupported.
+
+Keep ordinary `hidden_start_smoke`, frameless native input and Linux Docker divider tests in the regression run. Pixel samples do not replace first-presentation recordings or hardware-specific GPU, DPI and multi-display acceptance.

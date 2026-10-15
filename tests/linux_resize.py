@@ -94,7 +94,9 @@ try:
                 (profile / 'verify').touch()
                 # Allow the host's evaluation countdown to finish and its dialog to close.
                 def page_visible():
-                    rect = geometry()['page']
+                    state = geometry()
+                    if state['evaluationPending']: return False
+                    rect = state['page']
                     bitmap = Gdk.pixbuf_get_from_window(screen, 0, 0, screen.get_width(), screen.get_height())
                     return sample(rect, rect, bitmap)[1]
                 wait_for(page_visible, 20)

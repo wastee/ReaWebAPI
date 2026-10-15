@@ -34,6 +34,7 @@ struct WindowOptions {
   bool hidden = false;
   bool frameless = false;
   bool resizable = true;
+  bool transparent = false;
 };
 class Window {
 public:
@@ -68,7 +69,10 @@ public:
   virtual void cancel_pending_show() {}
   virtual bool focused() const { return false; }
   virtual bool frameless_active() const { return false; }
-  virtual Json window_capabilities() const { return {{"hiddenStart", true}, {"frameless", false}, {"resizable", false}}; }
+  virtual bool transparent_active() const { return false; }
+  virtual Json window_capabilities() const { return {{"hiddenStart", true}, {"frameless", false}, {"resizable", false},
+    {"transparent", true}, {"transparency", {{"supported", false}, {"framed", false}, {"frameless", false},
+      {"floatingOnly", true}, {"backend", "unknown"}, {"reason", "Native desktop Alpha is unavailable"}}}}; }
   virtual Json placement() const { return nullptr; }
   virtual void restore_placement(const Json&) {}
   virtual Json bounds() const { return placement(); }

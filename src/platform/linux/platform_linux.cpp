@@ -3,6 +3,8 @@
 #include "platform/shared/devtools.hpp"
 #include "platform/shared/window_menu.hpp"
 #include "platform/linux/linux_icon.hpp"
+#include "platform/linux/linux_alpha.hpp"
+#include "platform/shared/transparency.hpp"
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
@@ -40,6 +42,7 @@ public:
   std::string error;
   std::string version;
   bool frameless_supported = false;
+  std::map<int, unsigned long> alpha_frames;
   std::map<int, WindowOptions> listeners;
   std::map<int, Json> inspectors;
   std::map<int, unsigned> backgrounds;
@@ -105,6 +108,7 @@ public:
         if (op == "parked") { parked_.insert(message.at("id").get<int>()); return; }
         auto it = listeners.find(message.at("id").get<int>());
         if (it == listeners.end()) return;
+        if (op == "alpha-frame") { alpha_frames[it->first] = message.at("parent").get<unsigned long>(); return; }
         if (op == "background") { backgrounds[it->first] = message.at("color").get<unsigned>(); return; }
         if (op == "devtools-state") { inspectors[it->first] = message.at("state"); return; }
         if (op == "message") it->second.on_message(message.at("message").get<std::string>());
@@ -172,6 +176,8 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   bool style_saved_ = false;
   bool initial_hidden_ = false, cancelled_ = false, wants_visible_ = true;
   bool frameless_ = false, resizable_ = true;
+  bool transparent_ = false;
+  LinuxAlpha alpha_;
 public:
   bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
@@ -195,6 +201,7 @@ public:
   }
   LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id), initial_hidden_(options.hidden), wants_visible_(!options.hidden) {
     frameless_ = options.frameless; resizable_ = options.resizable;
+    transparent_ = options.transparent;
     icon_.decorations = !frameless_;
     auto on_close = std::move(options.on_close);
     options.on_close = [this, on_close = std::move(on_close)]() mutable {
@@ -204,6 +211,10 @@ public:
     window_ = std::make_unique<SwellWindow>(options.title, options.parent, [this] {
       try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
     }, options.on_close, /*hidden=*/true);
+    if (transparent_) {
+      SetProp(static_cast<HWND>(window_->handle()), "SWELLGdkAlphaChannel", reinterpret_cast<HANDLE>(1));
+      window_->set_transparent(true);
+    }
     if (frameless_ || !resizable_) {
       const auto handle = static_cast<HWND>(window_->handle());
       auto style = GetWindowLong(handle, GWL_STYLE);
@@ -214,7 +225,7 @@ public:
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
       {"appName", options.app_name ? options.app_name() : options.title},
-      {"frameless", frameless_}, {"resizable", resizable_},
+      {"frameless", frameless_}, {"resizable", resizable_}, {"transparent", transparent_},
       {"resourceRoot", options.resources ? options.resources->root().u8string() : ""}});
     process_->listeners.emplace(id_, std::move(options));
     process_->backgrounds.emplace(id_, 0xffffff);
@@ -264,6 +275,8 @@ public:
     };
   }
   ~LinuxWindow() override {
+    alpha_.detach();
+    process_->alpha_frames.erase(id_);
     immediate_resize_enabled_ = false;
     window_->resize = {};
     process_->listeners.erase(id_);
@@ -280,7 +293,16 @@ public:
       immediate_resize_enabled_ = false;
       return;
     }
-    window_->set_background(process_->backgrounds.at(id_));
+    if (!transparent_) window_->set_background(process_->backgrounds.at(id_));
+    else {
+      const auto reason = LinuxAlpha::unavailable();
+      if (!reason.empty()) { process_->listeners.at(id_).on_error("TRANSPARENCY_UNAVAILABLE: " + reason); return; }
+      auto frame = process_->alpha_frames.find(id_);
+      if (frame != process_->alpha_frames.end()) alpha_.present(frame->second);
+      if (alpha_.pending() && std::chrono::steady_clock::now() - started_ > std::chrono::seconds(15)) {
+        process_->listeners.at(id_).on_error("TRANSPARENCY_FAILED: WebKitGTK did not prepare the initial Alpha frame"); return;
+      }
+    }
     const bool is_docked = docked();
     icon_.refresh(icon_target(is_docked), is_docked);
     if (!wants_visible_) { immediate_resize_enabled_ = false; return; }
@@ -314,7 +336,7 @@ public:
     const int raw_x = origin.x, raw_y = origin.y;
     const int next_width = rect.right - rect.left;
     const int next_height = std::max(1, int(rect.bottom - rect.top));
-    const bool next_visible = visible();
+    const bool next_visible = transparent_ ? window_->visible() && !(native_state() & 2) : visible();
     const bool next_focused = focused();
     Json next = {{"id", id_}, {"op", "geometry"}, {"parent", get_xid(native)}, {"x", raw_x}, {"y", raw_y},
       {"width", next_width}, {"height", next_height}, {"visible", next_visible}, {"focused", next_focused},
@@ -381,6 +403,7 @@ public:
   bool closed() const override { return window_->closed() || !process_->error.empty(); }
   void* native_handle() const override { return window_->handle(); }
   void prepare_dock() override {
+    if (transparent_) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     immediate_resize_enabled_ = false;
     last_resize_sync_ = {};
     normal_ = placement(); maximized_ = (native_state() & 4) != 0;
@@ -478,25 +501,34 @@ public:
         catch (...) { wants_visible_ = previous; throw; }
       }
     }
-    window_->set_visible(visible);
+    if (transparent_) {
+      if (visible) alpha_.show(*window_);
+      else { alpha_.detach(); process_->alpha_frames.erase(id_); window_->set_visible(false); }
+    } else window_->set_visible(visible);
   }
   bool visibility_requested() const override { return initial_hidden_ ? wants_visible_ : visible(); }
   void show_after_create() override {
     immediate_resize_enabled_ = false;
-    if (!initial_hidden_ && !cancelled_) window_->set_visible(true);
+    if (!initial_hidden_ && !cancelled_) {
+      if (transparent_) set_visible(true);
+      else window_->set_visible(true);
+    }
   }
   Json bounds() const override { return window_->placement(); }
   void reload() override { process_->send({{"id", id_}, {"op", "reload"}}); }
   void set_drop_enabled(bool enabled) override { process_->send({{"id", id_}, {"op", "drop-enabled"}, {"enabled", enabled}}); }
   void start_drag(const Json& payload, Reply reply) override { process_->desktop("ReaWeb_Drag", payload, std::move(reply), id_); }
-  bool visible() const override { return window_->visible() && !(native_state() & 2); }
+  bool visible() const override { return window_->visible() && !alpha_.pending() && !(native_state() & 2); }
+  bool transparent_active() const override { return transparent_ && alpha_.active() && !closed(); }
   bool focused() const override { return window_->focused(); }
   bool frameless_active() const override {
     const auto handle = static_cast<HWND>(window_->handle());
     return frameless_ && !closed() && !docked() && !(GetWindowLong(handle, GWL_STYLE) & (WS_CHILD | WS_CAPTION));
   }
   Json window_capabilities() const override {
-    return {{"hiddenStart", true}, {"frameless", process_->frameless_supported}, {"resizable", true}, {"dragRegions", process_->frameless_supported}, {"windowSystem", "x11"}};
+    const auto reason = LinuxAlpha::unavailable();
+    return {{"hiddenStart", true}, {"frameless", process_->frameless_supported}, {"resizable", true}, {"dragRegions", process_->frameless_supported}, {"windowSystem", "x11"},
+      {"transparent", true}, {"transparency", transparency_capabilities(reason.empty(), "x11-rgba-webkitgtk", reason, process_->frameless_supported)}};
   }
   Json placement() const override {
     if (initial_hidden_ && !normal_.is_null()) return normal_;
@@ -528,6 +560,10 @@ class LinuxPlatform final : public Platform {
 public:
   explicit LinuxPlatform(fs::path data) : data_(std::move(data)) {}
   std::shared_ptr<Window> open(WindowOptions options) override {
+    if (options.transparent) {
+      const auto reason = LinuxAlpha::unavailable();
+      if (!reason.empty()) throw Error("TRANSPARENCY_UNAVAILABLE", reason);
+    }
     if (!process_ || (!process_->error.empty() && process_->listeners.empty())) process_ = std::make_shared<LinuxProcess>(data_);
     if (options.frameless) process_->require_frameless();
     auto window = std::make_shared<LinuxWindow>(process_, ++next_id_, std::move(options));

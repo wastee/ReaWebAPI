@@ -211,7 +211,7 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   }
   if (method == "ReaWeb_OpenDev") return open_dev(args[0].get<std::string>(), s.entry.parent_path());
   if (method == "ReaWeb_OpenEx") return open_impl(args[0].get<std::string>(), s.entry.parent_path(), "", s.app->launcher_source,
-    args[1].value("hidden", false), args[1].value("frameless", false), args[1].value("resizable", true));
+    args[1].value("hidden", false), args[1].value("frameless", false), args[1].value("resizable", true), args[1].value("transparent", false));
   if (method == "ReaWeb_BeginUndo" || method == "ReaWeb_EndUndo") return transaction_call(id, method, args);
   if (is_file_method(method) || method == "ReaWeb_SetIcon" || method == "ReaWeb_ClipboardReadText" ||
       method == "ReaWeb_ClipboardWriteText" || method == "ReaWeb_OpenExternal")

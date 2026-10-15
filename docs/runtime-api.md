@@ -194,3 +194,5 @@ Native Streams and platform additions: [English](native-streams.md) · [中文](
 `reaper.window.open(path, {hidden:true})` preloads a new child window. `show()` displays without forcing focus and `focus()` displays and focuses. Both retain their existing return types. See [hidden startup](host-api.md#hidden-startup) for capabilities, Dock restoration and readiness.
 
 `window.open(path, options?)` also accepts creation-only `frameless` and `resizable` flags. `getState()` and `windowstatechange` report these flags and `framelessActive`. See [frameless windows](host-api.md#frameless-windows) for native drag regions, capabilities and Docker behavior.
+
+`window.open(path, {transparent:true})` requests creation-only desktop Alpha. Window state includes `transparent` and `transparentActive`. Inspect `capabilities.runtime.window.transparency` before creating a window. See [transparent windows](host-api.md#transparent-windows) for native requirements, failures and Dock persistence.

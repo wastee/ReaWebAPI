@@ -181,3 +181,7 @@ For a window created with `{frameless:true}`, add `data-reaweb-drag` to a rectan
 ```
 
 Windows uses WebView2 native non-client regions. macOS and Linux cache clipped DOM rectangles before the press and consume the native mouse event directly. They do not start native movement from an asynchronous Runtime call. Keep title regions stable during interaction. Layout snapshots have a 32 ms sampling interval, with at most 512 rectangles in each drag/exclusion list. Oversized snapshots disable dragging. Arbitrary shapes and animated hit regions are outside this contract. Drag regions are inactive inside Docker containers. Right-click outside a drag region retains the existing page context-menu behavior. See the [Demo](../web/frameless/README.md).
+
+## Transparent backgrounds
+
+Open with `{transparent:true}` and explicitly set `html, body { background:transparent; }`. The host does not rewrite App CSS. Use translucent panels, rounded corners and CSS shadows within transparent page margins. Keep a visible close control in frameless tools. Visual transparency retains rectangular mouse hit testing. See the [transparent Demo](../web/transparent/README.md) and [native requirements](host-api.md#transparent-windows).

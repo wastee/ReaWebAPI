@@ -2,10 +2,12 @@
 
 ## English
 
-- Add optional frameless floating windows and creation-time `resizable` control through Lua `ReaWeb_OpenEx` and JavaScript `window.open`.
-- Add native HTML drag regions, window configuration/state reporting and resizable/fixed-size examples for Windows, macOS and Linux X11/XWayland.
+- Add creation-time `transparent` floating windows with desktop Alpha on Windows, macOS and composited Linux X11/XWayland.
+- Add transparency state and backend capability diagnostics, preserve saved Dock preferences, and reject docking for transparent windows.
+- Add a transparent-window Demo and SDK declarations.
 
 ## 简体中文
 
-- Lua `ReaWeb_OpenEx` 和 JavaScript `window.open` 新增可选无边框浮动窗口及创建时 `resizable` 配置。
-- 新增原生 HTML 拖动区、窗口配置与状态字段，以及 Windows、macOS 和 Linux X11/XWayland 的可缩放和固定尺寸示例。
+- 新增创建时 `transparent` 浮动窗口，支持 Windows、macOS 及具备合成器的 Linux X11/XWayland 桌面 Alpha。
+- 新增透明状态与后端能力诊断，保留原 Dock 偏好，并拒绝透明窗口停靠。
+- 新增透明窗口 Demo 和 SDK 类型声明。

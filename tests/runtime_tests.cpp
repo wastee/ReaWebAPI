@@ -14,6 +14,7 @@ int platform_pumps = 0;
 std::vector<fs::path> profiles;
 std::string waiting_on;
 bool defer_next_presentation = false;
+bool fail_next_presentation = false;
 struct FakeWindow : Window {
   WindowOptions options;
   bool is_closed = false;
@@ -64,7 +65,11 @@ struct FakeWindow : Window {
   }
   void devtools() override {}
   bool closed() const override { return is_closed; }
+  void show_after_create() override {
+    if (fail_next_presentation) { fail_next_presentation = false; throw Error("TRANSPARENCY_FAILED", "Injected native host setup failure"); }
+  }
   bool frameless_active() const override { return options.frameless && !(options.is_docked && options.is_docked()); }
+  bool transparent_active() const override { return options.transparent && !is_closed; }
   void* native_handle() const override { return const_cast<FakeWindow*>(this); }
   Json placement() const override { return bounds; }
   void restore_placement(const Json& value) override { bounds = value; }
@@ -184,7 +189,7 @@ int main() {
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {
       Runtime runtime(host, root / "FramelessProfile", [](const std::string&) {}, docks);
-      for (const auto* invalid : {R"({"frameless":1})", R"({"resizable":null})", R"({"frameless":"true"})"}) {
+      for (const auto* invalid : {R"({"frameless":1})", R"({"resizable":null})", R"({"frameless":"true"})", R"({"transparent":1})", R"({"transparent":null})", R"({"transparent":"true"})"}) {
         bool rejected = false;
         try { runtime.open_ex(entry.u8string(), invalid); } catch (const Error& error) { rejected = error.code == "INVALID_ARGUMENT"; }
         CHECK(rejected);
@@ -210,6 +215,56 @@ int main() {
       const auto reopened = runtime.open_ex(entry.u8string(), R"({"instanceKey":"frame","hidden":true})");
       CHECK(!windows.back().lock()->options.frameless && windows.back().lock()->options.resizable);
       runtime.close(reopened);
+    }
+    windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
+    {
+      int activations = 0;
+      auto alpha_docks = docks; alpha_docks.activate = [&](void*) { ++activations; };
+      Runtime runtime(host, root / "TransparentProfile", [&](const std::string& error) { errors.push_back(error); }, alpha_docks);
+      const auto original = runtime.open(entry.u8string());
+      auto first = windows.back().lock();
+      runtime.set_docked(original, true); runtime.close(original);
+      until(runtime, [&] { return runtime.diagnostics(original).value("stage", "") == "closed"; });
+      const auto before = activations;
+      const auto id = runtime.open_ex(entry.u8string(), R"({"instanceKey":"alpha","hidden":true,"frameless":true,"transparent":true})");
+      auto window = windows.back().lock();
+      CHECK(window->options.transparent && !window->shown && !runtime.is_docked(id) && activations == before);
+      CHECK(runtime.open_ex("missing.html", R"({"instanceKey":"alpha","hidden":true,"transparent":false})") == id);
+      CHECK(window->options.transparent && window->reloads == 0);
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      const auto state = [&] { return result(runtime, *window, window->send("ReaWeb_GetWindowState"))["result"]; };
+      CHECK(state()["transparent"] == true && state()["transparentActive"] == true);
+      bool refused = false;
+      try { runtime.set_docked(id, true); } catch (const Error& error) { refused = error.code == "DOCK_UNAVAILABLE"; }
+      CHECK(refused && !runtime.set_docked(id, false) && !runtime.is_docked(id));
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDocked", {true}))["error"]["code"] == "DOCK_UNAVAILABLE");
+      window->options.on_dock_toggle(); runtime.tick();
+      CHECK(!runtime.is_docked(id) && activations == before && window->reloads == 0);
+      runtime.show(id);
+      CHECK(window->shown && state()["transparentActive"] == true && activations == before);
+      result(runtime, *window, window->send("ReaWeb_SetVisible", {false}));
+      CHECK(state()["transparentActive"] == true);
+      CHECK(result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"transparent", "yes"}}}))["error"]["code"] == "INVALID_ARGUMENT");
+      const auto child = result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"transparent", true}, {"hidden", true}}}))["result"].get<int>();
+      CHECK(windows.back().lock()->options.transparent);
+      runtime.close(child); runtime.close(id);
+      until(runtime, [&] { return runtime.diagnostics(id).value("stage", "") == "closed"; });
+      const auto restored = runtime.open(entry.u8string());
+      CHECK(!windows.back().lock()->options.transparent && runtime.is_docked(restored));
+      runtime.close(restored);
+      until(runtime, [&] { return runtime.diagnostics(restored).value("stage", "") == "closed"; });
+      const auto failed = runtime.open_ex(entry.u8string(), R"({"transparent":true,"hidden":true})");
+      auto pending = windows.back().lock();
+      pending->options.on_error("TRANSPARENCY_FAILED: injected native initialization failure");
+      CHECK(!runtime.is_open(failed) && pending->presentation_cancelled);
+      until(runtime, [&] { return runtime.diagnostics(failed).value("stage", "") == "failed"; });
+      CHECK(runtime.diagnostics(failed)["lastError"] == "TRANSPARENCY_FAILED: injected native initialization failure");
+      fail_next_presentation = true;
+      refused = false;
+      try { runtime.open_ex(entry.u8string(), R"({"transparent":true})"); }
+      catch (const Error& error) { refused = error.code == "TRANSPARENCY_FAILED"; }
+      CHECK(refused && windows.back().expired());
+      errors.clear();
     }
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {

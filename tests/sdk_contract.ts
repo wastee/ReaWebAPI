@@ -88,6 +88,11 @@ async function runtimeContract(track: MediaTrackHandle, take: MediaItem_TakeHand
   const hiddenId: number = await reaper.window.open('other/index.html', {hidden:true});
   const framelessId: number = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
   const frameState: boolean = (await reaper.window.getState()).framelessActive;
+  const transparentId: number = await reaper.window.open('other/index.html', {frameless:true, transparent:true});
+  const alphaState: boolean = (await reaper.window.getState()).transparentActive;
+  const alphaSupport: boolean | undefined = (await reaper.system.getCapabilities()).runtime.window?.transparency.supported;
+  // @ts-expect-error Transparency requires a boolean.
+  reaper.window.open('other/index.html', {transparent:1});
   // @ts-expect-error Creation flags require booleans.
   reaper.window.open('other/index.html', {resizable:1});
   // @ts-expect-error Hidden startup requires a boolean.

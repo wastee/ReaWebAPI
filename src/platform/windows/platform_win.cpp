@@ -1,6 +1,7 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
+#include "platform/shared/transparency.hpp"
 #include "platform/shared/startup.hpp"
 #include "platform/shared/drag_regions.hpp"
 #include <windows.h>
@@ -114,6 +115,24 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   unsigned snapshot_requested_ = ~0u;
   bool startup_region_ = false;
   bool drag_regions_supported_ = false;
+  bool alpha_ready_ = false, alpha_supported_ = false;
+  static bool desktop_composition() {
+    BOOL enabled = FALSE;
+    return SUCCEEDED(DwmIsCompositionEnabled(&enabled)) && enabled;
+  }
+  void configure_transparency() {
+    if (!options_.transparent) return;
+    if (!desktop_composition()) throw Error("TRANSPARENCY_UNAVAILABLE", "Desktop Alpha requires DWM composition");
+    // Keep the HWND controller and its native input/drag-and-drop routing.
+    const auto region = CreateRectRgn(-1, -1, 0, 0);
+    if (!region) throw Error("TRANSPARENCY_FAILED", "Cannot allocate the DWM Alpha region");
+    DWM_BLURBEHIND blur{};
+    blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+    blur.fEnable = TRUE; blur.hRgnBlur = region;
+    const auto result = DwmEnableBlurBehindWindow(hwnd_, &blur);
+    DeleteObject(region);
+    if (FAILED(result)) throw Error("TRANSPARENCY_FAILED", "Cannot enable DWM desktop Alpha: " + std::to_string(result));
+  }
   bool floating() const { return hwnd_ && !(GetWindowLongPtrW(hwnd_, GWL_STYLE) & WS_CHILD); }
   DWORD floating_style() const {
     return (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN) & (options_.resizable ? ~DWORD{0} : ~DWORD(WS_THICKFRAME | WS_MAXIMIZEBOX));
@@ -121,7 +140,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   int resize_border() const { return options_.resizable && !IsZoomed(hwnd_) ? std::max(4, MulDiv(6, GetDpiForWindow(hwnd_), 96)) : 0; }
   void configure_frame() {
     if (!options_.frameless || !floating()) return;
-    const auto policy = DWMNCRP_DISABLED;
+    const auto policy = options_.transparent ? DWMNCRP_ENABLED : DWMNCRP_DISABLED;
     check(DwmSetWindowAttribute(hwnd_, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy)), "Configure frameless border");
   }
   void prepare_startup() {
@@ -145,6 +164,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
     if (FAILED(hr)) { snapshot_pending_ = false; fail("WebView2 could not capture the initial frame"); }
   }
   void set_background(unsigned color) {
+    if (options_.transparent) return;
     const auto next = RGB((color >> 16) & 255, (color >> 8) & 255, color & 255);
     if (background_ == next) return;
     background_ = next;
@@ -192,6 +212,11 @@ public:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (self) {
+      if (msg == WM_DWMCOMPOSITIONCHANGED && self->options_.transparent) {
+        try { self->configure_transparency(); }
+        catch (const std::exception& error) { self->fail(error.what()); }
+        return 0;
+      }
       if (self->options_.frameless && self->floating()) {
         if (msg == WM_NCCALCSIZE) {
           if (wp && IsZoomed(hwnd)) {
@@ -296,6 +321,10 @@ public:
     return DefWindowProcW(hwnd, msg, wp, lp);
   }
   WinWindow(WindowOptions options, HINSTANCE instance) : options_(std::move(options)), uri_(options_.url.empty() ? file_uri(options_.entry) : options_.url), startup_(options_.hidden) {
+    if (options_.transparent) {
+      if (!desktop_composition()) throw Error("TRANSPARENCY_UNAVAILABLE", "Desktop Alpha requires DWM composition");
+      background_ = RGB(0, 0, 0);
+    }
     // REAPER's Docker must be able to find focus inside the embedded inspector.
     hwnd_ = CreateWindowExW(WS_EX_CONTROLPARENT | (options_.frameless ? 0 : WS_EX_DLGMODALFRAME), window_class, wide(options_.title).c_str(), floating_style(),
       CW_USEDEFAULT, CW_USEDEFAULT, 860, 640, static_cast<HWND>(options_.parent), nullptr, instance, this);
@@ -313,7 +342,7 @@ public:
     // A cloaked window keeps composing without exposing its empty native surface.
     const auto cloak_result = DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked));
     if (FAILED(cloak_result)) { DestroyWindow(hwnd_); check(cloak_result, "Cloak initial window"); }
-    try { configure_frame(); } catch (...) { DestroyWindow(hwnd_); throw; }
+    try { configure_frame(); configure_transparency(); } catch (...) { DestroyWindow(hwnd_); throw; }
     if (!options_.hidden) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   }
   ~WinWindow() override {
@@ -352,6 +381,17 @@ public:
   }
   void configure() {
     layout();
+    ComPtr<ICoreWebView2Controller2> alpha_controller;
+    alpha_supported_ = SUCCEEDED(controller_.As(&alpha_controller));
+    if (options_.transparent) {
+      if (!alpha_supported_) throw Error("TRANSPARENCY_UNAVAILABLE", "Desktop Alpha requires WebView2 Controller2");
+      if (FAILED(alpha_controller->put_DefaultBackgroundColor({0, 0, 0, 0})))
+        throw Error("TRANSPARENCY_FAILED", "WebView2 rejected the transparent background");
+      COREWEBVIEW2_COLOR color{};
+      if (FAILED(alpha_controller->get_DefaultBackgroundColor(&color)) || color.A != 0)
+        throw Error("TRANSPARENCY_FAILED", "WebView2 did not establish desktop Alpha");
+      alpha_ready_ = true;
+    }
     ComPtr<ICoreWebView2Settings> settings;
     check(webview_->get_Settings(&settings), "get_Settings");
     settings->put_AreDevToolsEnabled(TRUE);
@@ -497,7 +537,8 @@ public:
         return S_OK;
       }).Get(), &token), "add_NavigationCompleted");
     check(webview_->AddScriptToExecuteOnDocumentCreated(wide(options_.script +
-      page_background_script("chrome.webview.postMessage(message);") + WinCursor::script +
+      (options_.transparent ? transparent_page_script("chrome.webview.postMessage('__reawebPresent');") :
+        page_background_script("chrome.webview.postMessage(message);")) + WinCursor::script +
       (options_.frameless ? drag_regions_script("", true) : "")).c_str(),
       Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
         [weak](HRESULT result, LPCWSTR) -> HRESULT {
@@ -547,7 +588,7 @@ public:
         SetWindowPlacement(hwnd_, &placement);
       }
       ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-      if (options_.frameless && controller_) controller_->put_IsVisible(TRUE);
+      if ((options_.frameless || options_.transparent) && controller_) controller_->put_IsVisible(TRUE);
       RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
       if (startup_.focus_requested() && GetForegroundWindow() == startup_foreground_) {
         if (options_.on_present) options_.on_present();
@@ -676,8 +717,11 @@ public:
       {"controllerVisible", visible_}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
   }
   bool frameless_active() const override { return options_.frameless && !closed_ && floating(); }
+  bool transparent_active() const override { return options_.transparent && alpha_ready_ && !closed_ && floating() && desktop_composition(); }
   Json window_capabilities() const override {
     return {{"hiddenStart", true}, {"frameless", drag_regions_supported_}, {"resizable", true},
+      {"transparent", true}, {"transparency", transparency_capabilities(alpha_supported_ && desktop_composition(), "dwm-hwnd",
+        !desktop_composition() ? "DWM composition is unavailable" : !alpha_supported_ ? "WebView2 Controller2 is not ready or unavailable" : "", drag_regions_supported_)},
       {"dragRegions", drag_regions_supported_}, {"windowSystem", "win32"}};
   }
   Json placement() const override {
@@ -719,6 +763,7 @@ public:
   }
   void* native_handle() const override { return hwnd_; }
   void prepare_dock() override {
+    if (options_.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     if (options_.frameless) evaluate("window.__reawebDragRegionsActive?.(false);");
     if (startup_.pending() && !startup_region_) {
       // DWM cannot uncloak an HWND after it becomes a non-layered child.

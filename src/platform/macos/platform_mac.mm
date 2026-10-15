@@ -1,6 +1,7 @@
 #include "platform/platform.hpp"
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
+#include "platform/shared/transparency.hpp"
 #include "platform/shared/startup.hpp"
 #include "platform/shared/drag_regions.hpp"
 #include "platform/shared/window_menu.hpp"
@@ -177,6 +178,10 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   ReaWebNativeView* webview_;
   id mouse_monitor_;
   DragRegions drag_regions_;
+  bool alpha_ready_ = false;
+  static bool alpha_supported() {
+    return [WKWebView instancesRespondToSelector:NSSelectorFromString(@"_setDrawsBackground:")];
+  }
   NSWindow* floating_window() const {
     if (!window_) return nil;
     auto content = (__bridge NSView*)GetDlgItem(static_cast<HWND>(window_->handle()), 0);
@@ -184,7 +189,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   }
   void configure_floating() {
     const auto& options = delegate_->options;
-    if (!options.frameless && options.resizable) return;
+    if (!options.frameless && options.resizable && !options.transparent) return;
     auto native = floating_window();
     if (!native) throw Error("WINDOW_STYLE_FAILED", "The standalone AppKit host is unavailable");
     const auto frame = native.frame;
@@ -195,6 +200,30 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
     native.styleMask = style;
     [native setFrame:frame display:NO];
     if (native.styleMask != style) throw Error("WINDOW_STYLE_FAILED", "AppKit could not apply the requested window style");
+    if (options.transparent) {
+      if (!alpha_supported()) throw Error("TRANSPARENCY_UNAVAILABLE", "WKWebView background control is unavailable");
+      @try {
+        [webview_ setValue:@NO forKey:@"drawsBackground"];
+        if ([[webview_ valueForKey:@"drawsBackground"] boolValue])
+          throw Error("TRANSPARENCY_FAILED", "WKWebView did not disable its opaque background");
+      } @catch (NSException* exception) {
+        throw Error("TRANSPARENCY_FAILED", exception.reason.UTF8String ?: "WKWebView background configuration failed");
+      }
+      native.opaque = NO;
+      native.backgroundColor = NSColor.clearColor;
+      native.ignoresMouseEvents = NO;
+      webview_.underPageBackgroundColor = NSColor.clearColor;
+      webview_->resizeBackground = NSColor.clearColor;
+      webview_.wantsLayer = YES;
+      webview_.layer.opaque = NO;
+      webview_.layer.backgroundColor = NSColor.clearColor.CGColor;
+      native.contentView.layer.opaque = NO;
+      native.contentView.layer.backgroundColor = NSColor.clearColor.CGColor;
+      SetOpaque(static_cast<HWND>(window_->handle()), false);
+      window_->set_transparent(true);
+      alpha_ready_ = !native.opaque;
+      if (!alpha_ready_) throw Error("TRANSPARENCY_FAILED", "AppKit did not establish a non-opaque host");
+    }
   }
   std::unique_ptr<MacDevTools> devtools_;
   ReaWebDelegate* delegate_;
@@ -289,7 +318,8 @@ public:
     }
     [config.userContentController addScriptMessageHandler:delegate_ name:@"reaweb"];
     auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script +
-      page_background_script("webkit.messageHandlers.reaweb.postMessage(message);") +
+      (delegate_->options.transparent ? transparent_page_script("webkit.messageHandlers.reaweb.postMessage('__reawebPresent');") :
+        page_background_script("webkit.messageHandlers.reaweb.postMessage(message);")) +
       (delegate_->options.frameless ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : ""))
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
@@ -335,6 +365,7 @@ public:
       if (message == "__reawebPresent") { prepare_startup(); return; }
       if (delegate_->options.frameless && drag_regions_.message(message)) return;
       if (!page_background_message(message, [this](unsigned color) {
+        if (delegate_->options.transparent) return;
         window_->set_background(color);
         auto background = [NSColor colorWithSRGBRed:((color >> 16) & 255) / 255.0
           green:((color >> 8) & 255) / 255.0 blue:(color & 255) / 255.0 alpha:1.0];
@@ -437,6 +468,7 @@ public:
   }
   void prepare_undock() override { release_dock_icon(); }
   void prepare_dock() override {
+    if (delegate_->options.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     icon_window_ = nil;
     maximized_ = webview_.window.zoomed;
     if (maximized_) [webview_.window zoom:nil];
@@ -541,7 +573,13 @@ public:
     return delegate_->options.frameless && native && !(native.styleMask & NSWindowStyleMaskTitled);
   }
   Json window_capabilities() const override {
-    return {{"hiddenStart", true}, {"frameless", true}, {"resizable", true}, {"dragRegions", true}, {"windowSystem", "appkit"}};
+    return {{"hiddenStart", true}, {"frameless", true}, {"resizable", true}, {"dragRegions", true}, {"windowSystem", "appkit"},
+      {"transparent", true}, {"transparency", transparency_capabilities(alpha_supported(), "appkit-wkwebview",
+        alpha_supported() ? "" : "WKWebView background control is unavailable")}};
+  }
+  bool transparent_active() const override {
+    auto native = floating_window();
+    return delegate_->options.transparent && alpha_ready_ && !closed() && native && !native.opaque;
   }
 };
 class MacPlatform final : public Platform {

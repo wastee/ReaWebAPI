@@ -14,9 +14,11 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
   if (message == WM_PAINT) {
     PAINTSTRUCT paint{};
     if (auto dc = BeginPaint(window, &paint)) {
-      const auto color = self->background_;
-      auto brush = CreateSolidBrush(RGB((color >> 16) & 255, (color >> 8) & 255, color & 255));
-      FillRect(dc, &paint.rcPaint, brush); DeleteObject(brush);
+      if (!self->transparent_) {
+        const auto color = self->background_;
+        auto brush = CreateSolidBrush(RGB((color >> 16) & 255, (color >> 8) & 255, color & 255));
+        FillRect(dc, &paint.rcPaint, brush); DeleteObject(brush);
+      }
       EndPaint(window, &paint);
     }
     return TRUE;

@@ -89,8 +89,8 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
     string_arg(a[0]);
     if (!a[1].is_object()) throw Error("INVALID_ARGUMENT", "Expected window open options");
     for (const auto& field : a[1].items())
-      if ((field.key() != "hidden" && field.key() != "frameless" && field.key() != "resizable") || !field.value().is_boolean())
-        throw Error("INVALID_ARGUMENT", "Expected boolean hidden, frameless or resizable open option");
+      if ((field.key() != "hidden" && field.key() != "frameless" && field.key() != "resizable" && field.key() != "transparent") || !field.value().is_boolean())
+        throw Error("INVALID_ARGUMENT", "Expected boolean hidden, frameless, resizable or transparent open option");
     return controls_.host_call("ReaWeb_OpenEx", a);
   });
   add("ReaWeb_Close", 0, 0, [this](const Json&) { controls_.close(); return true; });

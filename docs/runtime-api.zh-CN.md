@@ -239,3 +239,5 @@ Native Streams and platform additions: [English](native-streams.md) · [中文](
 `reaper.window.open(path, {hidden:true})` 预加载新的子窗口。`show()` 显示但不强制聚焦，`focus()` 显示并聚焦，返回类型保持不变。能力检测、Dock 恢复和就绪语义参见[隐藏启动](host-api.zh-CN.md#隐藏启动)。
 
 `window.open(path, options?)` 还接受仅在创建时生效的 `frameless` 和 `resizable`。`getState()` 与 `windowstatechange` 返回这两个配置及 `framelessActive`，原生拖动区、能力检测和 Docker 行为见[无边框窗口](host-api.zh-CN.md#无边框窗口)。
+
+`window.open(path, {transparent:true})` 请求仅在创建时生效的桌面 Alpha。窗口状态包含 `transparent` 与 `transparentActive`。创建前可检查 `capabilities.runtime.window.transparency`，原生要求、失败处理及 Dock 持久化规则见[透明窗口](host-api.zh-CN.md#透明窗口)。

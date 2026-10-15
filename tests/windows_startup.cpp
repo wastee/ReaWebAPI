@@ -40,6 +40,20 @@ int main(int argc, char** argv) {
     ShowWindow(host, SW_SHOW); SetForegroundWindow(host);
     const int count = argc > 1 ? std::stoi(argv[1]) : 20;
     if (argc > 2 && std::string(argv[2]) == "--hidden") {
+      if (GetForegroundWindow() != host) {
+        POINT saved{}; GetCursorPos(&saved); SetCursorPos(50, 100);
+        INPUT input[2]{};
+        input[0].type = input[1].type = INPUT_MOUSE;
+        input[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN; input[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        CHECK(SendInput(2, input, sizeof(INPUT)) == 2);
+        const auto start = GetTickCount64();
+        while (GetForegroundWindow() != host && GetTickCount64()-start < 1000) {
+          MSG msg{}; while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+          Sleep(1);
+        }
+        SetCursorPos(saved.x, saved.y);
+      }
+      CHECK(GetForegroundWindow() == host);
       for (int run = 0; run < count; ++run) {
         const auto path = root / ("hidden-" + std::to_string(run)); fs::create_directories(path);
         const auto entry = path / "index.html";

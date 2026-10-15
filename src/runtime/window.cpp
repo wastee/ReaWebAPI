@@ -13,18 +13,18 @@ int Runtime::open_ex(const std::string& path, const std::string& options) {
   for (const auto& field : value.items()) {
     const auto& key = field.key();
     if ((key == "instanceKey" || key == "id") ? !field.value().is_string() :
-        (key == "multiple" || key == "hidden" || key == "frameless" || key == "resizable") ? !field.value().is_boolean() : true)
+        (key == "multiple" || key == "hidden" || key == "frameless" || key == "resizable" || key == "transparent") ? !field.value().is_boolean() : true)
       throw Error("INVALID_ARGUMENT", "Unknown or invalid open option: " + key);
   }
   return open_instance(path, value.value("instanceKey", ""), value.value("id", ""),
-    value.value("multiple", false), value.value("hidden", false), value.value("frameless", false), value.value("resizable", true));
+    value.value("multiple", false), value.value("hidden", false), value.value("frameless", false), value.value("resizable", true), value.value("transparent", false));
 }
 
-int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple, bool hidden, bool frameless, bool resizable) {
+int Runtime::open_instance(const std::string& path, const std::string& instance_key, const std::string& name, bool multiple, bool hidden, bool frameless, bool resizable, bool transparent) {
   check_thread();
   if (instance_key.find('\0') != std::string::npos || name.find('\0') != std::string::npos)
     throw Error("INVALID_ARGUMENT", "Instance key and window name must not contain NUL");
-  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key, hidden, frameless, resizable);
+  if (multiple || instance_key.empty()) return open_impl(path, {}, "", instance_key, hidden, frameless, resizable, transparent);
   const auto key = std::make_pair(instance_key, name);
   // The identity lives with the session, so destruction cannot leave a stale registry entry.
   for (const auto& item : sessions_) {
@@ -34,7 +34,7 @@ int Runtime::open_instance(const std::string& path, const std::string& instance_
       return session.id;
     }
   }
-  const auto id = open_impl(path, {}, "", instance_key, hidden, frameless, resizable);
+  const auto id = open_impl(path, {}, "", instance_key, hidden, frameless, resizable, transparent);
   sessions_.at(id)->instance = key;
   return id;
 }
@@ -43,7 +43,7 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
   return open_impl("", base, validate_dev_url(url));
 }
 
-int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable) {
+int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable, bool transparent) {
   check_thread();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
@@ -86,6 +86,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   session->background_start = hidden;
   session->frameless = frameless;
   session->resizable = resizable;
+  session->transparent = transparent;
   session->entry = entry;
   session->app = app;
   std::set<int> slots;
@@ -182,7 +183,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, app->resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }, hidden, frameless, resizable});
+    }, hidden, frameless, resizable, transparent});
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);
@@ -191,8 +192,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       session->window->restore_placement(session->saved_state["placement"]);
       session->window->restore_devtools(session->saved_state.value("devtools", Json()));
       const auto dock_id = session->saved_state.value("dockId", -1);
-      if (dock_.remember && dock_id >= 0) dock_.remember(session->ident, dock_id);
-      if (session->saved_state.value("docked", false)) {
+      if (!transparent && dock_.remember && dock_id >= 0) dock_.remember(session->ident, dock_id);
+      if (!transparent && session->saved_state.value("docked", false)) {
         if (hidden) session->pending_dock = true;
         else set_docked(id, true);
       }
@@ -202,7 +203,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     log_(session->last_error);
   }
   // Complete native registration before a backend may present its first frame.
-  session->window->show_after_create();
+  try { session->window->show_after_create(); }
+  catch (...) { sessions_.erase(id); throw; }
   return id;
 }
 
@@ -290,6 +292,10 @@ bool Runtime::set_docked(int id, bool docked) {
   check_thread();
   if (!is_open(id)) throw Error("WINDOW_CLOSED", "Window is no longer open");
   auto& session = *sessions_.at(id);
+  if (session.transparent) {
+    if (docked) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
+    return false;
+  }
   auto handle = session.window->native_handle();
   if (!handle || !dock_.index || !dock_.add || !dock_.remove || !dock_.activate)
     throw Error("DOCK_UNAVAILABLE", "REAPER docking APIs are unavailable");
@@ -368,7 +374,8 @@ Json Runtime::window_state(const Session& s) const {
   return {{"id", s.id}, {"title", s.title}, {"docked", is_docked(s.id)},
     {"visible", s.window->visible()}, {"focused", s.window->focused()}, {"keyboardCapture", s.capture_keyboard},
     {"iconVisible", s.icon_visible}, {"frameless", s.frameless}, {"resizable", s.resizable},
-    {"framelessActive", !is_docked(s.id) && s.window->frameless_active()}};
+    {"framelessActive", !is_docked(s.id) && s.window->frameless_active()},
+    {"transparent", s.transparent}, {"transparentActive", !is_docked(s.id) && s.window->transparent_active()}};
 }
 
 void Runtime::persist(Session& s, bool force) {
@@ -386,6 +393,8 @@ void Runtime::persist(Session& s, bool force) {
     if (index < 0 && s.pending_state.is_object()) index = s.pending_state.value("dockId", -1);
     if (index < 0 && s.saved_state.is_object()) index = s.saved_state.value("dockId", -1);
     state = {{"schema", 1}, {"entry", s.entry.generic_u8string()}, {"placement", placement}, {"docked", docked}, {"dockId", index}};
+    // Floating transparency is a session override, not a new Dock preference.
+    if (s.transparent) state["docked"] = s.saved_state.is_object() && s.saved_state.value("docked", false);
     const auto devtools = s.window->devtools_state();
     if (!devtools.is_null()) state["devtools"] = devtools;
   } else if (!force || state.is_null()) return;

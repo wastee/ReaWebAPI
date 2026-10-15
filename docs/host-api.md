@@ -41,7 +41,7 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | `reaper.window.setDocked(docked)` | `boolean` | Returns the actual docked state, preserving the page |
 | `reaper.window.isDocked()` | `boolean` | Reads docked state |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | Default `true`. Setting `false` allows REAPER's normal global shortcut policy |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive`, `transparent`, `transparentActive` |
 
 Window placement and docking are persisted by entry file and instance slot. At most 32 ReaWebAPI windows can be open. Handles, subscriptions and pending requests remain document-local while browser storage is isolated by App ID.
 
@@ -249,7 +249,7 @@ loop()
 
 ### Hidden startup
 
-Since v0.3.8.15, `ReaWeb_OpenEx(path, optionsJson)` accepts a JSON object string with optional `instanceKey:string`, `id:string`, `multiple:boolean`, `hidden:boolean`, `frameless:boolean` and `resizable:boolean`. Defaults match `ReaWeb_Open`, with `hidden:false`, `frameless:false` and `resizable:true`. The last two fields require v0.3.8.16. Unknown fields, wrong types, null, empty or invalid JSON fail with `0` and `ReaWeb_GetLastError()`. Omitted or empty identity strings retain the existing instance rules.
+Since v0.3.8.15, `ReaWeb_OpenEx(path, optionsJson)` accepts a JSON object string with optional `instanceKey:string`, `id:string`, `multiple:boolean`, `hidden:boolean`, `frameless:boolean`, `resizable:boolean` and `transparent:boolean`. Defaults match `ReaWeb_Open`, with `hidden:false`, `frameless:false` and `resizable:true`. `frameless` and `resizable` require v0.3.8.16. `transparent` requires v0.3.8.18 and defaults to `false`. Unknown fields, wrong types, null, empty or invalid JSON fail with `0` and `ReaWeb_GetLastError()`. Omitted or empty identity strings retain the existing instance rules.
 
 ```lua
 assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
@@ -287,3 +287,25 @@ const id = await reaper.window.open('other/index.html', {frameless:true, resizab
 Use `data-reaweb-drag` and `data-reaweb-no-drag` for [native drag regions](frontend.md#native-drag-regions). No `beginDrag`, `beginResize`, `setFrameless` or `setResizable` method is added. The [runnable Demo](../web/frameless/README.md) includes resizable/fixed launchers and a lifecycle-aware close button.
 
 `capabilities.runtime.window` and diagnostics `windowFeatures` report `frameless`, `resizable`, `dragRegions` and `windowSystem` (`win32`, `appkit` or `x11`). Windows requires WebView2 non-client region support. Linux requires X11/XWayland with `_NET_WM_MOVERESIZE` support. Native Wayland is unsupported. Unsupported creation fails explicitly. Asynchronous WebView initialization failures follow the existing error and cleanup path. No fallback to a decorated visible window is performed.
+
+## Transparent windows
+
+Since v0.3.8.18, `ReaWeb_OpenEx` and `reaper.window.open` accept `transparent?:boolean`, default `false`. It applies only when creating a window. Instance reuse preserves the existing configuration and document. The legacy `ReaWeb_Open` ABI is unchanged.
+
+```lua
+local id = reaper.ReaWeb_OpenEx(path,
+  '{"instanceKey":"my-app","frameless":true,"transparent":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+```
+
+```js
+const id = await reaper.window.open('panel.html', {frameless:true, transparent:true});
+```
+
+`getState()` and `windowstatechange` expose the requested `transparent` flag and `transparentActive`, which reports established native desktop Alpha independently of CSS. Pending native initialization can report `false`. The page must explicitly use transparent CSS. Opaque CSS remains opaque. Transparent pixels retain rectangular mouse hit testing.
+
+`capabilities.runtime.window.transparent` means the option is accepted. Check `transparency.supported`, `framed`, `frameless`, `backend` and `reason` for the current native path. Windows uses the HWND WebView2 controller with DWM Alpha and requires Controller2. macOS uses a non-opaque AppKit host and WKWebView background control. Linux requires GDK3/X11, a 32-bit RGBA visual, an active compositor and REAPER/SWELL `SWELLGdkAlphaChannel` support. Native Wayland is unsupported. A hidden Linux window establishes its native host on first Show.
+
+Transparency is restricted to standalone floating windows. Saved Dock placement is temporarily bypassed before presentation. Position and size are still saved, while the previous `docked` and `dockId` preferences are retained. Closing a transparent window and reopening it without `transparent:true` restores the prior Dock preference. The transparency option itself is not persisted. All Dock requests reject with `DOCK_UNAVAILABLE`, including Lua and the context menu. Undocking an already floating window remains idempotent.
+
+Invalid options reject with `INVALID_ARGUMENT`. Missing native support uses `TRANSPARENCY_UNAVAILABLE`, and Alpha setup failures use `TRANSPARENCY_FAILED`. Synchronous Lua failures return `0` and set `ReaWeb_GetLastError()`. JavaScript uses the existing Promise error contract. Asynchronous native failures close the pending window and enter diagnostics/logs. A returned window ID is not proof of readiness. There is no dynamic transparency setter, click-through mode or Docker transparency. See the [runnable example](../web/transparent/README.md).

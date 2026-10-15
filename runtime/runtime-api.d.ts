@@ -110,7 +110,10 @@ type ReaWebRuntimeNamespace = 'window' | 'theme' | 'dialog' | 'events' | 'lifecy
   | 'clipboard' | 'dragDrop' | 'app' | 'system' | 'transaction' | 'host' | 'stream';
 interface ReaWebRuntimeCapabilities {
   contract: 2; namespaces: ReaWebRuntimeNamespace[]; cleanupTimeoutMs: number;
-  window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11' };
+  window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11';
+    /** The creation option is accepted. Check transparency.supported for desktop Alpha. */
+    transparent: boolean;
+    transparency: { supported: boolean; framed: boolean; frameless: boolean; floatingOnly: boolean; backend: string; reason: string } };
   /** Reserved Runtime namespace identifiers. */
   reservedNamespaces: ReaWebRuntimeNamespace[];
   host: { maxMessageBytes: number; maxPendingMessages: number; maxQueuedBytes: number;
@@ -120,7 +123,7 @@ interface ReaWebRuntimeCapabilities {
   stream: { abi: 1; transport: 'websocket-binary'; maxStreams: number; maxConsumers: number; maxBytes: number; kinds: ReaWebStreamInfo['kind'][] };
 }
 interface ReaWebCapabilities { runtime: ReaWebRuntimeCapabilities; }
-interface ReaWebWindowOpenOptions { hidden?: boolean; frameless?: boolean; resizable?: boolean; }
+interface ReaWebWindowOpenOptions { hidden?: boolean; frameless?: boolean; resizable?: boolean; transparent?: boolean; }
 interface ReaWebDevToolsState {
   mode: 'embedded' | 'floating';
   /** Embedded panel share of available width: 0.2–0.8, default 0.4. */

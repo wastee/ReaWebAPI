@@ -41,7 +41,7 @@
 | `reaper.window.setDocked(docked)` | `boolean` | 返回实际停靠状态，保留页面 |
 | `reaper.window.isDocked()` | `boolean` | 获取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | 默认 `true`，设为 `false` 后遵循 REAPER 的全局快捷键规则 |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive`、`transparent`、`transparentActive` |
 
 窗口位置和停靠状态按入口文件及实例序号保存，最多同时打开 32 个窗口。同一 App 目录的窗口共享浏览器存储，不同目录隔离；句柄、订阅及等待请求始终只属于本页。
 
@@ -249,7 +249,7 @@ loop()
 
 ### 隐藏启动
 
-v0.3.8.15 起，`ReaWeb_OpenEx(path, optionsJson)` 接收 JSON 对象字符串，可选字段为 `instanceKey:string`、`id:string`、`multiple:boolean`、`hidden:boolean`、`frameless:boolean` 和 `resizable:boolean`。默认值沿用 `ReaWeb_Open`，`hidden` 和 `frameless` 默认为 `false`，`resizable` 默认为 `true`。后两个字段要求 v0.3.8.16。未知字段、类型错误、null、空字符串或无效 JSON 返回 `0`，通过 `ReaWeb_GetLastError()` 获取错误。缺省或空身份字符串沿用原有实例规则。
+v0.3.8.15 起，`ReaWeb_OpenEx(path, optionsJson)` 接收 JSON 对象字符串，可选字段为 `instanceKey:string`、`id:string`、`multiple:boolean`、`hidden:boolean`、`frameless:boolean` 、`resizable:boolean` 和 `transparent:boolean`。默认值沿用 `ReaWeb_Open`，`hidden` 和 `frameless` 默认为 `false`，`resizable` 默认为 `true`。`frameless` 和 `resizable` 要求 v0.3.8.16，`transparent` 要求 v0.3.8.18，默认 `false`。未知字段、类型错误、null、空字符串或无效 JSON 返回 `0`，通过 `ReaWeb_GetLastError()` 获取错误。缺省或空身份字符串沿用原有实例规则。
 
 ```lua
 assert(reaper.APIExists("ReaWeb_OpenEx") and reaper.APIExists("ReaWeb_Show"), "ReaWebAPI v0.3.8.15 required")
@@ -287,3 +287,25 @@ const id = await reaper.window.open('other/index.html', {frameless:true, resizab
 使用 `data-reaweb-drag` 与 `data-reaweb-no-drag` 声明[原生拖动区](frontend.zh-CN.md#原生拖动区)。不新增 `beginDrag`、`beginResize`、`setFrameless` 或 `setResizable`。[可运行示例](../web/frameless/README.md)提供可缩放与固定尺寸启动脚本，以及使用既有生命周期的关闭按钮。
 
 `capabilities.runtime.window` 和诊断中的 `windowFeatures` 报告 `frameless`、`resizable`、`dragRegions` 及 `windowSystem`（`win32`、`appkit` 或 `x11`）。Windows 要求 WebView2 非客户区支持，Linux 要求 X11/XWayland 和支持 `_NET_WM_MOVERESIZE` 的窗口管理器，不支持原生 Wayland。不支持的创建选项明确失败，异步 WebView 初始化失败沿用既有错误报告和清理流程，不退化为带装饰的可见窗口。
+
+## 透明窗口
+
+v0.3.8.18 起，`ReaWeb_OpenEx` 与 `reaper.window.open` 接受 `transparent?:boolean`，默认 `false`，仅在创建窗口时生效。复用实例保留已有配置和文档。旧 `ReaWeb_Open` ABI 不变。
+
+```lua
+local id = reaper.ReaWeb_OpenEx(path,
+  '{"instanceKey":"my-app","frameless":true,"transparent":true}')
+assert(id > 0, reaper.ReaWeb_GetLastError())
+```
+
+```js
+const id = await reaper.window.open('panel.html', {frameless:true, transparent:true});
+```
+
+`getState()` 与 `windowstatechange` 返回请求值 `transparent` 及原生桌面 Alpha 状态 `transparentActive`。后者不依赖页面 CSS，原生初始化尚未完成时可以为 `false`。页面需显式设置透明 CSS，不透明 CSS 仍显示不透明内容。透明像素保留矩形鼠标命中区域。
+
+`capabilities.runtime.window.transparent` 表示接受该选项。实际支持情况通过 `transparency.supported`、`framed`、`frameless`、`backend` 与 `reason` 判断。Windows 使用 HWND WebView2 控制器与 DWM Alpha，要求 Controller2。macOS 使用非不透明 AppKit 宿主及 WKWebView 背景控制。Linux 要求 GDK3/X11、32 位 RGBA 视觉格式、活动合成器，以及 REAPER/SWELL 的 `SWELLGdkAlphaChannel` 支持，不支持原生 Wayland。Linux 隐藏窗口在首次 Show 时建立原生宿主。
+
+透明功能仅适用于独立浮动窗口。首次呈现前临时跳过已保存的 Dock 恢复，继续保存位置和尺寸，并保留原来的 `docked` 与 `dockId` 偏好。关闭后不带 `transparent:true` 重新打开时恢复原 Dock 偏好。透明选项本身不持久化。所有 Dock 请求均以 `DOCK_UNAVAILABLE` 拒绝，包括 Lua 和上下文菜单。对已浮动窗口取消停靠仍保持幂等。
+
+选项类型错误返回 `INVALID_ARGUMENT`，缺少原生支持使用 `TRANSPARENCY_UNAVAILABLE`，Alpha 初始化失败使用 `TRANSPARENCY_FAILED`。Lua 同步失败返回 `0`，通过 `ReaWeb_GetLastError()` 获取原因。JavaScript 沿用 Promise 错误合同。原生异步失败关闭待创建窗口，并写入诊断和日志，正数窗口 ID 不代表已就绪。不提供动态透明切换、鼠标穿透或 Docker 透明。参见[可运行示例](../web/transparent/README.md)。

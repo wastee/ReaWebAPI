@@ -21,7 +21,11 @@ Json rectangle(HWND handle) {
   return {rect.left, rect.top, rect.right, rect.bottom};
 }
 void tick() {
-  EnumWindows(+[](HWND dialog, LPARAM) -> BOOL {
+  bool evaluation_pending = false;
+  EnumWindows(+[](HWND dialog, LPARAM data) -> BOOL {
+    char title[128]{}; GetWindowText(dialog, title, sizeof(title));
+    if (std::string(title).find("About REAPER") == 0 && IsWindowVisible(dialog))
+      *reinterpret_cast<bool*>(data) = true;
     if (dialog != host->hwnd_main) EnumChildWindows(dialog, +[](HWND child, LPARAM) -> BOOL {
       char text[128]{}; GetWindowText(child, text, sizeof(text));
       if (std::string(text) == "Still Evaluating" && IsWindowEnabled(child))
@@ -29,7 +33,7 @@ void tick() {
       return TRUE;
     }, 0);
     return TRUE;
-  }, 0);
+  }, reinterpret_cast<LPARAM>(&evaluation_pending));
   if (!id) {
     if (!IsWindowVisible(host->hwnd_main)) return;
     open_window = reinterpret_cast<decltype(open_window)>(host->GetFunc("ReaWeb_Open"));
@@ -64,6 +68,7 @@ void tick() {
     const auto index = reinterpret_cast<int(*)(HWND, bool*)>(host->GetFunc("DockIsChildOfDock"))(window, &floating);
     const auto position = reinterpret_cast<int(*)(int)>(host->GetFunc("DockGetPosition"))(index);
     Json state{{"page", rectangle(window)}, {"docker", rectangle(GetParent(window))},
+      {"evaluationPending", evaluation_pending},
       {"main", rectangle(host->hwnd_main)}, {"xid", xid_of(native)}, {"position", position}, {"floating", floating}};
     { std::ofstream out(resource / "geometry.tmp"); out << state; }
     fs::rename(resource / "geometry.tmp", resource / "geometry.json");

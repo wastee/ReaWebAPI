@@ -19,6 +19,7 @@ launchers = %w[
   web/native-stream/reawebapi-native-stream.lua
   web/frameless/reawebapi-frameless-resizable.lua
   web/frameless/reawebapi-frameless-fixed.lua
+  web/transparent/reawebapi-transparent.lua
 ].sort
 abort 'Missing Demo files' unless scripts.map(&:file_pattern).sort == expected
 scripts.each do |item|

@@ -20,6 +20,7 @@ public:
   Json placement() const;
   void restore_placement(const Json& value);
   void set_background(unsigned color);
+  void set_transparent(bool value) { transparent_ = value; }
   std::function<void()> resize;
   std::function<void()> configure_floating;
   std::function<void(LPARAM)> context_menu;
@@ -29,6 +30,7 @@ private:
   RECT floating_{};
   bool closed_ = false;
   unsigned background_ = 0xffffff;
+  bool transparent_ = false;
   std::function<void()> focus_;
   std::function<void()> close_;
   static INT_PTR procedure(HWND, UINT, WPARAM, LPARAM);

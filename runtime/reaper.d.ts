@@ -68,6 +68,10 @@ interface ReaWebWindowState {
   frameless: boolean;
   resizable: boolean;
   framelessActive: boolean;
+  /** Creation-time request. Transparent windows cannot be docked. */
+  transparent: boolean;
+  /** Native desktop Alpha has been established, independently of page CSS. */
+  transparentActive: boolean;
 }
 interface ReaWebEvents {
   projectchange: { projectEpoch: number; changeCount: number };
