@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.8.22 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.23 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,9 +11,12 @@ option(REAWEB_BUILD_EXTENSION "Build the REAPER extension" ON)
 option(BUILD_TESTING "Build regression tests (included in source)" OFF)
 include(FetchContent)
 
+# Use the small official release archive instead of cloning the full Git history.
+# This is the same 3.11.3 release as commit 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03.
 FetchContent_Declare(json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03)
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+  DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
 FetchContent_MakeAvailable(json)
 
 FetchContent_Declare(ebur128
