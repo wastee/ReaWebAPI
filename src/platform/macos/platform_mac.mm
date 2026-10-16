@@ -30,11 +30,25 @@ void open_external(const std::string& url) {
   std::string entryURI;
   std::string navigationURI;
   bool isClosed;
+  NSOpenPanel* filePanel;
   std::function<void()> navigationStarted;
 }
 @end
 
 @implementation ReaWebDelegate
+- (void)webView:(WKWebView*)webView runOpenPanelWithParameters:(WKOpenPanelParameters*)parameters
+    initiatedByFrame:(WKFrameInfo*)frame completionHandler:(void (^)(NSArray<NSURL*>*))completionHandler {
+  if (isClosed || filePanel || !frame.mainFrame || !webView.window) { completionHandler(nil); return; }
+  filePanel = [NSOpenPanel openPanel];
+  filePanel.canChooseFiles = YES;
+  filePanel.canChooseDirectories = parameters.allowsDirectories;
+  filePanel.allowsMultipleSelection = parameters.allowsMultipleSelection;
+  [filePanel beginSheetModalForWindow:webView.window completionHandler:^(NSModalResponse response) {
+    NSArray<NSURL*>* urls = !self->isClosed && response == NSModalResponseOK ? self->filePanel.URLs : nil;
+    self->filePanel = nil;
+    completionHandler(urls);
+  }];
+}
 - (void)userContentController:(WKUserContentController*)controller didReceiveScriptMessage:(WKScriptMessage*)message {
   (void)controller;
   if (!isClosed && message.frameInfo.mainFrame && [message.body isKindOfClass:[NSString class]] &&
@@ -69,6 +83,7 @@ void open_external(const std::string& url) {
 }
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation {
   (void)webView; (void)navigation;
+  [filePanel cancel:nil];
   if (!isClosed && navigationStarted) navigationStarted();
   if (!isClosed && options.on_navigation) options.on_navigation();
 }
@@ -412,6 +427,7 @@ public:
     auto drag_reply = std::move(webview_->dragReply);
     if (drag_reply) try { drag_reply({{"result", false}}); } catch (...) {}
     delegate_->isClosed = true;
+    [delegate_->filePanel cancel:nil];
     delegate_->navigationStarted = {};
     [webview_ stopLoading];
     webview_.navigationDelegate = nil;

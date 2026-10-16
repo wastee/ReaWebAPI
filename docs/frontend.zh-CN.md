@@ -82,6 +82,8 @@ render(config, track);
 
 ## 资源来源与存储
 
+浏览器 File/Blob 播放、原生文件选择及可选下载导出模块见[浏览器媒体接入](browser-media.md)。
+
 `reaper.window.open(path)` 接受本地 HTML 路径，其规范化父目录是 **App Root**。生产页面使用 `reaweb://<appId>/<entry>`，不创建 TCP listener。Windows、macOS、Linux 分别通过 WebView2 Custom Scheme、WKURLSchemeHandler、WebKitGTK URI handler 提供只读资源。支持相对 URL、ES modules、本地 fetch、Unicode/空格/#/% 文件名、MIME、HEAD 和单字节范围请求。URL 中的 `#` 和 `%` 必须编码，例如 `file%23%25.js`。拒绝目录列表、写入、目录遍历及指向根目录外的 symlink/junction。
 
 在根目录 `app.json` 中定义稳定且全局唯一的 `id`：

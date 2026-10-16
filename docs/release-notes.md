@@ -2,12 +2,10 @@
 
 ## English
 
-- Add creation-time `transparent` floating windows with desktop Alpha on Windows, macOS and composited Linux X11/XWayland.
-- Add transparency state and backend capability diagnostics, preserve saved Dock preferences, and reject docking for transparent windows.
-- Add a transparent-window Demo and SDK declarations.
+- Add an opt-in browser file export helper for Windows, macOS and Linux, using native save dialogs with a 16 MiB limit.
+- Enable WKWebView file inputs on macOS with native selection and cancellation.
 
 ## 简体中文
 
-- 新增创建时 `transparent` 浮动窗口，支持 Windows、macOS 及具备合成器的 Linux X11/XWayland 桌面 Alpha。
-- 新增透明状态与后端能力诊断，保留原 Dock 偏好，并拒绝透明窗口停靠。
-- 新增透明窗口 Demo 和 SDK 类型声明。
+- 新增适用于 Windows、macOS 和 Linux 的可选浏览器文件导出模块，使用原生保存对话框，限制为 16 MiB。
+- 补全 macOS WKWebView 文件输入的原生选择与取消处理。

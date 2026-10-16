@@ -82,6 +82,8 @@ No special support is added for Service Worker, PWA, push, geolocation, camera, 
 
 ## Resource origin and storage
 
+For browser File/Blob playback, native file selection and opt-in download exports, see [browser files and media](browser-media.md).
+
 `reaper.window.open(path)` accepts a local HTML path. Its canonical parent directory is the **App root**. Production pages use `reaweb://<appId>/<entry>` without a TCP listener. WebView2 custom schemes, WKURLSchemeHandler and WebKitGTK URI handlers serve read-only resources. Relative URLs, ES modules, local fetch, Unicode/space/#/% names, MIME, HEAD and single byte ranges are supported. Encode `#` and `%` in resource URLs, for example `file%23%25.js`. Directory listing, writes, traversal and symlinks/junctions outside the root are rejected.
 
 Define a stable, globally unique `id` in the root's `app.json`:

@@ -20,8 +20,9 @@ def payload(root, version, revision):
     bindings = json.loads((root / 'api/bindings.json').read_text(encoding='utf-8-sig'))
     verify(root, schema, bindings)
     paths = {f'ReaWebAPI/SDK/{name}': root / 'runtime' / name for name in (
-        'reaper.d.ts', 'runtime-api.d.ts', 'app-manifest.schema.json', 'reaper-api.generated.d.ts', 'reaper.js', 'reaper-api.generated.js', 'README.md', 'README.zh-CN.md')}
+        'reaper.d.ts', 'runtime-api.d.ts', 'app-manifest.schema.json', 'reaper-api.generated.d.ts', 'reaper.js', 'reaper-api.generated.js', 'browser-files.mjs', 'browser-files.d.mts', 'README.md', 'README.zh-CN.md')}
     paths['ReaWebAPI/SDK/tools/validate_app.py'] = root / 'tools/validate_app.py'
+    paths['ReaWebAPI/docs/browser-media.md'] = root / 'docs/browser-media.md'
     paths['ReaWebAPI/SDK/native/reaweb_service.h'] = root / 'src/public/reaweb_service.h'
     for name in ('reaweb_stream.h', 'reaweb_tasks.h'):
         paths[f'ReaWebAPI/SDK/native/{name}'] = root / 'src/public' / name
