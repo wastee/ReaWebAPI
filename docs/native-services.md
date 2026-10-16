@@ -24,6 +24,8 @@ await stopUnload();
 
 The built-in `runtime` service implements `getInfo`, returning `{version, serviceABI}`. It uses the same registry as third-party extensions. State queries and controls retain existing Mirror APIs.
 
+The [`jsfx` service](jsfx-webui.md) synchronizes parameters for an explicitly associated native JSFX editor. Only its bound Hosted WebView can invoke parameter operations.
+
 ## Native integration
 
 Use the versioned C ABI in [reaweb_service.h](../src/public/reaweb_service.h). Resolve `ReaWeb_RegisterService`, `ReaWeb_UnregisterService`, `ReaWeb_CompleteServiceCall` and `ReaWeb_EmitServiceEvent` with REAPER's `GetFunc`. These are native extension APIs, not Mirror or Lua vararg APIs. The [test extension](../tests/native_service_extension.cpp) is a complete example.

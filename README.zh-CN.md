@@ -6,6 +6,7 @@
 
 ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩展，提供可停靠的 WebView 窗口，并通过 `reaper` 对象异步调用 REAPER API。
 
+- [JSFX Web UI](docs/jsfx-webui.md) 自动托管显式关联的原生 JSFX 编辑器，提供实例绑定的参数同步。
 - 730 项 REAPER 7.80 标准 API 绑定及 TypeScript 类型声明。
 - Mirror-aware Batch Builder，支持 456 项已审核 API（含播放查询和时间换算）、延迟引用、多返回值解构和结果类型推导。
 - 支持 Lua 后端 + WebView UI，通过 `ReaWeb_Send`、`ReaWeb_Receive`、`reaper.host.send` 和 `message` 事件通信。

@@ -43,13 +43,14 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
   return open_impl("", base, validate_dev_url(url));
 }
 
-int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable, bool transparent) {
+int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable, bool transparent, std::shared_ptr<Session::Jsfx> jsfx) {
   check_thread();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
   if (sessions_.size() >= 32) throw Error("WINDOW_LIMIT", "At most 32 ReaWebAPI windows may be open");
   if (next_id_ == std::numeric_limits<int>::max()) throw Error("WINDOW_LIMIT", "Window id space exhausted");
-  const auto app_id = dev_url.empty() ? app_identity(entry.parent_path(), launcher_source) : "dev-" + state_key(dev_url, 0);
+  const auto app_id = jsfx && !fs::exists(entry.parent_path() / "app.json") ? "jsfx-" + state_key(jsfx->binding->ident(), 0) :
+    dev_url.empty() ? app_identity(entry.parent_path(), launcher_source) : "dev-" + state_key(dev_url, 0);
   const auto profile = resource_ / "ReaWebAPI" / "Apps" / app_id;
   const auto app_key = (dev_url.empty() ? "app:" : "dev:") + app_id;
   auto app = apps_[app_key].lock();
@@ -83,6 +84,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   const auto id = ++next_id_;
   auto session = std::make_shared<Session>();
   session->id = id;
+  session->jsfx = std::move(jsfx);
+  if (session->jsfx) jsfx_platform_ = app->platform;
   session->background_start = hidden;
   session->frameless = frameless;
   session->resizable = resizable;
@@ -118,10 +121,12 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
         if (s->ready && work.text.size() <= 4096) {
           Json input;
           try { input = parse_request(work.text); } catch (const std::exception&) {}
-          if (input.is_object() && input.value("method", std::string()) == "ReaWeb_ServiceSend") {
+          if (input.is_object() && (input.value("method", std::string()) == "ReaWeb_ServiceSend" ||
+              (s->jsfx && !s->outstanding && input.value("method", std::string()) == "ReaWeb_ServiceInvoke"))) {
             const auto& args = input.at("args");
             if (args.size() == 3 && args[0].is_string() && args[1].is_string() &&
-                services_.is_input(args[0].get<std::string>(), args[1].get<std::string>())) {
+                ((input["method"] == "ReaWeb_ServiceSend" && services_.is_input(args[0].get<std::string>(), args[1].get<std::string>())) ||
+                 (s->jsfx && input["method"] == "ReaWeb_ServiceInvoke" && args[0] == "jsfx" && args[1] == "present"))) {
               work.kind = Work::Request; work.data = std::move(input); work.text.clear();
               ++s->outstanding;
               Json response{{"id", work.data.at("id")}, {"document", work.data.value("document", Json())}};
@@ -160,8 +165,15 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
         else ++s->outstanding;
       }
     }, [this, weak](std::string error) {
-      if (auto s = weak.lock()) fail(*s, error);
-    }, dock_.parent, [this, weak] { if (auto s = weak.lock()) navigate(*s); }, app->resources ? app->resources->entry_url(entry) : dev_url,
+      if (auto s = weak.lock()) {
+        if (s->jsfx) {
+          bool active = false;
+          try { active = s->jsfx->binding->editor_matches(s->jsfx->editor); } catch (...) {}
+          if (s->closing || !active) { release_jsfx(*s); s->closing = true; return; }
+        }
+        fail(*s, error);
+      }
+    }, session->jsfx ? session->jsfx->editor.host->parent() : dock_.parent, [this, weak] { if (auto s = weak.lock()) navigate(*s); }, app->resources ? app->resources->entry_url(entry) : dev_url,
     [this, id] { close(id); }, [this, id] { return defer_reload(id); },
     [this, weak](Json payload) {
       auto s = weak.lock();
@@ -174,7 +186,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       output.data = {{"document", s->document}, {"event", "native-drop"}, {"sequence", ++s->event_sequence}, {"data", payload}};
       if (s->output_pending >= 256 || !worker_.submit(std::move(output))) { fail(*s, "Native drop queue limit exceeded"); return; }
       ++s->output_pending;
-    }, dock_.add && dock_.remove && dock_.index && dock_.activate ? std::function<void()>([this, weak] {
+    }, !session->jsfx && dock_.add && dock_.remove && dock_.index && dock_.activate ? std::function<void()>([this, weak] {
       if (auto s = weak.lock(); s && !s->closing)
         s->native_dock_request = !s->native_dock_request.value_or(is_docked(s->id));
     }) : std::function<void()>{}, [this, id] { return is_docked(id); }, [weak] {
@@ -184,10 +196,12 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, window_resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }, hidden, frameless, resizable, transparent});
+    }, hidden, frameless, resizable, transparent, bool(session->jsfx)});
   session->window->set_media_resources(window_resources);
+  if (session->jsfx) session->jsfx->editor.host->resize(session->window->native_handle());
   sessions_.emplace(id, session);
-  try {
+  if (session->jsfx) attach_jsfx(*session, session->jsfx->editor);
+  try { if (!session->jsfx) {
     auto cached = state_cache_.find(session->ident);
     session->saved_state = cached != state_cache_.end() ? cached->second : read_state(session->state_path, entry.generic_u8string());
     if (!session->saved_state.is_null()) {
@@ -200,7 +214,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
         else set_docked(id, true);
       }
     }
-  } catch (const std::exception& e) {
+  } } catch (const std::exception& e) {
     session->last_error = std::string("Window state was not restored: ") + e.what();
     log_(session->last_error);
   }
@@ -295,6 +309,7 @@ bool Runtime::set_docked(int id, bool docked) {
   check_thread();
   if (!is_open(id)) throw Error("WINDOW_CLOSED", "Window is no longer open");
   auto& session = *sessions_.at(id);
+  if (session.jsfx) throw Error("WINDOW_HOSTED", "REAPER controls the JSFX editor placement");
   if (session.transparent) {
     if (docked) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     return false;
@@ -342,6 +357,7 @@ bool Runtime::set_docked(int id, bool docked) {
 }
 
 void Runtime::detach(const Session& session) {
+  if (session.jsfx) return;
   if (dock_.index && dock_.remove) {
     auto handle = session.window->native_handle();
     if (handle && dock_.index(handle) >= 0) dock_.remove(handle);
@@ -354,6 +370,7 @@ void Runtime::set_title(Session& s, const std::string& title) {
 }
 
 void Runtime::refresh_icon(Session& s) {
+  if (s.jsfx) return;
   auto target = s.window->icon_target();
   if (s.icon_dirty || target != s.icon_target) {
     s.icon_target = target; s.icon_dirty = false;
@@ -382,6 +399,7 @@ Json Runtime::window_state(const Session& s) const {
 }
 
 void Runtime::persist(Session& s, bool force) {
+  if (s.jsfx) return;
   Json state = s.pending_state;
   if (s.window->native_handle()) {
     const bool docked = is_docked(s.id);

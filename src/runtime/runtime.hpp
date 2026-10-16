@@ -10,6 +10,7 @@
 #include "runtime/native_producers.hpp"
 #include "runtime/external_transport.hpp"
 #include "runtime/external_settings.hpp"
+#include "runtime/jsfx_webui.hpp"
 #include <deque>
 #include <optional>
 #include <set>
@@ -42,6 +43,7 @@ public:
   NativeTasks& tasks() { return tasks_; }
   NativeProducers& producers() { return producers_; }
   void configure_external(const ExternalSettings& settings);
+  void initialize_jsfx(JsfxDiscovery discovery);
   uint16_t external_port() const;
 private:
   struct ExternalSession {
@@ -110,6 +112,18 @@ private:
     bool icon_visible = true, icon_dirty = false, icon_initialized = false;
     uint64_t favicon_revision = 0;
     bool failed = false;
+    struct Jsfx {
+      JsfxEditor editor;
+      std::unique_ptr<JsfxBinding> binding;
+      Json values = Json::array(), changes = Json::array();
+      int scan = 0, count = 0, editing = -1;
+      uint64_t revision = 0, host_revision = 0, activation = 1;
+      bool initialized = false, presented = false;
+      double presentation_ms = 0;
+      std::string undo;
+      Clock::time_point next_poll{}, last_edit{}, last_used = Clock::now();
+    };
+    std::shared_ptr<Jsfx> jsfx;
     bool lifecycle_enabled = false, allow_reload = false;
     std::string lifecycle_action, lifecycle_token;
     Clock::time_point lifecycle_deadline;
@@ -166,11 +180,24 @@ private:
   uint64_t lifecycle_sequence_ = 0;
   bool ticking_ = false;
   std::thread::id main_thread_;
+  JsfxDiscovery jsfx_discovery_;
+  std::shared_ptr<Platform> jsfx_platform_;
+  uint64_t jsfx_service_ = 0;
+  int jsfx_poll_cursor_ = 0;
+  Clock::time_point next_jsfx_discovery_{};
+  std::map<void*, std::shared_ptr<JsfxEditorHost>> jsfx_blocked_;
+  void tick_jsfx();
+  void release_jsfx(Session& session);
+  void park_jsfx(Session& session);
+  void attach_jsfx(Session& session, const JsfxEditor& editor);
+  Json jsfx_state(Session& session);
+  Json jsfx_call(int window, const std::string& method, const Json& payload);
+  void end_jsfx_edit(Session& session);
   void check_thread() const;
   void enqueue_message(Session& session, const std::string& message, bool to_web);
   void clear_messages(Session& session);
   void flush_messages(Session& session, Clock::time_point deadline);
-  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source = {}, bool hidden = false, bool frameless = false, bool resizable = true, bool transparent = false);
+  int open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source = {}, bool hidden = false, bool frameless = false, bool resizable = true, bool transparent = false, std::shared_ptr<Session::Jsfx> jsfx = {});
   void attach_pending_dock(Session& session);
   bool start_async(Session& session, const Work& request);
   void refresh_icon(Session& session);

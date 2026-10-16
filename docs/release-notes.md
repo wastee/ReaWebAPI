@@ -2,10 +2,10 @@
 
 ## English
 
-- Add `reaper.fs.openMedia()` for read-only local media URLs with bounded streaming, seeking and document-scoped cleanup on Windows, macOS and Linux.
-- Fetch nlohmann/json 3.11.3 from its SHA-256-verified release archive to reduce build-time downloads and exposure to Git clone network failures.
+- Add JSFX Web UI with automatic native editor hosting for explicit JSON associations on Windows, macOS and Linux, and instance-bound parameter synchronization.
+- Add bounded JSFX page reuse with reliable initial presentation and sizing, stable sizing, position and background during switches, plus a parameter helper with visibility events, coalesced writes, native edit gestures and managed Undo.
 
 ## 简体中文
 
-- 新增 `reaper.fs.openMedia()`，在 Windows、macOS 和 Linux 提供只读本地媒体 URL，支持有界流式读取、跳转及文档生命周期清理。
-- 构建时改用经 SHA-256 校验的 nlohmann/json 3.11.3 发布压缩包，减少下载量并降低 Git 克隆网络故障对构建的影响。
+- 新增 JSFX Web UI，在 Windows、macOS 和 Linux 自动托管显式 JSON 关联的原生编辑器，支持实例绑定的参数同步。
+- 新增 JSFX 页面有限缓存、首次内容显示与尺寸初始化及切换期间的尺寸、位置和背景保持，参数辅助模块支持可见性事件、合并写入、原生编辑手势和托管 Undo。

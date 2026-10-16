@@ -35,6 +35,7 @@ struct WindowOptions {
   bool frameless = false;
   bool resizable = true;
   bool transparent = false;
+  bool hosted = false;
 };
 class Window {
   std::shared_ptr<WebResources> media_resources_;
@@ -54,6 +55,8 @@ public:
   virtual void restore_devtools(const Json&) {}
   virtual bool closed() const = 0;
   virtual void* native_handle() const { return nullptr; }
+  virtual void reparent_host(void*) { throw Error("HOST_UNAVAILABLE", "Hosted window reparenting unavailable"); }
+  virtual unsigned background_color() const { return 0xffffff; }
   virtual void prepare_dock() {}
   virtual void prepare_undock() {}
   virtual void restore_floating() {}

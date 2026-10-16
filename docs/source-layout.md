@@ -29,6 +29,7 @@ src/
 │  ├─ service_router.cpp
 │  ├─ lifecycle.cpp
 │  ├─ services.cpp / services.hpp
+│  ├─ jsfx_webui.cpp / jsfx_webui.hpp / jsfx_runtime.cpp
 │  ├─ window.cpp
 │  ├─ theme.cpp
 │  ├─ debug.cpp
@@ -51,6 +52,7 @@ src/
 │  ├─ shared/drag_regions.hpp
 │  ├─ shared/transparency.hpp
 │  ├─ shared/startup.hpp
+│  ├─ shared/jsfx_editor.cpp / jsfx_editor.hpp
 │  └─ shared/swell_window.cpp / swell_window.hpp
 ├─ web/
 │  └─ web_resources.cpp / web_resources.hpp

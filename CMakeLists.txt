@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.8.23 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.24 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -135,6 +135,8 @@ add_library(reaweb_runtime STATIC
   src/runtime/native_monitor.cpp
   src/runtime/service_router.cpp
   src/runtime/runtime.cpp
+  src/runtime/jsfx_webui.cpp
+  src/runtime/jsfx_runtime.cpp
   src/runtime/window.cpp
   src/runtime/events.cpp
   src/runtime/messages.cpp
@@ -150,7 +152,7 @@ endif()
 
 if(REAWEB_BUILD_EXTENSION)
 
-  add_library(reawebapi MODULE src/plugin/plugin.cpp src/plugin/preferences.cpp)
+  add_library(reawebapi MODULE src/plugin/plugin.cpp src/plugin/preferences.cpp src/platform/shared/jsfx_editor.cpp)
   target_link_libraries(reawebapi PRIVATE reaweb_runtime)
   target_compile_definitions(reawebapi PRIVATE NOMINMAX)
   target_include_directories(reawebapi PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

@@ -2,6 +2,11 @@
 
 namespace reaweb {
 void Runtime::fail(Session& session, const std::string& message) {
+  if (session.jsfx) {
+    release_jsfx(session);
+    auto host = session.jsfx->editor.host;
+    if (host && host->valid()) jsfx_blocked_[host->parent()] = host;
+  }
   session.last_error = message;
   session.failed = true;
   if (!session.closing) session.closing_since = Clock::now();
@@ -32,6 +37,9 @@ Json Runtime::diagnostics(int id) const {
   result["system"] = system_diagnostics();
   result["streams"] = streams_.info();
   result["audioCapture"] = producers_.diagnostics();
+  if (s.jsfx) result["jsfx"] = {{"cached", !s.jsfx->editor.host}, {"activation", s.jsfx->activation},
+    {"presented", s.jsfx->presented}, {"fxGuid", s.jsfx->binding->guid()}, {"fxIndex", s.jsfx->editor.fx},
+    {"presentationMs", s.jsfx->presentation_ms}};
   result.update({{"version", REAWEB_VERSION}, {"protocol", 1}, {"window", window_state(s)},
     {"stage", s.closing ? "closing" : s.ready ? "ready" : "loading"}, {"documentGeneration", s.generation},
     {"projectEpoch", project_epoch_}, {"pendingCalls", s.outstanding}, {"queuedCalls", s.queue.size()},

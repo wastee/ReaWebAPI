@@ -204,6 +204,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   }
   void configure_floating() {
     const auto& options = delegate_->options;
+    if (options.hosted) return;
     if (!options.frameless && options.resizable && !options.transparent) return;
     auto native = floating_window();
     if (!native) throw Error("WINDOW_STYLE_FAILED", "The standalone AppKit host is unavailable");
@@ -374,7 +375,7 @@ public:
     webview_.navigationDelegate = delegate_;
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true);
+    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true, delegate_->options.hosted);
     delegate_->navigationStarted = [this] { startup_.navigate(); drag_regions_.clear(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
       if (message == "__reawebPresent") { prepare_startup(); return; }
@@ -473,6 +474,13 @@ public:
   void restore_devtools(const Json& value) override { devtools_->restore(value); }
   bool closed() const override { return delegate_->isClosed || window_->closed(); }
   void* native_handle() const override { return window_->handle(); }
+  unsigned background_color() const override { return window_->background_color(); }
+  void reparent_host(void* parent) override {
+    if (!delegate_->options.hosted) throw Error("HOST_UNAVAILABLE", "Expected a hosted window");
+    set_visible(false);
+    window_->reparent_host(parent);
+    delegate_->options.parent = window_->host_parent();
+  }
   void* icon_target() const override {
     auto native = webview_.window;
     if (delegate_->options.is_docked && delegate_->options.is_docked()) {
@@ -510,12 +518,12 @@ public:
     if (startup_.present()) {
       window_->set_visible(true);
       if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
-      if (startup_.focus_requested() && NSApp.active && NSApp.keyWindow == startup_key_) {
+      if (!delegate_->options.hosted && startup_.focus_requested() && NSApp.active && NSApp.keyWindow == startup_key_) {
         if (delegate_->options.on_present) delegate_->options.on_present();
         if (!(delegate_->options.is_docked && delegate_->options.is_docked())) focus();
       }
     }
-    devtools_->tick(); apply_icon();
+    devtools_->tick(); if (!delegate_->options.hosted) apply_icon();
   }
   void set_title(const std::string& title) override { window_->set_title(title); icon_window_ = nil; apply_icon(); }
   std::vector<int> icon_sizes() const override {

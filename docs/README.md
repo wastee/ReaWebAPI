@@ -12,6 +12,7 @@ Reference for building WebView tools in REAPER.
 | [REAPER API](api-reference.md) | 730 REAPER 7.80 signatures and return types |
 | [Runtime API](runtime-api.md) | Windows, events, files, audio and App services |
 | [Native Services](native-services.md) | Native events, monitor payloads and C/C++ service integration |
+| [JSFX Web UI](jsfx-webui.md) | Native JSFX editor hosting and bound parameter service / 原生 JSFX 编辑器托管与参数服务 |
 | [External Clients](external-clients.md) | Authenticated localhost access to native APIs, services, events and streams |
 | [API inventory](runtime-api-inventory.md) | Runtime namespace and method index |
 | [Host API](host-api.md) | Lua entry points, native bridge behavior and error codes |

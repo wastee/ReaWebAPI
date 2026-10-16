@@ -210,7 +210,12 @@ public:
     };
     window_ = std::make_unique<SwellWindow>(options.title, options.parent, [this] {
       try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
-    }, options.on_close, /*hidden=*/true);
+    }, options.on_close, /*hidden=*/true, options.hosted);
+    if (options.hosted) window_->before_destroy = [this] {
+      immediate_resize_enabled_ = false; wants_visible_ = false;
+      geometry_ = Json(); pending_origin_valid_ = false;
+      try { process_->park(id_); } catch (...) {}
+    };
     if (transparent_) {
       SetProp(static_cast<HWND>(window_->handle()), "SWELLGdkAlphaChannel", reinterpret_cast<HANDLE>(1));
       window_->set_transparent(true);
@@ -279,6 +284,7 @@ public:
     process_->alpha_frames.erase(id_);
     immediate_resize_enabled_ = false;
     window_->resize = {};
+    window_->before_destroy = {};
     process_->listeners.erase(id_);
     process_->inspectors.erase(id_);
     process_->backgrounds.erase(id_);
@@ -304,7 +310,7 @@ public:
       }
     }
     const bool is_docked = docked();
-    icon_.refresh(icon_target(is_docked), is_docked);
+    if (!process_->listeners.at(id_).hosted) icon_.refresh(icon_target(is_docked), is_docked);
     if (!wants_visible_) { immediate_resize_enabled_ = false; return; }
     using GetXid = unsigned long (*)(void*);
     static auto get_xid = reinterpret_cast<GetXid>(dlsym(RTLD_DEFAULT, "gdk_x11_window_get_xid"));
@@ -402,6 +408,15 @@ public:
   }
   bool closed() const override { return window_->closed() || !process_->error.empty(); }
   void* native_handle() const override { return window_->handle(); }
+  unsigned background_color() const override { return process_->backgrounds.at(id_); }
+  void reparent_host(void* parent) override {
+    auto& options = process_->listeners.at(id_);
+    if (!options.hosted) throw Error("HOST_UNAVAILABLE", "Expected a hosted window");
+    set_visible(false);
+    window_->reparent_host(parent);
+    options.parent = window_->host_parent();
+    geometry_ = Json(); pending_origin_valid_ = false;
+  }
   void prepare_dock() override {
     if (transparent_) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     immediate_resize_enabled_ = false;

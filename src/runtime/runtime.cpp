@@ -46,6 +46,9 @@ Runtime::Runtime(Host host, fs::path resource, std::function<void(const std::str
   services_.add("runtime", &builtin, &handle);
 }
 Runtime::~Runtime() {
+  jsfx_discovery_.reset();
+  for (auto& item : sessions_) release_jsfx(*item.second);
+  jsfx_blocked_.clear();
   stop_external();
   services_.shutdown();
   try { finish_undo(); } catch (...) {}
@@ -132,6 +135,7 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
     return bounds;
   }
   if (method == "ReaWeb_SetBounds") {
+    if (s.jsfx) throw Error("WINDOW_HOSTED", "REAPER controls the JSFX editor bounds");
     if (is_docked(id)) throw Error("WINDOW_DOCKED", "REAPER controls Docker geometry; undock before setting bounds");
     if (!args[0].is_object() || args[0].empty()) throw Error("INVALID_ARGUMENT", "Expected window bounds");
     auto bounds = s.window->bounds();
@@ -407,6 +411,7 @@ void Runtime::tick() {
   ticking_ = true;
   struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
   sync_external();
+  tick_jsfx();
   if (auto platform = platform_.lock()) platform->pump();
   for (auto it = apps_.begin(); it != apps_.end();) {
     if (!it->second.expired()) ++it;
@@ -576,6 +581,7 @@ void Runtime::tick() {
         if (response) { auto request = std::move(audio.request); s.audio.pop_front(); reply(s, std::move(request), *response); }
       }
       if (s.closing || s.window->closed()) {
+        release_jsfx(s);
         streams_.detach_window(s.id);
         producers_.close_window(s.id);
         tasks_.cancel_window(s.id);

@@ -4,6 +4,8 @@
 
 static SWELL_DialogRegHelper reaweb_dialog(&SWELL_curmodule_dialogresource_head,
   [](HWND, int) {}, 101, SWELL_DLG_WS_RESIZABLE, "ReaWebAPI", 860, 640, 1.0, 1.0);
+static SWELL_DialogRegHelper reaweb_hosted_dialog(&SWELL_curmodule_dialogresource_head,
+  [](HWND, int) {}, 102, SWELL_DLG_WS_CHILD, "ReaWebAPI", 860, 640, 1.0, 1.0);
 
 namespace reaweb {
 INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM parameter) {
@@ -32,15 +34,22 @@ INT_PTR SwellWindow::procedure(HWND window, UINT message, WPARAM command, LPARAM
     if (self->close_) self->close_(); else self->closed_ = true;
     return TRUE;
   }
-  if (message == WM_DESTROY) { self->closed_ = true; self->window_ = nullptr; }
+  if (message == WM_DESTROY) {
+    if (self->before_destroy) self->before_destroy();
+    self->closed_ = true; self->window_ = nullptr;
+  }
   if (message == WM_SETFOCUS && self->focus_) self->focus_();
   return FALSE;
 }
-SwellWindow::SwellWindow(const std::string& title, void* parent, std::function<void()> focus, std::function<void()> close, bool hidden)
+SwellWindow::SwellWindow(const std::string& title, void* parent, std::function<void()> focus, std::function<void()> close, bool hidden, bool hosted)
   : owner_(static_cast<HWND>(parent)), focus_(std::move(focus)), close_(std::move(close)) {
-  window_ = CreateDialogParam(nullptr, MAKEINTRESOURCE(101), static_cast<HWND>(parent), procedure, reinterpret_cast<LPARAM>(this));
+  window_ = CreateDialogParam(nullptr, MAKEINTRESOURCE(hosted ? 102 : 101), static_cast<HWND>(parent), procedure, reinterpret_cast<LPARAM>(this));
   if (!window_) throw std::runtime_error("Cannot create the REAPER WebView container");
   SetWindowText(window_, title.c_str());
+  if (hosted) {
+    RECT rect{}; GetClientRect(static_cast<HWND>(parent), &rect);
+    SetWindowPos(window_, HWND_TOP, 0, 0, rect.right, rect.bottom, SWP_NOACTIVATE);
+  }
   // Backends can finish Docker registration and first-frame preparation before showing.
   if (!hidden) ShowWindow(window_, SW_SHOW);
 }
@@ -49,6 +58,7 @@ SwellWindow::~SwellWindow() {
     SetWindowLong(window_, GWL_USERDATA, 0);
     DestroyWindow(window_);
   }
+  if (hosted_parking_ && IsWindow(hosted_parking_)) DestroyWindow(hosted_parking_);
 }
 bool SwellWindow::closed() const { return closed_ || !window_ || !IsWindow(window_); }
 void SwellWindow::set_background(unsigned color) {
@@ -78,6 +88,21 @@ void SwellWindow::focus() {
 }
 void SwellWindow::set_title(const std::string& title) { SetWindowText(window_, title.c_str()); }
 void SwellWindow::set_visible(bool visible) { ShowWindow(window_, visible ? SW_SHOWNOACTIVATE : SW_HIDE); }
+void SwellWindow::reparent_host(void* parent) {
+  if (closed()) throw Error("FX_STALE", "Hosted window is no longer available");
+  if (!parent) {
+    if (!hosted_parking_) {
+      hosted_parking_ = CreateDialogParam(nullptr, MAKEINTRESOURCE(101), nullptr, procedure, 0);
+      if (hosted_parking_) { ShowWindow(hosted_parking_, SW_HIDE); EnableWindow(hosted_parking_, FALSE); }
+    }
+    parent = hosted_parking_;
+  }
+  if (!parent || !IsWindow(static_cast<HWND>(parent))) throw Error("FX_STALE", "Hosted parent is no longer available");
+  ShowWindow(window_, SW_HIDE);
+  SetParent(window_, static_cast<HWND>(parent));
+  if (GetParent(window_) != parent) throw Error("HOST_UNAVAILABLE", "Cannot reparent the hosted window");
+  owner_ = static_cast<HWND>(parent);
+}
 bool SwellWindow::visible() const { return !closed() && IsWindowVisible(window_); }
 bool SwellWindow::focused() const {
   auto focus = GetFocus();

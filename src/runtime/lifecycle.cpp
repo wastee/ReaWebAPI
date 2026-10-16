@@ -2,6 +2,11 @@
 
 namespace reaweb {
 void Runtime::navigate(Session& session) {
+  end_jsfx_edit(session);
+  if (session.jsfx) {
+    session.jsfx->initialized = false;
+    session.jsfx->values = session.jsfx->changes = Json::array(); session.jsfx->scan = 0;
+  }
   if (session.window) session.window->clear_media();
   streams_.detach_window(session.id);
   producers_.close_window(session.id);

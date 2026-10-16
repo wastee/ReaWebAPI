@@ -39,6 +39,8 @@ bool Runtime::service_call(Session& session, const Work& request) {
       }
     }
     complete({{"result", {{"handle", std::to_string(handle)}}}});
+  } else if (method == "ReaWeb_ServiceInvoke" && jsfx_service_ && session.jsfx && service == "jsfx" && name == "present") {
+    complete({{"result", jsfx_call(session.id, name, args[2])}});
   } else if (method == "ReaWeb_ServiceInvoke") services_.call(service, name, args[2], session.id, std::move(complete));
   else { services_.call(service, name, args[2], session.id, {}); complete({{"result", true}}); }
   return true;
@@ -55,6 +57,7 @@ void Runtime::service_event(uint64_t handle, const std::string& service, int win
     Work output; output.kind = Work::Encode; output.session = s.id; output.generation = s.generation;
     output.counted_output = true;
     output.data = {{"document", s.document}, {"service", service}, {"serviceHandle", std::to_string(handle)}, {"serviceEvent", name}, {"data", data}};
+    if (handle == jsfx_service_ && s.jsfx && deliver_inline(s, output, output.data)) continue;
     if (s.output_pending >= 256 || !worker_.submit(std::move(output))) fail(s, "Service event queue limit exceeded");
     else ++s.output_pending;
     if (name == "unloaded") s.service_subscriptions.erase(handle);

@@ -100,6 +100,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   std::unique_ptr<WinDevTools> devtools_;
   static constexpr UINT toggle_devtools_message = DevToolsKeys::toggle_message;
   static constexpr UINT focus_page_message = WM_APP + 74;
+  HWND hosted_parking_ = nullptr;
   RECT floating_rect_{};
   bool maximized_ = false;
   std::string browser_version_;
@@ -254,7 +255,7 @@ public:
       }
       if (self->options_.frameless && !self->floating() &&
           (msg == WM_NCLBUTTONDOWN || msg == WM_NCLBUTTONDBLCLK)) return 0;
-      if (msg == WM_WINDOWPOSCHANGED || (msg == WM_STYLECHANGED && wp == static_cast<WPARAM>(GWL_STYLE)))
+      if (!self->options_.hosted && (msg == WM_WINDOWPOSCHANGED || (msg == WM_STYLECHANGED && wp == static_cast<WPARAM>(GWL_STYLE))))
         self->dock_redraw_.sync(hwnd);
       if (msg == WM_STYLECHANGING && wp == static_cast<WPARAM>(GWL_STYLE)) {
         reinterpret_cast<STYLESTRUCT*>(lp)->styleNew |= WS_CLIPCHILDREN;
@@ -275,7 +276,7 @@ public:
         return 0;
       }
       if (msg == WM_SHOWWINDOW) {
-        if (wp) self->icon_.refresh(hwnd, self->icon_host(true));
+        if (wp && !self->options_.hosted) self->icon_.refresh(hwnd, self->icon_host(true));
         else self->cursor_.finish();
       }
       if (msg == WM_SYSCOMMAND && (wp & 0xfff0) == dock_command) {
@@ -326,8 +327,9 @@ public:
       background_ = RGB(0, 0, 0);
     }
     // REAPER's Docker must be able to find focus inside the embedded inspector.
-    hwnd_ = CreateWindowExW(WS_EX_CONTROLPARENT | (options_.frameless ? 0 : WS_EX_DLGMODALFRAME), window_class, wide(options_.title).c_str(), floating_style(),
-      CW_USEDEFAULT, CW_USEDEFAULT, 860, 640, static_cast<HWND>(options_.parent), nullptr, instance, this);
+    hwnd_ = CreateWindowExW(WS_EX_CONTROLPARENT | (options_.frameless || options_.hosted ? 0 : WS_EX_DLGMODALFRAME), window_class, wide(options_.title).c_str(),
+      options_.hosted ? WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN : floating_style(),
+      options_.hosted ? 0 : CW_USEDEFAULT, options_.hosted ? 0 : CW_USEDEFAULT, 860, 640, static_cast<HWND>(options_.parent), nullptr, instance, this);
     if (!hwnd_) throw std::runtime_error("CreateWindowEx failed");
     cursor_.attach(hwnd_);
     if (options_.on_dock_toggle) {
@@ -336,6 +338,18 @@ public:
     }
     try { devtools_ = std::make_unique<WinDevTools>(hwnd_, [this] { layout(); }, [this] { focus(); }); }
     catch (...) { DestroyWindow(hwnd_); throw; }
+    if (options_.hosted) {
+      RECT rect{}; GetClientRect(static_cast<HWND>(options_.parent), &rect);
+      SetWindowPos(hwnd_, HWND_TOP, 0, 0, rect.right, rect.bottom, SWP_NOACTIVATE);
+      auto region = CreateRectRgn(0, 0, 0, 0);
+      if (!region || !SetWindowRgn(hwnd_, region, FALSE)) {
+        if (region) DeleteObject(region);
+        DestroyWindow(hwnd_); throw std::runtime_error("Cannot prepare the hosted WebView");
+      }
+      startup_region_ = true;
+      ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+      return;
+    }
     // A REAPER-owned floating window stays above its owner when focus returns to REAPER.
     SetWindowLongPtrW(hwnd_, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(options_.parent));
     const BOOL cloaked = TRUE;
@@ -354,10 +368,14 @@ public:
     devtools_.reset();
     webview_.Reset(); controller_.Reset();
     if (hwnd_) DestroyWindow(hwnd_);
+    if (hosted_parking_) DestroyWindow(hosted_parking_);
   }
   void fail(const std::string& error) { closed_ = true; options_.on_error(error); }
   void initialize(ICoreWebView2Environment* environment) {
     if (closed_) return;
+    if (options_.hosted && (!hwnd_ || !IsWindow(hwnd_) || !IsWindow(static_cast<HWND>(options_.parent)))) {
+      closed_ = true; return;
+    }
     LPWSTR version = nullptr;
     if (SUCCEEDED(environment->get_BrowserVersionString(&version))) browser_version_ = utf8(version);
     CoTaskMemFree(version);
@@ -366,6 +384,11 @@ public:
       [weak](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
         auto self = weak.lock();
         if (!self || self->closed_) { if (controller) controller->Close(); return S_OK; }
+        if (self->options_.hosted && (!self->hwnd_ || !IsWindow(self->hwnd_) ||
+            !IsWindow(static_cast<HWND>(self->options_.parent)))) {
+          if (controller) controller->Close();
+          self->closed_ = true; return S_OK;
+        }
         try {
           check(result, "CreateCoreWebView2Controller");
           if (!controller) throw std::runtime_error("WebView2 controller is unavailable");
@@ -588,7 +611,7 @@ public:
         SetWindowPlacement(hwnd_, &placement);
       }
       ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-      if ((options_.frameless || options_.transparent) && controller_) controller_->put_IsVisible(TRUE);
+      if ((options_.hosted || options_.frameless || options_.transparent) && controller_) controller_->put_IsVisible(TRUE);
       RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
       if (startup_.focus_requested() && GetForegroundWindow() == startup_foreground_) {
         if (options_.on_present) options_.on_present();
@@ -596,8 +619,8 @@ public:
       }
     }
     if (!closed_) cursor_.tick();
-    if (!closed_) dock_redraw_.sync(hwnd_);
-    if (!closed_) icon_.refresh(hwnd_, icon_host());
+    if (!closed_ && !options_.hosted) dock_redraw_.sync(hwnd_);
+    if (!closed_ && !options_.hosted) icon_.refresh(hwnd_, icon_host());
     if (!closed_ && devtools_) devtools_->tick(webview_.Get());
     const bool next = startup_.pending() || visible();
     if (controller_ && next != visible_) { controller_->put_IsVisible(next); visible_ = next; }
@@ -628,6 +651,9 @@ public:
   void set_visible(bool visible) override {
     startup_.request(visible);
     if (!visible) cursor_.finish();
+    if (options_.hosted && controller_ && !startup_.pending()) {
+      controller_->put_IsVisible(visible); visible_ = visible;
+    }
     if (startup_.pending()) return;
     ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
   }
@@ -762,6 +788,23 @@ public:
     if (shown) ShowWindow(hwnd_, maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
   }
   void* native_handle() const override { return hwnd_; }
+  unsigned background_color() const override { return (GetRValue(background_) << 16) | (GetGValue(background_) << 8) | GetBValue(background_); }
+  void reparent_host(void* parent) override {
+    if (!options_.hosted || closed_) throw Error("FX_STALE", "Hosted window is no longer available");
+    if (!parent) {
+      if (!hosted_parking_) hosted_parking_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"",
+        WS_POPUP | WS_DISABLED, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+      parent = hosted_parking_;
+    }
+    if (!IsWindow(static_cast<HWND>(parent))) throw Error("FX_STALE", "Hosted parent is no longer available");
+    set_visible(false);
+    ShowWindow(hwnd_, SW_HIDE);
+    SetParent(hwnd_, static_cast<HWND>(parent));
+    if (GetParent(hwnd_) != parent) throw Error("HOST_UNAVAILABLE", "Cannot reparent the hosted window");
+    options_.parent = parent;
+    if (controller_) controller_->NotifyParentWindowPositionChanged();
+    layout();
+  }
   void prepare_dock() override {
     if (options_.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     if (options_.frameless) evaluate("window.__reawebDragRegionsActive?.(false);");

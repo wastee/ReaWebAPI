@@ -361,6 +361,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
         if (dock_index(hwnd, &floating) >= 0 && floating && IsWindowVisible(hwnd)) activate_dock(hwnd);
       }};
     runtime = std::make_unique<Runtime>(std::move(host), fs::u8path(resource()), log_error, std::move(dock));
+    runtime->initialize_jsfx(make_jsfx_editor_discovery());
     try { runtime->configure_external(external_preferences()); }
     catch (const std::exception& error) { log_error(std::string("External Client: ") + error.what()); }
     register_audio_hook = reinterpret_cast<int (*)(bool, audio_hook_register_t*)>(rec->GetFunc("Audio_RegHardwareHook"));

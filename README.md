@@ -9,6 +9,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - Lua backend + WebView UI through `ReaWeb_Send`, `ReaWeb_Receive`, `reaper.host.send` and `message` events.
 - Optional [External Clients](docs/external-clients.md) over authenticated localhost WebSocket, sharing the Native API, Batch, Service, Event and binary Stream capabilities.
 - [Native Events and Host Services](docs/native-services.md) with subscription-driven state monitoring and a C/C++ extension registry, independent of Lua loops.
+- [JSFX Web UI](docs/jsfx-webui.md) automatically hosts explicitly associated native JSFX editors with instance-bound FX parameter synchronization.
 - Optional [transparent floating windows](docs/host-api.md#transparent-windows) with desktop Alpha, explicit backend capability reporting and preserved Dock preferences.
 - Optional [frameless floating windows](docs/host-api.md#frameless-windows) with native drag regions and creation-time resize policy on Windows, macOS and Linux X11/XWayland.
 - 15 Runtime namespaces for windows, events, files, native dialogs, drag and drop, audio, Undo and application services.
