@@ -106,6 +106,7 @@ REAPER 工程、对象、播放及窗口状态通知。Host state notifications;
 
 | API | 返回 / Result | 用途 |
 | --- | --- | --- |
+| `reaper.fs.openMedia(path)` | `Promise<{url, size, type, close}>` | 当前文档的只读媒体 URL，支持 GET、HEAD、Range 和释放 |
 | `reaper.fs.readText(path)` | `Promise<string>` | 读取 UTF-8 文本 |
 | `reaper.fs.writeText(path, text, options?)` | `Promise<{ path, bytes }>` | 写入 UTF-8 文本 |
 | `reaper.fs.readBinary(path)` | `Promise<Uint8Array>` | 读取二进制字节 |

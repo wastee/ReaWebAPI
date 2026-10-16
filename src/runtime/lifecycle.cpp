@@ -2,6 +2,7 @@
 
 namespace reaweb {
 void Runtime::navigate(Session& session) {
+  if (session.window) session.window->clear_media();
   streams_.detach_window(session.id);
   producers_.close_window(session.id);
   tasks_.cancel_window(session.id);
@@ -55,6 +56,7 @@ void Runtime::complete_lifecycle(Session& s) {
     if (undo_owner_ == s.id) finish_undo();
     s.audio.clear();
     s.closing = true; s.closing_since = Clock::now();
+    s.window->clear_media();
     s.window->cancel_pending_show();
     clear_messages(s);
   } else {

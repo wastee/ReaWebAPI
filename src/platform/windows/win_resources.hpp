@@ -16,6 +16,18 @@ public:
     if (!buffer && count) return STG_E_INVALIDPOINTER;
     std::lock_guard<std::mutex> lock(mutex_);
     const auto size = static_cast<ULONG>(std::min<uint64_t>(count, response_.size - std::min<uint64_t>(position_, response_.size)));
+    if (response_.reader) {
+      try {
+        size_t copied = 0;
+        while (copied < size) {
+          const auto part = response_.reader->read(response_.offset + position_ + copied, static_cast<char*>(buffer) + copied, size - copied);
+          if (!part) break;
+          copied += part;
+        }
+        position_ += copied; if (read) *read = static_cast<ULONG>(copied);
+        return copied == count ? S_OK : S_FALSE;
+      } catch (...) { if (read) *read = 0; return STG_E_READFAULT; }
+    }
     if (size) std::memcpy(buffer, response_.data + position_, size);
     position_ += size; if (read) *read = size;
     return size == count ? S_OK : S_FALSE;

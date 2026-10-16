@@ -627,6 +627,11 @@
     close: host('ReaWeb_Close'), reload: host('ReaWeb_Reload')
   });
   api.fs = Object.freeze({
+    openMedia: async path => {
+      const descriptor = await call('ReaWeb_OpenMedia', [path]);
+      let closing;
+      return Object.freeze({ ...descriptor, close: () => closing || (closing = call('ReaWeb_CloseMedia', [descriptor.url]).catch(error => { closing = null; throw error; })) });
+    },
     watch: (path, callback, options = {}) => nativeTask('file-change', 'ReaWeb_WatchBegin', [path, options], 'ReaWeb_WatchEnd', callback, true),
     readFile: host('ReaWeb_ReadFile'), writeFile: host('ReaWeb_WriteFile'),
     readText: path => call('ReaWeb_ReadFile', [path, { encoding: 'utf8' }]),

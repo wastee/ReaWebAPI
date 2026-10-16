@@ -15,13 +15,44 @@ addEventListener('pagehide', dispose, { once: true });
 
 The handler intercepts connected `data:` and `blob:` download links. Ordinary navigation, remote downloads, detached anchors and `window.open()` are unchanged. Only one export is processed at a time. A native save dialog selects the destination, then `reaper.fs.writeBinary` writes it with overwrite enabled. Native errors propagate from `saveBlob`, or reach `onError` for intercepted links. Exports above 16 MiB reject with `BUFFER_LIMIT`. The streaming URL reader enforces this bound before accumulating a larger payload. Disposing removes the listener and aborts pending URL reads. It cannot dismiss an already open native save dialog.
 
-## Local playback
+## Browser-selected files
 
 Use `<input type="file" multiple>` or DOM file drops to obtain browser `File` objects. Pass those objects directly to the player or create a Blob URL. Revoke URLs when their files are no longer in use. This path does not use `reaper.fs.readBinary` and is not subject to its 16 MiB binary-value limit. Browser memory, metadata parsing and codec limits still apply.
 
 Windows uses WebView2's native file chooser. Linux uses WebKitGTK's [default file chooser](https://webkitgtk.org/reference/webkit2gtk/stable/class.FileChooserRequest.html). macOS implements [WKUIDelegate's open-panel callback](https://developer.apple.com/documentation/webkit/wkuidelegate/webview(_:runopenpanelwith:initiatedbyframe:completionhandler:)), including multiple selection and cancellation. WKOpenPanelParameters does not expose HTML `accept` filters to the host. Apps must validate selected file contents.
 
-Web Audio, media codecs and WebGL2 require feature detection. Resume a suspended AudioContext from a user gesture. Close the audio context and release media resources when disposing a player. Blob URLs cannot be restored across documents. Save file metadata only, then ask users to select the original files again.
+Web Audio, media codecs and WebGL2 require feature detection. Resume a suspended AudioContext from a user gesture. Close the audio context and release media resources when disposing a player. Blob URLs cannot be restored across documents. Persist a File copy in bounded browser storage, or ask users to select the original file again.
+
+## Native media paths (v0.3.8.21)
+
+Local Apps can open a native audio/video path without passing the file contents through the JSON bridge:
+
+```js
+const capabilities = await reaper.system.getCapabilities();
+if (!capabilities.runtime?.fs?.mediaURLs) throw new Error('Media URLs unavailable');
+const path = await reaper.dialog.openFile({ title: 'Open media' });
+if (path) {
+  const media = await reaper.fs.openMedia(path);
+  const audio = document.querySelector('audio');
+  audio.src = media.url;
+  document.querySelector('#release-media').onclick = async () => {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    await media.close();
+  };
+}
+```
+
+The frozen result contains `url`, `size` (bytes), `type` (MIME), and an idempotent async `close()`. Relative paths resolve against the entry document's directory. Paths must resolve to regular files. Supported extensions are WAV/WAVE, MP3, FLAC, OGG/OGA/OPUS, M4A/MP4, AAC, AIF/AIFF and WebM. The WebView's codec support determines actual playback support.
+
+The opaque `reaweb://` URL does not contain the native path. Access is restricted to the creating local App window and current document. Another window of the same App cannot reuse the grant. Reload, navigation, close and explicit release revoke it, including outstanding readers. Missing or size/mtime-modified source files invalidate the grant at the next request/read. Save paths and reopen them in a new document, never persist these URLs. Already delivered browser buffers cannot be revoked.
+
+Media responses support GET, HEAD and single byte ranges, including `206`, `Content-Range` and `416`. Multi-range requests and requests with an unvalidated `If-Range` use a full `200` response. Responses disable caching and resource sniffing. File reads are bounded to 64 KiB, with at most 32 open grants, 64 outstanding GET response readers per window and 64 GiB per file. A saturated reader limit returns `429`. Read failures terminate the response. There is no whole-file bridge copy or external HTTP server. `reaper.fs.readBinary()` and its 16 MiB limit are unchanged.
+
+The API inherits the existing trusted-local-App file-access model. It does not grant arbitrary web pages or External Clients local filesystem access. HTTP development pages are unsupported (`HOST_UNAVAILABLE`). A media grant does not make scripts, HTML or directories servable, or expand the static App root. Local App code remains trusted and can use other existing filesystem APIs.
+
+Windows uses an IStream response, macOS asynchronously delivers scheme chunks, and Linux uses a GInputStream in the WebKit helper. No media reads run on the REAPER audio thread. Windows media playback and seek are host-tested. macOS and Linux implementations require platform acceptance.
 
 Allow local `connect-src`, `media-src blob:` and the player's required images, styles and Workers in the App CSP. Some visualization presets compile expressions and require `script-src 'unsafe-eval'`. Scope that policy to the App that needs it. None of these browser features imply REAPER master-audio routing or Native Stream conversion.
 

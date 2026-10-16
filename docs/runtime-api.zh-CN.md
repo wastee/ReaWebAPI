@@ -20,6 +20,8 @@ JavaScript Runtime 使用下列 15 个命名空间。730 项标准 REAPER 镜像
 
 `reaper.fs` 提供 `readText`、`writeText`、`readBinary`、`writeBinary`，以及支持 encoding 重载的 `readFile` / `writeFile`、`stat`、`readDirectory`、`makeDirectory`。文本使用 UTF-8，二进制使用 `Uint8Array`。写入可传 `{overwrite:true}`，默认拒绝覆盖已有文件；继续采用 worker 文件操作和 16 MiB 上限。剪贴板文本使用 `reaper.clipboard.readText()` / `reaper.clipboard.writeText(text)`。可通过 `reaper.system.openExternal(url)` 显式打开外部链接，普通外部导航同样交给系统默认程序。参见[导航行为](frontend.zh-CN.md#导航行为)。
 
+v0.3.8.21 新增 `reaper.fs.openMedia(path)`，返回 `{url, size, type, close()}`，用于本地音频或视频的只读播放与跳转。文件通过有界流式读取提供，不经过二进制桥接复制。使用前检查 `capabilities.runtime.fs.mediaURLs`，不再使用时调用 `close()`。授权随文档导航、重载或关闭失效。限制与平台覆盖见[媒体访问文档](browser-media.md#native-media-paths-v03821)。
+
 ## Window
 
 Windows 和 macOS 新窗口在原生首帧准备完成后自动显示。等待期间 `getState().visible` 为 false，与 `reaper.lifecycle.ready` 独立。此时调用 `hide()` 会阻止自动显示，直到调用 `show()` 或 `focus()`。关闭窗口会取消待显示状态，包括生命周期清理期间。最终可见状态变化通过现有 `windowstatechange` 事件报告。Linux 保留 v0.3.8.10 的窗口显示行为，不设首帧等待阶段。

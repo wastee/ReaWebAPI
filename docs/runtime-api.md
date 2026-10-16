@@ -18,6 +18,8 @@ All fifteen namespaces provide implemented members: 77 methods and one Promise p
 
 `reaper.fs` provides `readText`, `writeText`, `readBinary` and `writeBinary` with explicit encoding, plus overloaded `readFile` / `writeFile`, `stat`, `readDirectory`, `makeDirectory`. Text is UTF-8 and binary data is `Uint8Array`. Writes accept `{overwrite:true}` to replace an existing file; the default refuses overwrite. The same 16 MiB limits and worker-based file operations apply. Clipboard text is read/written with `reaper.clipboard.readText()` / `reaper.clipboard.writeText(text)`. Use `reaper.system.openExternal(url)` to open external URLs explicitly. Ordinary external navigation also uses the system handler. See [navigation](frontend.md#navigation).
 
+`reaper.fs.openMedia(path)` (v0.3.8.21) returns `{url, size, type, close()}` for bounded, read-only local media playback and seeking. It does not copy the file through the binary bridge. Check `capabilities.runtime.fs.mediaURLs` and release the descriptor when unused. Grants expire on document navigation/reload/close. See [media access, limits and platform coverage](browser-media.md#native-media-paths-v03821).
+
 ## Window and lifecycle
 
 On Windows and macOS, new windows automatically become visible after their initial native frame is prepared. `getState().visible` stays false while presentation is pending, independently of `reaper.lifecycle.ready`. A pending `hide()` suppresses automatic display until `show()` or `focus()`. Closing cancels pending display, including during lifecycle cleanup. Existing `windowstatechange` events report the eventual visibility change. Linux retains the v0.3.8.10 window display behavior without a pending first-frame stage.

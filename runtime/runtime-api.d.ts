@@ -110,6 +110,7 @@ type ReaWebRuntimeNamespace = 'window' | 'theme' | 'dialog' | 'events' | 'lifecy
   | 'clipboard' | 'dragDrop' | 'app' | 'system' | 'transaction' | 'host' | 'stream';
 interface ReaWebRuntimeCapabilities {
   contract: 2; namespaces: ReaWebRuntimeNamespace[]; cleanupTimeoutMs: number;
+  fs?: { mediaURLs: boolean; maxOpenMedia: number; maxMediaBytes: number };
   window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11';
     /** The creation option is accepted. Check transparency.supported for desktop Alpha. */
     transparent: boolean;
@@ -188,6 +189,8 @@ interface ReaWebAPI {
     send(message: ReaWebHostMessage): Promise<boolean>;
   };
   readonly fs: {
+    /** Document-scoped read-only media URL. Release when unused. Reload/close revokes it. */
+    openMedia(path: string): Promise<Readonly<{ url: string; size: number; type: string; close(): Promise<boolean> }>>;
     /** Resolves after the native baseline scan. Changes are coalesced at 250 ms. */
     watch(path: string, callback: (event: ReaWebFileChange) => void | Promise<void>, options?: { recursive?: boolean }): Promise<ReaWebDispose>;
     /** Encoding-specific helpers use the same worker and 16 MiB limit as readFile/writeFile. */

@@ -342,6 +342,7 @@ public:
       if (event == WEBKIT_LOAD_FINISHED) { page->page_ready_ = true; page->prepare_alpha(); }
       if (event == WEBKIT_LOAD_STARTED) {
         auto self = static_cast<Page*>(data);
+        if (self->resources_) self->resources_->clear_media();
         self->loaded_ = true;
         self->drag_regions_.clear();
         try { self->channel_.send({{"id", self->id_}, {"op", "navigating"}}); }
@@ -436,6 +437,8 @@ public:
     if (op == "eval") {
       const auto script = request.at("script").get<std::string>();
       webkit_web_view_evaluate_javascript(view_, script.c_str(), static_cast<gssize>(script.size()), nullptr, nullptr, nullptr, nullptr, nullptr);
+    } else if (op == "media-clear") {
+      if (resources_) resources_->clear_media();
     } else if (op == "drop-enabled") {
       drag_->enabled(request.at("enabled").get<bool>());
     } else if (op == "reload") {
@@ -566,6 +569,11 @@ public:
     }
   }
   void start_drag(const Json& payload, std::function<void(Json)> reply) { drag_->start(payload, std::move(reply)); }
+  Json media(const std::string& method, const Json& args) {
+    if (!resources_) throw Error("HOST_UNAVAILABLE", "Media URLs require a local App document");
+    return method == "ReaWeb_OpenMedia" ? resources_->open_media(fs::u8path(args.at(0).get<std::string>())) :
+      Json(resources_->close_media(args.at(0).get<std::string>()));
+  }
 };
 struct Process {
   LinuxChannel channel{3};
@@ -591,6 +599,11 @@ struct Process {
     try {
       const auto method = request.at("method").get<std::string>();
       const auto& args = request.at("args");
+      if (method == "ReaWeb_OpenMedia" || method == "ReaWeb_CloseMedia") {
+        auto it = pages.find(request.at("id").get<int>());
+        if (it == pages.end()) throw Error("WINDOW_CLOSED", "Media document is closed");
+        respond({{"result", it->second->media(method, args)}}); return;
+      }
       if (method == "ReaWeb_GetDisplays") {
         Json displays = Json::array(); auto display = gdk_display_get_default();
         for (int i = 0; i < gdk_display_get_n_monitors(display); ++i) {

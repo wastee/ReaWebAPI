@@ -518,6 +518,11 @@ public:
   void reload() override { process_->send({{"id", id_}, {"op", "reload"}}); }
   void set_drop_enabled(bool enabled) override { process_->send({{"id", id_}, {"op", "drop-enabled"}, {"enabled", enabled}}); }
   void start_drag(const Json& payload, Reply reply) override { process_->desktop("ReaWeb_Drag", payload, std::move(reply), id_); }
+  void media(const std::string& method, const Json& args, Reply reply) override { process_->desktop(method, args, std::move(reply), id_); }
+  void clear_media() override {
+    Window::clear_media();
+    if (!closed()) process_->send({{"id", id_}, {"op", "media-clear"}});
+  }
   bool visible() const override { return window_->visible() && !alpha_.pending() && !(native_state() & 2); }
   bool transparent_active() const override { return transparent_ && alpha_.active() && !closed(); }
   bool focused() const override { return window_->focused(); }

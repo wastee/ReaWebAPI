@@ -104,6 +104,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     [this, id](const std::string& method, const Json& args) { return host_call(id, method, args); }
   }, std::to_string(id));
   std::weak_ptr<Session> weak = session;
+  auto window_resources = app->resources ? std::make_shared<WebResources>(app->resources->root(), app_id) : nullptr;
   session->window = app->platform->open(WindowOptions{entry, bridge_script, session->title,
     [this, weak](std::string message) {
       if (auto s = weak.lock(); s && !s->closing) {
@@ -180,10 +181,11 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       if (auto s = weak.lock())
         return s->title != s->default_title || s->title_explicit ? s->title : s->app->info.at("name").get<std::string>();
       return std::string();
-    }, app->resources, [this, weak] {
+    }, window_resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
     }, hidden, frameless, resizable, transparent});
+  session->window->set_media_resources(window_resources);
   sessions_.emplace(id, session);
   try {
     auto cached = state_cache_.find(session->ident);
@@ -230,6 +232,7 @@ bool Runtime::close(int id) {
   if (!it->second->closing && lifecycle(*it->second, "close")) return true;
   if (!it->second->closing) it->second->closing_since = Clock::now();
   it->second->closing = true;
+  it->second->window->clear_media();
   clear_messages(*it->second);
   return true;
 }

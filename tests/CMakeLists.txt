@@ -301,6 +301,9 @@ add_test(NAME python_contracts COMMAND "${Python3_EXECUTABLE}" -X utf8 -m unitte
 set_tests_properties(python_contracts PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" ENVIRONMENT "PYTHONUTF8=1")
 
 add_executable(web_resources_driver web_resources_driver.cpp)
+add_executable(media_resources media_resources.cpp)
+target_link_libraries(media_resources PRIVATE reaweb_core)
+add_test(NAME media_resources COMMAND media_resources)
 target_link_libraries(web_resources_driver PRIVATE reaweb_core)
 add_test(NAME web_resources COMMAND "${Python3_EXECUTABLE}" -X utf8
   "${CMAKE_CURRENT_SOURCE_DIR}/web_resources_contract.py" "$<TARGET_FILE:web_resources_driver>")

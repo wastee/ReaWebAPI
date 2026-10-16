@@ -3,6 +3,8 @@
 #include "core/worker.hpp"
 #include "core/file_time.hpp"
 #include <fstream>
+#include <random>
+#include <atomic>
 #ifndef _WIN32
 #include <sys/file.h>
 #endif
@@ -155,6 +157,147 @@ WebResources::WebResources(const fs::path& root, const std::string& app_id)
   : root_(fs::canonical(root)), origin_("reaweb://" + app_id) {
   if (!valid_id(app_id)) throw Error("APP_MANIFEST_INVALID", "Invalid App ID");
 }
+WebResources::~WebResources() { clear_media(); }
+
+struct WebResources::Media final : ResourceReader {
+  fs::path path;
+#ifdef _WIN32
+  HANDLE file = INVALID_HANDLE_VALUE;
+#else
+  std::ifstream file;
+#endif
+  uint64_t length;
+  fs::file_time_type modified;
+  std::string type;
+  std::mutex mutex;
+  std::atomic<bool> active{true};
+  Media(const fs::path& source, std::string mime) : path(source),
+#ifndef _WIN32
+    file(source, std::ios::binary),
+#endif
+    length(fs::file_size(source)), modified(fs::last_write_time(source)), type(std::move(mime)) {
+    if (length > 64ull * 1024 * 1024 * 1024) throw Error("MEDIA_LIMIT", "Media file exceeds 64 GiB");
+#ifdef _WIN32
+    file = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) throw Error("FILE_NOT_FOUND", "Cannot open media file");
+#else
+    if (!file) throw Error("FILE_NOT_FOUND", "Cannot open media file");
+#endif
+  }
+  ~Media() override {
+#ifdef _WIN32
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+#endif
+  }
+  bool valid() {
+    std::error_code error;
+    if (!active || !fs::is_regular_file(path, error) || error || fs::file_size(path, error) != length || error ||
+        fs::last_write_time(path, error) != modified || error) { active = false; return false; }
+    return true;
+  }
+  size_t read(uint64_t offset, char* output, size_t count) override {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!valid()) throw Error("MEDIA_CLOSED", "Media was released, removed or changed");
+    if (offset >= length) return 0;
+    count = static_cast<size_t>(std::min<uint64_t>(std::min<size_t>(count, 65536), length - offset));
+#ifdef _WIN32
+    LARGE_INTEGER position{}; position.QuadPart = static_cast<LONGLONG>(offset);
+    DWORD copied = 0;
+    const bool success = SetFilePointerEx(file, position, nullptr, FILE_BEGIN) &&
+      ReadFile(file, output, static_cast<DWORD>(count), &copied, nullptr) && copied == count;
+#else
+    file.clear(); file.seekg(static_cast<std::streamoff>(offset));
+    file.read(output, static_cast<std::streamsize>(count));
+    const bool success = file.gcount() == static_cast<std::streamsize>(count);
+#endif
+    if (!success) {
+      active = false; throw Error("MEDIA_CLOSED", "Media read failed");
+    }
+    return count;
+  }
+};
+Json WebResources::open_media(const fs::path& input) {
+  std::error_code error;
+  const auto path = fs::canonical(input, error);
+  if (error || !fs::is_regular_file(path)) throw Error("FILE_NOT_FOUND", "Media path must be a regular file");
+  auto extension = path.extension().u8string();
+  std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const std::map<std::string, std::string> types{{".wav","audio/wav"},{".wave","audio/wav"},{".mp3","audio/mpeg"},
+    {".flac","audio/flac"},{".ogg","audio/ogg"},{".oga","audio/ogg"},{".opus","audio/ogg"},{".m4a","audio/mp4"},
+    {".mp4","video/mp4"},{".aac","audio/aac"},{".aif","audio/aiff"},{".aiff","audio/aiff"},{".webm","video/webm"}};
+  const auto mime = types.find(extension);
+  if (mime == types.end()) throw Error("UNSUPPORTED_FORMAT", "Unsupported media filename extension");
+  std::lock_guard<std::mutex> lock(media_mutex_);
+  if (media_.size() >= 32) throw Error("MEDIA_LIMIT", "At most 32 media files may be open per document");
+  auto media = std::make_shared<Media>(path, mime->second);
+  std::random_device random;
+  const char* hex = "0123456789abcdef";
+  std::string token;
+  do {
+    token.clear();
+    for (int i = 0; i < 8; ++i) { auto n = random(); for (int j = 0; j < 8; ++j) { token += hex[n & 15]; n >>= 4; } }
+  } while (media_.count(token));
+  media_.emplace(token, media);
+  return {{"url", origin_ + "/__reaweb_media__/" + token}, {"size", media->length}, {"type", media->type}};
+}
+bool WebResources::close_media(const std::string& url) {
+  const auto prefix = origin_ + "/__reaweb_media__/";
+  if (url.compare(0, prefix.size(), prefix) != 0) throw Error("INVALID_ARGUMENT", "Expected a media URL owned by this document");
+  std::lock_guard<std::mutex> lock(media_mutex_);
+  const auto it = media_.find(url.substr(prefix.size()));
+  if (it == media_.end()) return false;
+  it->second->active = false; media_.erase(it); return true;
+}
+void WebResources::clear_media() {
+  std::lock_guard<std::mutex> lock(media_mutex_);
+  for (auto& [token, media] : media_) media->active = false;
+  media_.clear();
+}
+ResourceResponse WebResources::media_request(const std::string& token, const std::string& method,
+    const std::map<std::string, std::string>& headers) const {
+  ResourceResponse response;
+  response.headers = {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'none'; sandbox"},
+    {"X-Content-Type-Options", "nosniff"}, {"Cross-Origin-Resource-Policy", "same-origin"}, {"Content-Type", "application/octet-stream"}};
+  auto fail = [&](int status) { response.status = status; response.headers["Content-Length"] = "0"; return response; };
+  std::shared_ptr<Media> media;
+  { std::lock_guard<std::mutex> lock(media_mutex_); auto it = media_.find(token); if (it != media_.end()) media = it->second; }
+  if (!media || !media->valid()) return fail(404);
+  uint64_t offset = 0, length = media->length;
+  response.headers["Content-Type"] = media->type;
+  response.headers["Accept-Ranges"] = "bytes";
+  auto it = headers.find("range");
+  if (method == "GET" && it != headers.end() && !headers.count("if-range")) {
+    httplib::Ranges ranges;
+    if (!httplib::detail::parse_range_header(it->second, ranges)) return fail(400);
+    if (ranges.size() == 1) {
+      auto [first, last] = ranges.front();
+      if (first == -1) { first = std::max<int64_t>(0, static_cast<int64_t>(length) - last); last = static_cast<int64_t>(length) - 1; }
+      else if (last == -1 || last >= static_cast<int64_t>(length)) last = static_cast<int64_t>(length) - 1;
+      if (first < 0 || static_cast<uint64_t>(first) >= length || last < first) {
+        response.headers["Content-Range"] = "bytes */" + std::to_string(length); return fail(416);
+      }
+      response.status = 206;
+      response.headers["Content-Range"] = "bytes " + std::to_string(first) + "-" + std::to_string(last) + "/" + std::to_string(length);
+      offset = static_cast<uint64_t>(first); length = static_cast<uint64_t>(last - first + 1);
+    }
+  }
+  response.headers["Content-Length"] = std::to_string(length);
+  if (method == "GET") {
+    if (media_reads_->fetch_add(1) >= 64) { --*media_reads_; return fail(429); }
+    struct Lease final : ResourceReader {
+      std::shared_ptr<Media> media;
+      std::shared_ptr<std::atomic<size_t>> count;
+      Lease(std::shared_ptr<Media> m, std::shared_ptr<std::atomic<size_t>> c) : media(std::move(m)), count(std::move(c)) {}
+      ~Lease() override { --*count; }
+      size_t read(uint64_t at, char* out, size_t size) override { return media->read(at, out, size); }
+    };
+    try { response.reader = std::make_shared<Lease>(media, media_reads_); }
+    catch (...) { --*media_reads_; throw; }
+    response.offset = offset; response.size = static_cast<size_t>(length);
+  }
+  return response;
+}
 std::string WebResources::entry_url(const fs::path& entry) const {
   const auto resolved = fs::canonical(entry);
   if (!contained(root_, resolved)) throw Error("INVALID_PATH", "The entry must be inside the App directory");
@@ -185,6 +328,9 @@ ResourceResponse WebResources::request(const std::string& uri, const std::string
   try {
     const auto end = uri.find_first_of("?#", origin_.size());
     auto path = decode_path(uri.substr(origin_.size(), end == std::string::npos ? end : end - origin_.size()));
+    const std::string media_prefix = "/__reaweb_media__/";
+    if (path.compare(0, media_prefix.size(), media_prefix) == 0)
+      return media_request(path.substr(media_prefix.size()), method, request_headers);
     if (path.back() == '/') path += "index.html";
     auto relative = fs::u8path(path.substr(1));
     if (relative.has_root_path()) return fail(403);

@@ -2,10 +2,8 @@
 
 ## English
 
-- Add an opt-in browser file export helper for Windows, macOS and Linux, using native save dialogs with a 16 MiB limit.
-- Enable WKWebView file inputs on macOS with native selection and cancellation.
+- Add `reaper.fs.openMedia()` for read-only local media URLs with bounded streaming, seeking and document-scoped cleanup on Windows, macOS and Linux.
 
 ## 简体中文
 
-- 新增适用于 Windows、macOS 和 Linux 的可选浏览器文件导出模块，使用原生保存对话框，限制为 16 MiB。
-- 补全 macOS WKWebView 文件输入的原生选择与取消处理。
+- 新增 `reaper.fs.openMedia()`，在 Windows、macOS 和 Linux 提供只读本地媒体 URL，支持有界流式读取、跳转及文档生命周期清理。

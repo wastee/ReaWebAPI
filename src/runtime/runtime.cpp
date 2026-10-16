@@ -312,9 +312,10 @@ bool Runtime::start_async(Session& session, const Work& request) {
     ++session.output_pending;
     return true;
   }
+  const bool media = method == "ReaWeb_OpenMedia" || method == "ReaWeb_CloseMedia";
   const bool drag = method == "ReaWeb_DragFiles" || method == "ReaWeb_DragText";
   const bool binary_clipboard = method == "ReaWeb_ClipboardReadBinary" || method == "ReaWeb_ClipboardWriteBinary";
-  if (!drag && !binary_clipboard && method != "ReaWeb_GetDisplays" && method != "ReaWeb_RevealPath" && method != "ReaWeb_ClipboardReadText" && method != "ReaWeb_ClipboardWriteText" && method != "ReaWeb_OpenExternal") return false;
+  if (!media && !drag && !binary_clipboard && method != "ReaWeb_GetDisplays" && method != "ReaWeb_RevealPath" && method != "ReaWeb_ClipboardReadText" && method != "ReaWeb_ClipboardWriteText" && method != "ReaWeb_OpenExternal") return false;
   std::weak_ptr<Session> weak = sessions_.at(session.id);
   auto complete = [this, weak, request](Json result) mutable {
     auto s = weak.lock();
@@ -323,6 +324,13 @@ bool Runtime::start_async(Session& session, const Work& request) {
     response.update(result);
     reply(*s, std::move(request), std::move(response));
   };
+  if (media) {
+    if (args.size() != 1 || !args[0].is_string()) throw Error("INVALID_ARGUMENT", "Expected one media path or URL");
+    if (!session.app->resources) throw Error("HOST_UNAVAILABLE", "Media URLs require a local App document");
+    auto input = args;
+    if (method == "ReaWeb_OpenMedia") input[0] = existing_local_path(session.entry.parent_path(), args[0]).u8string();
+    session.window->media(method, input, std::move(complete)); return true;
+  }
   if (drag) {
     if (drag_owner_) throw Error("DRAG_BUSY", "A native drag is already active");
     auto payload = drag_payload(session.entry.parent_path(), method, args);

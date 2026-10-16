@@ -37,9 +37,17 @@ struct WindowOptions {
   bool transparent = false;
 };
 class Window {
+  std::shared_ptr<WebResources> media_resources_;
 public:
   using Reply = std::function<void(Json)>;
-  virtual ~Window() = default;
+  virtual ~Window() { if (media_resources_) media_resources_->clear_media(); }
+  void set_media_resources(std::shared_ptr<WebResources> resources) { media_resources_ = std::move(resources); }
+  virtual void clear_media() { if (media_resources_) media_resources_->clear_media(); }
+  virtual void media(const std::string& method, const Json& args, Reply reply) {
+    if (!media_resources_) throw Error("HOST_UNAVAILABLE", "Media URLs require a local App document");
+    reply({{"result", method == "ReaWeb_OpenMedia" ? media_resources_->open_media(fs::u8path(args.at(0).get<std::string>())) :
+      Json(media_resources_->close_media(args.at(0).get<std::string>()))}});
+  }
   virtual void evaluate(const std::string& script) = 0;
   virtual void devtools() = 0;
   virtual Json devtools_state() const { return nullptr; }

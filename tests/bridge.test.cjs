@@ -63,6 +63,7 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
     "setBufferSize"
   ],
   "fs": [
+    "openMedia",
     "watch",
     "readText",
     "writeText",
@@ -123,6 +124,18 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
   assert.deepEqual(documented.sort(), declared.sort());
   const headings = [...inventory.matchAll(/^## reaper\.(\w+)$/gm)].map(match => match[1]);
   assert.deepEqual(headings.sort(), Object.keys(expected).sort());
+});
+
+test('Media URL handles preserve descriptors and release idempotently', async () => {
+  const t = await connected(), io = t.window.reaper.fs;
+  const descriptor = {url:'reaweb://app/__reaweb_media__/token',size:20000000,type:'audio/wav'};
+  const media = await answer(t, 'ReaWeb_OpenMedia', ['outside.wav'], descriptor, io.openMedia('outside.wav'));
+  assert.equal(media.url, descriptor.url);
+  assert.equal(media.size, descriptor.size);
+  assert.ok(Object.isFrozen(media));
+  const release = media.close();
+  assert.equal(media.close(), release);
+  assert.equal(await answer(t, 'ReaWeb_CloseMedia', [descriptor.url], true, release), true);
 });
 
 test('Encoding-specific fs helpers preserve bytes, overwrite policy, and host failures', async () => {
