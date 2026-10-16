@@ -38,7 +38,7 @@ type eventsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['events'], 'on' 
 type lifecycleSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['lifecycle'], 'ready' | 'on'>>;
 type lifecycleEvents = RuntimeAssert<RuntimeEqual<Parameters<ReaWebAPI['lifecycle']['on']>[0], 'before-close' | 'before-reload' | 'cleanup'>>;
 type debugSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['debug'], 'log' | 'warn' | 'error' | 'inspect' | 'getLogs' | 'getDiagnostics' | 'openDevTools' | 'setBufferSize'>>;
-type fsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['fs'], 'readText' | 'writeText' | 'readBinary' | 'writeBinary' | 'readFile' | 'writeFile' | 'stat' | 'readDirectory' | 'makeDirectory' | 'watch'>>;
+type fsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['fs'], 'openMedia' | 'readText' | 'writeText' | 'readBinary' | 'writeBinary' | 'readFile' | 'writeFile' | 'stat' | 'readDirectory' | 'makeDirectory' | 'watch'>>;
 type audioSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['audio'], 'getFileInfo' | 'getWaveform' | 'getTrackMeter' | 'setTrackValueLatest' | 'openStream' | 'resetMeter' | 'decodeMeter'>>;
 type clipboardSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['clipboard'], 'readText' | 'writeText' | 'readBinary' | 'writeBinary'>>;
 type dragDropSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['dragDrop'], 'startFiles' | 'startText'>>;
@@ -144,6 +144,20 @@ async function runtimeContract(track: MediaTrackHandle, take: MediaItem_TakeHand
   // @ts-expect-error Mirror methods still return Promise values.
   const wrong: MediaTrackHandle | null = reaper.GetTrack(0, 0);
   await cleanup(); await stop();
+}
+
+async function mediaContract() {
+  const media = await reaper.fs.openMedia('sample.wav');
+  const url: string = media.url;
+  const size: number = media.size;
+  const type: string = media.type;
+  const closed: boolean = await media.close();
+  // @ts-expect-error Media URLs require a local path string.
+  await reaper.fs.openMedia(new Uint8Array());
+  // @ts-expect-error Media descriptors are read-only.
+  media.url = 'other.wav';
+  // @ts-expect-error Releasing a media URL is asynchronous.
+  const immediate: boolean = media.close();
 }
 
 async function appContract() {

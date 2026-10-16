@@ -15,6 +15,7 @@
 #include "platform/linux/gtk_devtools.hpp"
 #include "platform/linux/gtk_context_menu.hpp"
 #include "platform/linux/gtk_resources.hpp"
+#include "platform/linux/gtk_media.hpp"
 
 namespace reaweb {
 namespace {
@@ -38,6 +39,7 @@ class Page {
   WebKitWebView* view_ = nullptr;
   WebKitUserContentManager* manager_ = nullptr;
   std::shared_ptr<WebResources> resources_;
+  std::unique_ptr<GtkMedia> media_;
   ::Window parent_ = 0;
   bool failed_ = false;
   bool loaded_ = false, allow_reload_ = false, intercept_reload_ = false;
@@ -571,8 +573,9 @@ public:
   void start_drag(const Json& payload, std::function<void(Json)> reply) { drag_->start(payload, std::move(reply)); }
   Json media(const std::string& method, const Json& args) {
     if (!resources_) throw Error("HOST_UNAVAILABLE", "Media URLs require a local App document");
-    return method == "ReaWeb_OpenMedia" ? resources_->open_media(fs::u8path(args.at(0).get<std::string>())) :
-      Json(resources_->close_media(args.at(0).get<std::string>()));
+    if (!media_) media_ = std::make_unique<GtkMedia>(resources_);
+    return method == "ReaWeb_OpenMedia" ? media_->open(fs::u8path(args.at(0).get<std::string>())) :
+      Json(media_->close(args.at(0).get<std::string>()));
   }
 };
 struct Process {
