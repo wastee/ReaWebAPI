@@ -10,6 +10,7 @@ namespace {
 struct Fx { Guid guid{}; double value = 0.25; std::string ident = "Utility/utility.jsfx"; };
 std::vector<Fx> effects{{Guid{1}}, {Guid{2}}};
 int writes = 0, ended = 0, selected = 0;
+void* floating = nullptr;
 struct Editor : JsfxEditorHost {
   std::optional<int> selection;
   void* parent() const override { return nullptr; }
@@ -22,12 +23,13 @@ struct Editor : JsfxEditorHost {
 void* native(const char* name) {
 #define FN(n, lambda) if (!std::strcmp(name, n)) return reinterpret_cast<void*>(+lambda)
   FN("TrackFX_GetCount", [](void*) { return int(effects.size()); });
-  FN("TrackFX_GetFXGUID", [](void*, int fx) -> Guid* { return &effects.at(fx).guid; });
+  FN("TrackFX_GetFXGUID", [](void*, int fx) -> Guid* { return fx >= 0 && fx < int(effects.size()) ? &effects[fx].guid : nullptr; });
   FN("TrackFX_GetNamedConfigParm", [](void*, int fx, const char* key, char* out, int) {
     std::string value = !std::strcmp(key, "fx_type") ? "JS" : !std::strcmp(key, "fx_ident") ? effects.at(fx).ident : "0.5";
     std::strcpy(out, value.c_str()); return true;
   });
   FN("TrackFX_GetChainVisible", [](void*) { return selected; });
+  FN("TrackFX_GetFloatingWindow", [](void*, int) { return floating; });
   FN("TrackFX_GetNumParams", [](void*, int) { return 1; });
   FN("TrackFX_GetParamEx", [](void*, int fx, int, double* lo, double* hi, double* mid) {
     *lo = 0; *hi = 1; *mid = 0.5; return effects.at(fx).value;
@@ -59,6 +61,13 @@ int main() {
     JsfxBinding binding(host, &track, 0);
     auto editor = std::make_shared<Editor>();
     JsfxEditor context{&track, 0, false, nullptr, editor};
+    CHECK(binding.editor_matches(context));
+    floating = &track;
+    CHECK(!binding.editor_matches(context));
+    auto floated = context; floated.floating = true; floated.container = floating;
+    CHECK(binding.editor_matches(floated));
+    floating = nullptr;
+    CHECK(!binding.editor_matches(floated));
     CHECK(binding.editor_matches(context));
     editor->selection = 0; selected = 1;
     CHECK(binding.editor_matches(context));

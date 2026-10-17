@@ -18,7 +18,11 @@ public:
   bool focus_requested() const { return focus_; }
   bool cancelled() const { return cancelled_; }
   void cancel() { cancelled_ = true; wanted_ = false; }
-  unsigned navigate() { ready_ = false; return ++generation_; }
+  unsigned navigate(bool hosted = false) {
+    ready_ = false;
+    if (hosted) { pending_ = true; explicit_ = false; wanted_ = false; started_ = Clock::now(); }
+    return ++generation_;
+  }
   unsigned generation() const { return generation_; }
   void prepared(unsigned generation) { if (generation == generation_) ready_ = true; }
   bool present() {

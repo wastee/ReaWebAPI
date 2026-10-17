@@ -1,7 +1,7 @@
 /** Connect only from a JSFX Hosted WebView. Values always originate in REAPER. */
 export async function connectJSFX(reaper = globalThis.reaper, onError = console.error) {
   const service = reaper.host.service('jsfx');
-  const listeners = new Set(), visibility = new Set(), pending = new Map();
+  const listeners = new Set(), visibility = new Set(), pending = new Map(), observed = new Map();
   let state, revision = 0, editing = -1, running, opening, disposed = false, activation = 0, active = false;
   const notify = () => { for (const listener of listeners) listener(state); };
   const present = async () => {
@@ -11,8 +11,16 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
     catch (error) { if (active && activation === current && !disposed) throw error; }
   };
   const apply = next => {
-    if (next.activation < activation || next.revision < revision) return;
-    state = next; revision = next.revision; activation = next.activation; active = next.active;
+    if (next.activation < activation) return;
+    if (next.activation > activation) { revision = 0; observed.clear(); }
+    if (state && next.activation === activation && next.revision < revision) return;
+    // Events can arrive before the initial snapshot. Keep their newer parameter values.
+    for (const parameter of next.parameters) {
+      const newer = observed.get(parameter.index);
+      if (newer && newer.revision > next.revision) Object.assign(parameter, newer.parameter);
+    }
+    state = next; revision = Math.max(revision, next.revision); state.revision = revision;
+    activation = next.activation; active = next.active;
     notify();
   };
   const refresh = async () => {
@@ -21,18 +29,20 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
     return state;
   };
   const off = await service.on('paramChanged', event => {
-    if (!state || disposed || !active || event.activation !== activation || event.revision <= revision) return;
+    if (disposed || event.activation < activation || (state && (!active || event.activation !== activation)) || event.revision <= revision) return;
+    if (event.activation > activation) { activation = event.activation; observed.clear(); }
     revision = event.revision;
     for (const parameter of event.parameters) {
-      if (parameter.index === editing || pending.has(parameter.index)) continue;
-      Object.assign(state.parameters[parameter.index] || {}, parameter);
+      observed.set(parameter.index, { revision, parameter });
+      if (state) Object.assign(state.parameters[parameter.index] || {}, parameter);
     }
-    notify();
+    if (state) { state.revision = revision; notify(); }
   });
   let offVisibility;
   try {
     offVisibility = await service.on('visibilityChanged', event => {
       if (disposed || event.activation < activation) return;
+      if (event.activation > activation) { revision = 0; observed.clear(); }
       activation = event.activation; active = event.active;
       pending.clear(); editing = -1; opening = undefined;
       if (state) { state.active = active; state.activation = activation; }
@@ -56,9 +66,17 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
         const [index, value] = pending.entries().next().value;
         pending.delete(index);
         const current = activation;
+        const before = revision;
         try {
           const result = await service.invoke('setParam', { index, value, normalized: true, activation: current });
-          if (current === activation && active && !pending.has(index)) { Object.assign(state.parameters[index], result); notify(); }
+          const newer = observed.get(index);
+          const resultRevision = result.revision ?? before;
+          if (!disposed && current === activation && active && !pending.has(index) &&
+              (!newer || newer.revision <= resultRevision)) {
+            Object.assign(state.parameters[index], result);
+            observed.set(index, { revision: resultRevision, parameter: result });
+            revision = Math.max(revision, resultRevision); state.revision = revision; notify();
+          }
         } catch (error) { if (current === activation && active) throw error; }
       }
     })().finally(() => { running = undefined; });

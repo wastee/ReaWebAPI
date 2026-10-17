@@ -4,6 +4,23 @@
 #include <vector>
 
 namespace reaweb {
+struct JsfxTarget {
+  void* track = nullptr;
+  void* take = nullptr;
+  bool input = false;
+  void* object() const { return take ? take : track; }
+  bool operator==(const JsfxTarget& other) const { return track == other.track && take == other.take && input == other.input; }
+  bool operator!=(const JsfxTarget& other) const { return !(*this == other); }
+  template<class T> T api(Host& host, const char* suffix) const {
+    const auto name = std::string(take ? "TakeFX_" : "TrackFX_") + suffix;
+    auto fn = host.native_function ? reinterpret_cast<T>(host.native_function(name.c_str())) : nullptr;
+    if (!fn) throw Error("HOST_UNAVAILABLE", "JSFX Web UI requires " + name);
+    return fn;
+  }
+  std::string config(Host&, int fx, const std::string& key) const;
+  std::vector<int> indices(Host&) const;
+  int selected(Host&) const;
+};
 class JsfxEditorHost {
 public:
   virtual ~JsfxEditorHost() = default;
@@ -28,11 +45,14 @@ struct JsfxEditor {
   bool floating = false;
   void* container = nullptr;
   std::shared_ptr<JsfxEditorHost> host;
+  void* take = nullptr;
+  bool input = false;
+  JsfxTarget target() const { return {track, take, input}; }
 };
 class JsfxEditorDiscovery {
 public:
   struct Size { int width, height; };
-  using Match = std::function<std::optional<Size>(void*, int)>;
+  using Match = std::function<std::optional<Size>(JsfxTarget, int)>;
   virtual ~JsfxEditorDiscovery() = default;
   virtual std::vector<JsfxEditor> scan(Host&, Match) = 0;
   virtual bool pending() const { return false; }

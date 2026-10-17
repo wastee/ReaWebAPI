@@ -16,6 +16,12 @@ int main() {
     const auto current = reload.navigate();
     reload.prepared(old); CHECK(!reload.present());
     reload.prepared(current); CHECK(reload.present());
+    const auto hosted = reload.navigate(true);
+    CHECK(reload.pending() && !reload.wanted());
+    reload.request(true); reload.prepared(current); CHECK(!reload.present());
+    reload.prepared(hosted); CHECK(reload.present());
+    // Ordinary App navigation keeps an already presented window visible.
+    reload.navigate(); CHECK(!reload.pending());
 
     StartupPresentation closed;
     const auto pending = closed.navigate();

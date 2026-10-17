@@ -15,6 +15,7 @@ std::vector<fs::path> profiles;
 std::string waiting_on;
 bool defer_next_presentation = false;
 bool fail_next_presentation = false;
+void* jsfx_floating = nullptr;
 struct FakeWindow : Window {
   WindowOptions options;
   bool is_closed = false;
@@ -77,7 +78,12 @@ struct FakeWindow : Window {
   bool visibility_requested() const override { return deferred ? wants_visible : shown; }
   bool presentation_pending() const override { return deferred; }
   void cancel_pending_show() override { if (deferred) presentation_cancelled = true; }
-  void set_visible(bool value) override { wants_visible = value; shown = value && !deferred; }
+  std::function<void()> on_hide;
+  void set_visible(bool value) override {
+    wants_visible = value; shown = value && !deferred;
+    if (!value && on_hide) { auto callback = std::move(on_hide); callback(); }
+  }
+  void reparent_host(void* parent) override { options.parent = parent; deferred = false; set_visible(false); }
   void reload() override {
     if (options.on_reload && options.on_reload()) return;
     ++reloads; if (options.on_navigation) options.on_navigation();
@@ -158,6 +164,90 @@ int main() {
     DockApi docks{nullptr,
       [&](void* h, const std::string&, const std::string& ident) { CHECK(ident.find("ReaWebAPI:") == 0); docked.insert(h); },
       [&](void* h) { docked.erase(h); }, [&](void* h) { return docked.count(h) ? 3 : -1; }, [](void*) {}};
+    {
+      struct Editor final : JsfxEditorHost {
+        bool alive = true;
+        int size_requests = 0;
+        void* parent() const override { return const_cast<Editor*>(this); }
+        bool valid() const override { return alive; }
+        std::optional<int> selected_fx() const override { return alive ? 0 : -1; }
+        void resize(void*) override {}
+        void present(void*) override {}
+        void restore() override {}
+        void request_size(int, int) override { ++size_requests; }
+      };
+      struct Discovery final : JsfxEditorDiscovery {
+        JsfxEditor editor;
+        bool found = false;
+        std::vector<JsfxEditor> scan(reaweb::Host&, Match) override {
+          if (found) return {};
+          found = true; return {editor};
+        }
+      };
+      const auto resource = root / "JSFXProfile", directory = resource / "Effects/Test";
+      fs::create_directories(directory);
+      std::ofstream(directory / "test.jsfx") << "desc:Test\n@sample\n";
+      std::ofstream(directory / "test.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html"}})";
+      std::ofstream(directory / "index.html") << "<html></html>";
+      auto jsfx_host = host;
+      jsfx_host.native_function = [](const char* name) -> void* {
+        if (!std::strcmp(name, "TrackFX_GetCount")) return reinterpret_cast<void*>(+[](void*) { return 1; });
+        if (!std::strcmp(name, "TrackFX_GetFloatingWindow")) return reinterpret_cast<void*>(+[](void*, int) -> void* { return jsfx_floating; });
+        if (!std::strcmp(name, "TrackFX_GetFXGUID")) return reinterpret_cast<void*>(+[](void*, int) -> Guid* { static Guid guid{42}; return &guid; });
+        if (!std::strcmp(name, "TrackFX_GetNumParams")) return reinterpret_cast<void*>(+[](void*, int) { return 0; });
+        if (!std::strcmp(name, "TrackFX_GetNamedConfigParm")) return reinterpret_cast<void*>(+[](void*, int, const char* key, char* out, int) {
+          const char* value = !std::strcmp(key, "fx_type") ? "JS" : !std::strcmp(key, "fx_ident") ? "Test/test.jsfx" : nullptr;
+          if (!value) return false; std::strcpy(out, value); return true;
+        });
+        return adapter::resolve(name);
+      };
+      auto editor = std::make_shared<Editor>();
+      auto discovery = std::make_shared<Discovery>(); discovery->editor = {&track, 0, false, editor.get(), editor};
+      Runtime runtime(jsfx_host, resource, [&](const std::string& error) { errors.push_back(error); }, docks);
+      const auto before = windows.size(); runtime.initialize_jsfx(discovery);
+      until(runtime, [&] { return windows.size() > before; });
+      auto window = windows.back().lock(); const int id = 1;
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      const auto call = [&](const char* method, Json payload = Json::object()) {
+        return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
+      };
+      const auto first = call("getState")["result"];
+      CHECK(call("present", {{"activation", first["activation"]}})["result"] == true);
+      CHECK(window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == true);
+      int reload_hello = 0;
+      window->on_hide = [&] {
+        window->document = "jsfx-reloaded";
+        reload_hello = window->send("__reawebHello", {1});
+      };
+      window->reload();
+      CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == false);
+      result(runtime, *window, reload_hello);
+      CHECK(runtime.is_ready(id));
+      CHECK(call("present", {{"activation", first["activation"]}})["result"] == false);
+      const auto fresh = call("getState")["result"];
+      CHECK(fresh["activation"] > first["activation"] && fresh["revision"] > first["revision"]);
+      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == true);
+      CHECK(window->visible());
+      auto floating_editor = std::make_shared<Editor>();
+      jsfx_floating = floating_editor.get();
+      discovery->editor = {&track, 0, true, jsfx_floating, floating_editor}; discovery->found = false;
+      until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
+      CHECK(windows.size() == before + 1 && floating_editor->size_requests == 1);
+      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == false);
+      const auto floating_state = call("getState")["result"];
+      CHECK(call("present", {{"activation", floating_state["activation"]}})["result"] == true);
+      jsfx_floating = nullptr; floating_editor->alive = false;
+      discovery->editor = {&track, 0, false, editor.get(), editor}; discovery->found = false;
+      until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
+      CHECK(windows.size() == before + 1 && editor->size_requests == 2);
+      CHECK(call("present", {{"activation", floating_state["activation"]}})["result"] == false);
+      const auto returned = call("getState")["result"];
+      CHECK(call("present", {{"activation", returned["activation"]}})["result"] == true);
+      editor->alive = false; runtime.tick();
+      CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["cached"] == true);
+      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == false);
+    }
+    windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {
       int activations = 0;
       auto startup_docks = docks; startup_docks.activate = [&](void*) { ++activations; };

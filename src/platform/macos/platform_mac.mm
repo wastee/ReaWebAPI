@@ -376,7 +376,7 @@ public:
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true, delegate_->options.hosted);
-    delegate_->navigationStarted = [this] { startup_.navigate(); drag_regions_.clear(); };
+    delegate_->navigationStarted = [this] { startup_.navigate(delegate_->options.hosted); drag_regions_.clear(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
       if (message == "__reawebPresent") { prepare_startup(); return; }
       if (delegate_->options.frameless && drag_regions_.message(message)) return;

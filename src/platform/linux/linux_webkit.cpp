@@ -42,6 +42,7 @@ class Page {
   std::unique_ptr<GtkMedia> media_;
   ::Window parent_ = 0;
   bool failed_ = false;
+  bool hosted_ = false, allocating_host_ = false;
   bool loaded_ = false, allow_reload_ = false, intercept_reload_ = false;
   std::string navigation_uri_;
   std::unique_ptr<GtkNativeDrag> drag_;
@@ -355,6 +356,19 @@ public:
       channel_.send({{"id", id_}, {"op", "drop"}, {"payload", payload}});
     });
     plug_ = gtk_plug_new(0);
+    hosted_ = request.value("hosted", false);
+    g_signal_connect_after(plug_, "size-allocate", G_CALLBACK((+[](GtkWidget* widget, GtkAllocation* allocation, gpointer data) {
+      auto self = static_cast<Page*>(data);
+      if (!self->hosted_ || self->allocating_host_ || !self->geometry_initialized_ || !self->parent_) return;
+      const int width = self->allocated_width_, height = self->allocated_height_;
+      if (width < 1 || height < 1) return;
+      if (allocation->width == width && allocation->height == height) return;
+      self->allocating_host_ = true;
+      GtkAllocation bounds{0, 0, width, height};
+      gtk_widget_size_allocate(widget, &bounds);
+      gdk_window_resize(gtk_widget_get_window(widget), width, height);
+      self->allocating_host_ = false;
+    })), this);
     if (transparent_) gtk_widget_set_visual(plug_, gdk_screen_get_rgba_visual(gtk_widget_get_screen(plug_)));
     gtk_window_set_focus_on_map(GTK_WINDOW(plug_), FALSE);
     g_object_ref_sink(plug_);
@@ -404,9 +418,9 @@ public:
     auto display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(plug_));
     if (allocation_changed) {
       GtkAllocation allocation{0, 0, gtk_width, gtk_height};
-      gtk_widget_size_allocate(plug_, &allocation);
       allocated_width_ = gtk_width;
       allocated_height_ = gtk_height;
+      gtk_widget_size_allocate(plug_, &allocation);
     }
     if (native_size_changed) {
       // Keep GDK's native-window cache in sync with the allocation. GDK
@@ -522,9 +536,9 @@ public:
       // different units at a scaled display.
       GtkAllocation allocation{0, 0, gtk_width, gtk_height};
       if (allocation_changed) {
-        gtk_widget_size_allocate(plug_, &allocation);
         allocated_width_ = gtk_width;
         allocated_height_ = gtk_height;
+        gtk_widget_size_allocate(plug_, &allocation);
       }
       if (parent_changed || position_changed || native_size_changed) {
         if (auto gdk_window = gtk_widget_get_window(plug_)) {

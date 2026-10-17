@@ -519,7 +519,8 @@ public:
         }
         else if (self->options_.on_reload && self->options_.on_reload()) args->put_Cancel(TRUE);
         else {
-          self->startup_.navigate();
+          if (self->options_.hosted) self->set_visible(false);
+          self->startup_.navigate(self->options_.hosted);
           self->cursor_.finish();
           if (self->options_.on_navigation) self->options_.on_navigation();
         }
@@ -599,7 +600,7 @@ public:
       if (startup_region_) {
         if (!SetWindowRgn(hwnd_, nullptr, TRUE)) { fail("Cannot present the initial docked window"); return; }
         startup_region_ = false;
-      } else {
+      } else if (!options_.hosted) {
         const BOOL cloaked = FALSE;
         if (FAILED(DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked)))) {
           fail("WebView2 could not present the initial window"); return;

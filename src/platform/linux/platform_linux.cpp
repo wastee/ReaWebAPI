@@ -230,7 +230,7 @@ public:
     process_->send({{"id", id_}, {"op", "open"}, {"uri", options.url.empty() ? file_uri(options.entry) : options.url},
       {"script", options.script}, {"lifecycleReload", static_cast<bool>(options.on_reload)}, {"dockEnabled", static_cast<bool>(options.on_dock_toggle)},
       {"appName", options.app_name ? options.app_name() : options.title},
-      {"frameless", frameless_}, {"resizable", resizable_}, {"transparent", transparent_},
+      {"frameless", frameless_}, {"resizable", resizable_}, {"transparent", transparent_}, {"hosted", options.hosted},
       {"resourceRoot", options.resources ? options.resources->root().u8string() : ""}});
     process_->listeners.emplace(id_, std::move(options));
     process_->backgrounds.emplace(id_, 0xffffff);

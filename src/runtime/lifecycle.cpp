@@ -4,7 +4,10 @@ namespace reaweb {
 void Runtime::navigate(Session& session) {
   end_jsfx_edit(session);
   if (session.jsfx) {
-    session.jsfx->initialized = false;
+    session.jsfx->initialized = session.jsfx->presented = false;
+    ++session.jsfx->activation;
+    session.jsfx->last_used = Clock::now();
+    session.jsfx->next_poll = {};
     session.jsfx->values = session.jsfx->changes = Json::array(); session.jsfx->scan = 0;
   }
   if (session.window) session.window->clear_media();
@@ -34,6 +37,8 @@ void Runtime::navigate(Session& session) {
   session.lifecycle_action.clear(); session.lifecycle_token.clear();
   session.started = Clock::now();
   session.bridge->reset_handles();
+  // Hiding a Linux hosted view can pump pending messages while parking its X11 child.
+  if (session.jsfx && session.window) session.window->set_visible(false);
 }
 bool Runtime::lifecycle(Session& s, const std::string& action) {
   if (!s.ready || !s.lifecycle_enabled || s.failed || s.window->closed()) return false;

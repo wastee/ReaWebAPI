@@ -40,6 +40,7 @@ void Runtime::release_jsfx(Session& session) {
   if (host) { host->on_destroy({}); host->restore(); }
   if (session.window && !session.window->closed()) session.window->set_visible(false);
   session.jsfx->initialized = false;
+  session.jsfx->presented = false;
 }
 void Runtime::park_jsfx(Session& session) {
   auto& ui = *session.jsfx;
@@ -76,8 +77,9 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
   if (session.ready) editor.host->set_background(session.window->background_color());
   editor.host->present(session.window->native_handle());
   std::weak_ptr<Session> weak = sessions_.at(session.id);
-  editor.host->on_destroy([this, weak] {
-    if (auto s = weak.lock(); s && !s->closing) {
+  std::weak_ptr<JsfxEditorHost> expected = editor.host;
+  editor.host->on_destroy([this, weak, expected] {
+    if (auto s = weak.lock(); s && !s->closing && s->jsfx && s->jsfx->editor.host == expected.lock()) {
       try { park_jsfx(*s); }
       catch (...) { release_jsfx(*s); s->closing = true; }
     }
@@ -91,7 +93,10 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   if (it == sessions_.end() || !it->second->jsfx || it->second->closing || it->second->window->closed())
     throw Error("FX_UNBOUND", "The JSFX service requires a bound Hosted WebView");
   auto& session = *it->second; auto& ui = *session.jsfx;
-  if (method == "getState") return jsfx_state(session);
+  if (method == "getState") {
+    if (ui.editor.host && !ui.binding->editor_matches(ui.editor)) park_jsfx(session);
+    return jsfx_state(session);
+  }
   if (method == "present" && (!ui.editor.host || (payload.is_object() && payload.value("activation", Json()) != ui.activation))) return false;
   if (!ui.binding->editor_matches(ui.editor)) throw Error("FX_STALE", "The JSFX editor binding is no longer active");
   if (!payload.is_object() || payload.value("activation", Json()) != ui.activation)
@@ -135,6 +140,7 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   ui.next_poll = Clock::now();
   auto result = ui.binding->parameter(param);
   result["activation"] = ui.activation;
+  result["revision"] = ++ui.revision;
   for (auto& change : ui.changes) if (change["index"] == param) change = result;
   return result;
 }
@@ -196,9 +202,9 @@ void Runtime::tick_jsfx() {
   };
   if (!jsfx_discovery_ || (now < next_jsfx_discovery_ && !jsfx_discovery_->pending())) { trim_cache(); return; }
   next_jsfx_discovery_ = now + std::chrono::milliseconds(200);
-  for (auto editor : jsfx_discovery_->scan(host_, [this](void* track, int fx) -> std::optional<JsfxEditorDiscovery::Size> {
+  for (auto editor : jsfx_discovery_->scan(host_, [this](JsfxTarget target, int fx) -> std::optional<JsfxEditorDiscovery::Size> {
       try {
-        JsfxBinding binding(host_, track, fx);
+        JsfxBinding binding(host_, target, fx);
         if (auto association = jsfx_association(resource_ / "Effects", binding.ident()))
           return JsfxEditorDiscovery::Size{association->width, association->height};
       } catch (...) {}
@@ -206,7 +212,7 @@ void Runtime::tick_jsfx() {
     })) {
     if (sessions_.size() >= 32) break;
     try {
-      auto binding = std::make_unique<JsfxBinding>(host_, editor.track, editor.fx);
+      auto binding = std::make_unique<JsfxBinding>(host_, editor.target(), editor.fx);
       if (!binding->editor_matches(editor)) continue;
       const auto association = jsfx_association(resource_ / "Effects", binding->ident());
       if (!association) continue;
@@ -217,7 +223,7 @@ void Runtime::tick_jsfx() {
         auto& candidate = *entry.second;
         if (!candidate.jsfx || candidate.closing || candidate.window->closed() || candidate.jsfx->editor.host) continue;
         auto& previous = *candidate.jsfx->binding;
-        if (previous.project() == binding->project() && previous.track() == binding->track() && previous.guid() == binding->guid() &&
+        if (previous.project() == binding->project() && previous.target() == binding->target() && previous.guid() == binding->guid() &&
             candidate.entry == association->entry) { cached = &candidate; break; }
       }
       if (cached) { attach_jsfx(*cached, editor); continue; }
