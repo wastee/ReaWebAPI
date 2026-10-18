@@ -1,0 +1,30 @@
+desc:ReaWebAPI JSFX resources and commands
+options:gmem=ReaWebAPI_Demo_v1
+import reaweb_jsfx.inc
+slider1:1<0,1,0.001>Gain
+slider2:0<-70368744177664,70368744177664,1>-ReaWebAPI transport v1
+in_pin:left
+in_pin:right
+out_pin:left
+out_pin:right
+@init
+ext_tail_size=-1;
+reaweb_jsfx_init(0,65536);
+reaweb_jsfx_resource(0,131072,196608,0,32768,1);
+@slider
+slider2=reaweb_jsfx_handshake(slider2);
+@block
+slider2=reaweb_jsfx_handshake(slider2);
+reaweb_jsfx_service()==1 ? (
+  reaweb_jsfx_id==0 ? 32768[0]=reaweb_jsfx_value(0)+reaweb_jsfx_value(1) : (
+    32768[0]=reaweb_jsfx_value(2)>0 ?
+      reaweb_jsfx_note_on(reaweb_jsfx_value(0),reaweb_jsfx_value(1),reaweb_jsfx_value(2)) :
+      reaweb_jsfx_note_off(reaweb_jsfx_value(0),reaweb_jsfx_value(1));
+  );
+  reaweb_jsfx_reply(0,32768,1);
+);
+@sample
+spl0*=slider1;spl1*=slider1;
+@serialize
+reaweb_jsfx_serialize(0,0,1);
+slider2=reaweb_jsfx_handshake(slider2);

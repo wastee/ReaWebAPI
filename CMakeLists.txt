@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 endif()
-project(ReaWebAPI VERSION 0.3.8.25 LANGUAGES C CXX)
+project(ReaWebAPI VERSION 0.3.8.26 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -120,6 +120,9 @@ if(WIN32)
 endif()
 
 # Share the same session implementation between the plugin and native tests.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS runtime/jsfx/bridge.jsfx)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/runtime/jsfx/bridge.jsfx" REAWEB_JSFX_BRIDGE_SOURCE)
+configure_file(src/runtime/jsfx_channel_source.hpp.in generated/jsfx_channel_source.hpp @ONLY)
 add_library(reaweb_runtime STATIC
   src/runtime/external_transport.cpp
   src/runtime/external_client.cpp
@@ -137,6 +140,11 @@ add_library(reaweb_runtime STATIC
   src/runtime/runtime.cpp
   src/runtime/jsfx_webui.cpp
   src/runtime/jsfx_runtime.cpp
+  src/runtime/jsfx_channel.cpp
+  src/runtime/jsfx_schema.cpp
+  src/runtime/jsfx_native.cpp
+  src/runtime/jsfx_control.cpp
+  src/runtime/jsfx_transfer.cpp
   src/runtime/window.cpp
   src/runtime/events.cpp
   src/runtime/messages.cpp
@@ -144,6 +152,9 @@ add_library(reaweb_runtime STATIC
   src/runtime/debug.cpp
   src/runtime/transaction.cpp)
 target_link_libraries(reaweb_runtime PUBLIC reaweb_core PRIVATE reaweb_loudness)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(reaweb_runtime PRIVATE dl)
+endif()
 target_include_directories(reaweb_runtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(reaweb_runtime SYSTEM PRIVATE "${wdl_SOURCE_DIR}/WDL")
 if(WIN32)

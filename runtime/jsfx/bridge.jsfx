@@ -1,0 +1,91 @@
+desc:ReaWebAPI internal JSFX channel
+options:gmem=__RWA_GMEM__
+slider1:0<0,2147483647,1>-dispatch
+@init
+base = __RWA_BASE__;
+atomic_setifequal(gmem[base],0,1381452337);
+namespace_valid = gmem[base] == 1381452337;
+@slider
+// Only the owning native bridge accesses staging, synchronously on one thread.
+base = __RWA_BASE__;
+stage = base+2162688;
+operation = gmem[stage];
+slot = gmem[stage+1];
+token = gmem[stage+2];
+addr = base+65536+slot*65536;
+gmem[stage+3] = 0;
+namespace_valid && slot >= 0 && slot < 32 ? (
+  operation==6 && atomic_get(gmem[addr])==0 ? gmem[stage+3]=1;
+  operation == 1 ? (
+    atomic_setifequal(gmem[addr],0,3) == 0 ? (
+      i = 1; loop(65535, gmem[addr+i]=0; i+=1;);
+      token = atomic_add(gmem[base+2],1);
+      token < 1099511627776 ? (
+        gmem[addr+1] = token;
+        gmem[stage+2] = token;
+        gmem[stage+3] = 1;
+        atomic_set(gmem[addr],1);
+      ) : atomic_set(gmem[addr],0);
+    );
+  ) : atomic_setifequal(gmem[addr],1,3) == 1 ? (
+    release_state = 1;
+    gmem[addr+1] == token && (operation==2 || operation==6 || operation==9 || gmem[addr+2]==gmem[stage+4]) ? (
+      operation == 2 ? (
+        i=0; loop(64,gmem[stage+64+i]=gmem[addr+i];i+=1;);
+        gmem[stage+3]=1;
+      ) : operation == 3 ? (
+        read = gmem[addr+17];
+        read < gmem[addr+16] ? (
+          packet = addr+16448+(read%8)*4112;
+          length = gmem[packet+1];
+          length >= 0 && length <= 4096 ? (
+            i=0; loop(length+16,gmem[stage+64+i]=gmem[packet+i];i+=1;);
+            gmem[stage+3]=1;
+          );
+          gmem[addr+17]=read+1;
+        );
+      ) : operation == 4 ? (
+        length = gmem[stage+12];
+        gmem[addr+8] == 0 && length >= 0 && length <= 8192 ? (
+          i=0; loop(length,gmem[addr+64+i]=gmem[stage+64+i];i+=1;);
+          gmem[addr+9]=gmem[stage+9];
+          gmem[addr+10]=gmem[stage+10];
+          gmem[addr+11]=gmem[stage+11];
+          gmem[addr+12]=length;
+          gmem[addr+15]=gmem[stage+15];
+          gmem[addr+23]=0;
+          gmem[addr+8]=1;
+          gmem[stage+3]=1;
+        );
+      ) : operation == 5 ? (
+        length = gmem[addr+14];
+        gmem[addr+8] == 3 && length >= 0 && length <= 8192 ? (
+          gmem[stage+9]=gmem[addr+9];
+          gmem[stage+13]=gmem[addr+13];
+          gmem[stage+14]=length;
+          i=0; loop(length,gmem[stage+64+i]=gmem[addr+8256+i];i+=1;);
+          gmem[addr+8]=0;
+          gmem[stage+3]=1;
+        );
+      ) : operation == 6 ? (
+        gmem[addr+1]=0;
+        gmem[addr+2]=0;
+        release_state=0;
+        gmem[stage+3]=1;
+      ) : operation == 7 ? (
+        gmem[addr+9]==gmem[stage+9] ? (
+          gmem[addr+8]==1 ? (gmem[addr+8]=0;gmem[stage+3]=1;) :
+          gmem[addr+8]==2 && gmem[stage+23] ? (gmem[addr+23]=1;gmem[stage+3]=2;);
+        );
+      ) : operation == 8 ? (
+        gmem[addr+27]=gmem[stage+27];gmem[stage+3]=1;
+      ) : operation == 9 && gmem[addr+2]==0 ? (
+        gmem[addr+28]!=gmem[stage+28] ? (
+          gmem[addr+28]=gmem[stage+28];atomic_add(gmem[base+3],1);
+        );
+        gmem[stage+3]=1;
+      );
+    ) : gmem[stage+3]=-1;
+    atomic_set(gmem[addr],release_state);
+  );
+);

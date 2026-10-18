@@ -47,10 +47,13 @@ def receive(sock):
     if header[0] & 15 == 8:
         assert data[2:] == b'STREAM_CLOSED'
         return None
-    assert data[:4] == b'RWS\x01'
+    assert data[:4] == b'RWS'+bytes([stream_version])
     sequence = struct.unpack_from('<Q', data, 8)[0]
-    assert len(data) == 40 + 240 * 160 * 4
-    assert all(byte == sequence & 255 for byte in data[40:])
+    header = 80 if stream_version == 2 else 40
+    assert len(data) == header + 240 * 160 * 4
+    if stream_version == 2:
+        assert struct.unpack_from('<QQQdBB',data,40) == (99,9007199254740992+sequence,17,0.5,1,1)
+    assert all(byte == sequence & 255 for byte in data[header:])
     return sequence
 
 
@@ -58,9 +61,11 @@ def ack(sock):
     sock.sendall(b'\x82\x81\x11\x22\x33\x44\x10')
 
 
-process = subprocess.Popen([sys.argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+process = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 try:
     first, second = json.loads(process.stdout.readline())
+    stream_version = first.get('layoutVersion', 1)
+    assert stream_version == (2 if len(sys.argv)>2 else 1)
     assert connect(first, 'http://wrong.invalid') is None
     a, b = connect(first), connect(second)
     assert a is not None and b is not None

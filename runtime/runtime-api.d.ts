@@ -6,10 +6,14 @@ interface ReaWebStreamInfo {
   width: number; height: number; stride: number; channels: number; sampleRate: number;
   blockFrames: number; fftSize: number; binHz: number; updateRate: number; source: string;
   policy: 'latest' | 'drop-new';
+  layoutVersion?: 2;
+  jsfx?: Readonly<{ sessionId: string; id: string; source: string; [key: string]: unknown }>;
 }
 interface ReaWebStreamPacket {
   sequence: bigint; frameId: bigint; timestamp: number; producerDropped: bigint;
   data: Uint8Array | Float32Array; bytes: Uint8Array;
+  timing?: Readonly<{ clockEpoch: bigint; firstSample: bigint; sourceDropped: bigint;
+    position: number; playState: number; discontinuity: boolean }>;
 }
 interface ReaWebStream {
   readonly info: Readonly<ReaWebStreamInfo>;
@@ -110,6 +114,8 @@ type ReaWebRuntimeNamespace = 'window' | 'theme' | 'dialog' | 'events' | 'lifecy
   | 'clipboard' | 'dragDrop' | 'app' | 'system' | 'transaction' | 'host' | 'stream';
 interface ReaWebRuntimeCapabilities {
   contract: 2; namespaces: ReaWebRuntimeNamespace[]; cleanupTimeoutMs: number;
+  /** JSFX-specific service protocol, when the optional module is registered. */
+  jsfx?: { protocolVersion: 1 };
   fs?: { mediaURLs: boolean; maxOpenMedia: number; maxMediaBytes: number };
   window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11';
     /** The creation option is accepted. Check transparency.supported for desktop Alpha. */

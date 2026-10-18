@@ -1,5 +1,7 @@
 #include "runtime/native_stream.hpp"
 #include "runtime/stream_transport.hpp"
+#include "runtime/jsfx_transfer.hpp"
+#include "runtime/external_settings.hpp"
 #include <cmath>
 #include <cstring>
 #include <random>
@@ -9,7 +11,7 @@ namespace reaweb {
 StreamBuffer::StreamBuffer(int type, const ReaWeb_StreamDesc& desc) : kind(type), descriptor(desc), slots_(new Slot[desc.capacity]) {
   for (unsigned i = 0; i < desc.capacity; ++i) slots_[i].data.reset(new unsigned char[desc.max_bytes]);
 }
-int StreamBuffer::publish(const void* data, uint32_t bytes, uint64_t sequence, double timestamp) noexcept {
+int StreamBuffer::publish(const void* data, uint32_t bytes, uint64_t sequence, double timestamp, const Timing* timing) noexcept {
   if (closed.load(std::memory_order_acquire)) return REAWEB_STREAM_CLOSED;
   if (!data || !bytes || bytes > descriptor.max_bytes || !std::isfinite(timestamp)) return REAWEB_INVALID_ARGUMENT;
   if (kind == REAWEB_FRAME && bytes != descriptor.stride * descriptor.height) return REAWEB_INVALID_ARGUMENT;
@@ -28,6 +30,7 @@ int StreamBuffer::publish(const void* data, uint32_t bytes, uint64_t sequence, d
   }
   std::memcpy(slot.data.get(), data, bytes);
   slot.bytes = bytes; slot.sequence = sequence; slot.timestamp = timestamp; slot.order = ++order_;
+  slot.timing = timing ? std::optional<Timing>(*timing) : std::nullopt;
   slot.state.store(2, std::memory_order_release);
   write_ = (write_ + 1) % descriptor.capacity;
   published.fetch_add(1, std::memory_order_relaxed);
@@ -37,7 +40,7 @@ bool StreamBuffer::consume(Packet& packet) {
   if (kind == REAWEB_AUDIO || kind == REAWEB_MIDI) {
     auto& slot = slots_[read_]; unsigned expected = 2;
     if (!slot.state.compare_exchange_strong(expected, 3, std::memory_order_acquire)) return false;
-    packet = {slot.sequence, slot.timestamp, dropped.load(), {slot.data.get(), slot.data.get() + slot.bytes}};
+    packet = {slot.sequence, slot.timestamp, dropped.load(), {slot.data.get(), slot.data.get() + slot.bytes}, slot.timing};
     slot.state.store(0, std::memory_order_release); read_ = (read_ + 1) % descriptor.capacity; return true;
   }
   // A producer can refill an already-scanned slot before this scan reaches a
@@ -48,7 +51,7 @@ bool StreamBuffer::consume(Packet& packet) {
     if (!slot.state.compare_exchange_strong(expected, 3, std::memory_order_acquire)) continue;
     if (slot.order > newest) {
       newest = slot.order; found = true;
-      packet = {slot.sequence, slot.timestamp, dropped.load(), {slot.data.get(), slot.data.get() + slot.bytes}};
+      packet = {slot.sequence, slot.timestamp, dropped.load(), {slot.data.get(), slot.data.get() + slot.bytes}, slot.timing};
     }
     slot.state.store(0, std::memory_order_release);
   }
@@ -119,19 +122,31 @@ int StreamHub::create(int kind, const char* name, const ReaWeb_StreamDesc* input
   free->source = desc.source ? desc.source : ""; desc.source = nullptr;
   free->owned = std::make_shared<StreamBuffer>(kind, desc);
   free->name = name; free->owner = desc.owner; free->allocation = allocation; allocated_ += allocation;
+  free->protected_window = 0; free->protected_generation = 0; free->metadata = nullptr;
   *handle = (++serial_ << 8) | index;
   free->handle.store(*handle, std::memory_order_release);
   free->buffer.store(free->owned.get(), std::memory_order_release);
   return REAWEB_OK;
 }
-int StreamHub::publish(int kind, uint64_t handle, const void* data, uint32_t bytes, uint64_t sequence, double timestamp) noexcept {
+int StreamHub::create_jsfx(int kind, const char* name, const ReaWeb_StreamDesc* desc, uint64_t* handle,
+                           int window, uint64_t generation, const Json& metadata) {
+  if (window <= 0 || !metadata.is_object()) return REAWEB_INVALID_ARGUMENT;
+  const auto result = create(kind, name, desc, handle);
+  if (result != REAWEB_OK) return result;
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto& slot = slots_[*handle & 255];
+  slot.protected_window = window; slot.protected_generation = generation; slot.metadata = metadata;
+  return REAWEB_OK;
+}
+int StreamHub::publish(int kind, uint64_t handle, const void* data, uint32_t bytes, uint64_t sequence, double timestamp,
+                       const StreamBuffer::Timing* timing) noexcept {
   const unsigned index = handle & 255;
   if (!handle || index >= slots_.size()) return REAWEB_STREAM_NOT_FOUND;
   auto& slot = slots_[index]; slot.readers.fetch_add(1, std::memory_order_seq_cst);
   auto* buffer = slot.buffer.load(std::memory_order_seq_cst);
   int status = REAWEB_STREAM_CLOSED;
   if (buffer && slot.handle.load(std::memory_order_acquire) == handle)
-    status = buffer->kind == kind ? buffer->publish(data, bytes, sequence, timestamp) : REAWEB_UNSUPPORTED_FORMAT;
+    status = buffer->kind == kind ? buffer->publish(data, bytes, sequence, timestamp, timing) : REAWEB_UNSUPPORTED_FORMAT;
   slot.readers.fetch_sub(1, std::memory_order_release);
   return status;
 }
@@ -158,6 +173,18 @@ Json StreamHub::attach_external(const std::string& name, uint64_t session) {
   if (!session) throw Error("INVALID_ARGUMENT", "External consumer must have a session");
   return attach_consumer(name, 0, 0, {}, session);
 }
+Json StreamHub::attach_jsfx_resource(const std::shared_ptr<JsfxTransfer>& transfer,int window,uint64_t generation,const std::string& origin) {
+  if(std::this_thread::get_id()!=main_)throw Error("WRONG_THREAD", "Resource tickets require the main thread");
+  if(!transfer || transfer->closed() || window<=0 || origin.empty())throw Error("FX_UNBOUND", "Resource transfer requires a bound JSFX document");
+  if(!transport_)transport_=std::make_unique<StreamTransport>(*this);
+  std::lock_guard<std::mutex> lock(mutex_);
+  for(auto it=tickets_.begin();it!=tickets_.end();)
+    if(it->second.reliable==transfer)it=tickets_.erase(it);else ++it;
+  if(tickets_.size()>=256)throw Error("QUEUE_LIMIT", "Too many native transport tickets");
+  const auto token=external_token();Ticket ticket{window,generation,origin,nullptr};ticket.reliable=transfer;
+  tickets_.emplace(token,std::move(ticket));
+  return {{"token",token},{"url",transport_->url()+"/"+token},{"mode","jsfxResourceV1"}};
+}
 void StreamHub::detach_external(uint64_t session, const std::string& token) {
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto it = tickets_.begin(); it != tickets_.end();)
@@ -169,6 +196,8 @@ Json StreamHub::attach_consumer(const std::string& name, int window, uint64_t ge
   std::lock_guard<std::mutex> lock(mutex_);
   if (tickets_.size() >= 64) throw Error("QUEUE_LIMIT", "At most 64 stream consumers may be attached");
   for (const auto& slot : slots_) if (slot.owned && slot.name == name) {
+    if (slot.protected_window && (external || window != slot.protected_window || generation != slot.protected_generation))
+      throw Error("FX_UNBOUND", "This stream belongs to another JSFX document");
     std::random_device random; std::string token;
     for (int i = 0; i < 8; ++i) { char text[9]; std::snprintf(text, sizeof(text), "%08x", random()); token += text; }
     auto inserted = tickets_.emplace(token, Ticket{window, generation, origin, slot.owned});
@@ -176,11 +205,13 @@ Json StreamHub::attach_consumer(const std::string& name, int window, uint64_t ge
     const auto& d = slot.owned->descriptor;
     static const char* kinds[] = {"", "frame", "audio", "spectrum", "meter", "waveform", "binary", "midi"};
     static const char* formats[] = {"", "rgba8", "bgra8", "float32", "bytes"};
-    return {{"token", token}, {"url", transport_->url() + "/" + token}, {"name", name}, {"kind", kinds[slot.owned->kind]},
+    Json result{{"token", token}, {"url", transport_->url() + "/" + token}, {"name", name}, {"kind", kinds[slot.owned->kind]},
       {"format", formats[d.format]}, {"capacity", d.capacity}, {"maxBytes", d.max_bytes}, {"width", d.width}, {"height", d.height},
       {"stride", d.stride}, {"channels", d.channels}, {"sampleRate", d.sample_rate}, {"blockFrames", d.block_frames},
       {"fftSize", d.fft_size}, {"binHz", d.fft_size ? double(d.sample_rate) / d.fft_size : 0}, {"updateRate", d.update_rate}, {"source", slot.source},
       {"policy", slot.owned->kind == REAWEB_AUDIO || slot.owned->kind == REAWEB_MIDI ? "drop-new" : "latest"}};
+    if (slot.protected_window) { result["layoutVersion"] = 2; result["jsfx"] = slot.metadata; }
+    return result;
   }
   throw Error("STREAM_NOT_FOUND", "Native stream not registered: " + name);
 }

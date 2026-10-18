@@ -60,6 +60,8 @@ Runtime::~Runtime() {
     try { persist(*item.second, true); detach(*item.second); } catch (...) {}
   }
   sessions_.clear();
+  jsfx_instances_.clear();
+  jsfx_native_.reset();
   apps_.clear();
 }
 void Runtime::check_thread() const {
@@ -528,6 +530,7 @@ void Runtime::tick() {
         response = s->bridge->dispatch_request(query);
         response["result"]["webRuntime"] = web_runtime(*s);
         response["result"]["runtime"]["window"] = s->window->window_capabilities();
+        if (jsfx_service_) response["result"]["runtime"]["jsfx"] = {{"protocolVersion", 1}};
         response["result"]["windowId"] = s->id;
         response["result"]["projectEpoch"] = project_epoch_;
       } else {
@@ -548,6 +551,7 @@ void Runtime::tick() {
         if (method == "ReaWeb_GetCapabilities" && response.contains("result")) {
           response["result"]["webRuntime"] = web_runtime(*s);
           response["result"]["runtime"]["window"] = s->window->window_capabilities();
+          if (jsfx_service_) response["result"]["runtime"]["jsfx"] = {{"protocolVersion", 1}};
         }
       }
     } catch (const Error& e) { response = error_response(data, e.code, e.what(), e.details); }

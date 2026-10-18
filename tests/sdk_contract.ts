@@ -263,3 +263,24 @@ const meterSnapshot = reaper.audio.decodeMeter(new Float32Array(40), 2);
 const exactSampleClips: bigint = meterSnapshot.sampleClipCount[0];
 const exactTrueClips: bigint = meterSnapshot.truePeakClipCount[0];
 void exactSampleClips; void exactTrueClips;
+
+async function jsfxContract() {
+  const { connectJSFX } = await import('../runtime/jsfx-webui.mjs');
+  const jsfx = await connectJSFX(reaper);
+  const state = await jsfx.params.getState();
+  const revision: string = state.revision;
+  const result = await jsfx.params.set(0, .5);
+  const applied: boolean = result.applied;
+  await jsfx.params.beginEditGroup([0, 1]);
+  await jsfx.params.setMany([{ index: 0, normalized: .4 }, { index: 1, normalized: .6 }]);
+  await jsfx.params.endEditGroup();
+  const off: () => Promise<void> = await jsfx.params.onChange(snapshot => console.log(snapshot.revision));
+  await off();
+  // @ts-expect-error Parameter state has no legacy root alias.
+  jsfx.state;
+  // @ts-expect-error Parameter snapshots are immutable.
+  state.parameters[0].normalized = .4;
+  // @ts-expect-error Writes accept normalized numbers only.
+  await jsfx.params.set(0, { value: .4 });
+  await jsfx.dispose();
+}

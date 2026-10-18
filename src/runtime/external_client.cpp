@@ -201,6 +201,7 @@ bool Runtime::dispatch_external() {
         const bool service = method == "service.subscribe";
         if (service) shape(params, {"service", "event"}); else shape(params, {"event"});
         const auto event = name(params, "event"), service_name = service ? name(params, "service") : "";
+        if (jsfx_service_ && service_name == "jsfx") throw Error("FX_UNBOUND", "JSFX events require a bound Hosted WebView");
         uint64_t handle = service ? services_.lookup(service_name) : 0;
         if (!service && !monitors_.contains(event)) throw Error("INVALID_ARGUMENT", "Unknown Native Event");
         if (session->subscriptions.size() >= 256) throw Error("QUEUE_LIMIT", "Too many subscriptions");

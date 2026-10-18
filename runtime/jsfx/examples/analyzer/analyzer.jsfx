@@ -1,0 +1,28 @@
+desc:ReaWebAPI JSFX analyzer
+options:gmem=ReaWebAPI_Demo_v1
+import reaweb_jsfx.inc
+slider1:0<0,1,1>Telemetry test tone
+slider2:0<-70368744177664,70368744177664,1>-ReaWebAPI transport v1
+in_pin:left
+in_pin:right
+out_pin:left
+out_pin:right
+@init
+ext_tail_size=-1;
+reaweb_jsfx_init(0,65536);
+collected=0;clock=0;
+@slider
+slider2=reaweb_jsfx_handshake(slider2);
+@block
+slider2=reaweb_jsfx_handshake(slider2);
+reaweb_jsfx_service();
+@sample
+0[collected*2]=slider1?sin(clock*2*$pi*440/srate):spl0;
+0[collected*2+1]=slider1?sin(clock*2*$pi*440/srate):spl1;
+clock+=1;collected+=1;
+collected==256 ? (
+  reaweb_jsfx_publish(0,0,512,2,clock-256);
+  reaweb_jsfx_publish(1,0,512,2,clock-256);
+  reaweb_jsfx_publish(2,0,512,2,clock-256);
+  collected=0;
+);

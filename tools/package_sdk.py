@@ -22,6 +22,18 @@ def payload(root, version, revision):
     paths = {f'ReaWebAPI/SDK/{name}': root / 'runtime' / name for name in (
         'reaper.d.ts', 'runtime-api.d.ts', 'app-manifest.schema.json', 'reaper-api.generated.d.ts', 'reaper.js', 'reaper-api.generated.js', 'browser-files.mjs', 'browser-files.d.mts', 'jsfx-webui.mjs', 'jsfx-webui.d.mts', 'README.md', 'README.zh-CN.md')}
     paths['ReaWebAPI/docs/jsfx-webui.md'] = root / 'docs/jsfx-webui.md'
+    paths['ReaWebAPI/docs/jsfx-native-channel.md'] = root / 'docs/jsfx-native-channel.md'
+    paths['ReaWebAPI/docs/jsfx-webui.zh-CN.md'] = root / 'docs/jsfx-webui.zh-CN.md'
+    paths['ReaWebAPI/docs/jsfx-native-channel.zh-CN.md'] = root / 'docs/jsfx-native-channel.zh-CN.md'
+    paths['ReaWebAPI/SDK/jsfx/reaweb_jsfx.inc'] = root / 'runtime/jsfx/reaweb_jsfx.inc'
+    for demo in ('analyzer', 'curve', 'resource'):
+        directory = root / 'runtime/jsfx/examples' / demo
+        for path in directory.iterdir():
+            if path.is_file():
+                paths[f'ReaWebAPI/SDK/jsfx/examples/{demo}/{path.name}'] = path
+        for name in ('jsfx-webui.mjs', 'jsfx-webui.d.mts', 'runtime-api.d.ts'):
+            paths[f'ReaWebAPI/SDK/jsfx/examples/{demo}/{name}'] = root / 'runtime' / name
+        paths[f'ReaWebAPI/SDK/jsfx/examples/{demo}/reaweb_jsfx.inc'] = root / 'runtime/jsfx/reaweb_jsfx.inc'
     paths['ReaWebAPI/SDK/tools/validate_app.py'] = root / 'tools/validate_app.py'
     paths['ReaWebAPI/docs/browser-media.md'] = root / 'docs/browser-media.md'
     paths['ReaWebAPI/SDK/native/reaweb_service.h'] = root / 'src/public/reaweb_service.h'

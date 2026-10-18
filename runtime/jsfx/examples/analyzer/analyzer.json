@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "JSFX_WebUI": {
+    "entry": "index.html",
+    "width": 680,
+    "height": 600,
+    "native": {
+      "protocolVersion": 1,
+      "gmem": "ReaWebAPI_Demo_v1",
+      "base": 0,
+      "transportParam": 1,
+      "streams": [
+        {
+          "id": "spectrum",
+          "kind": "spectrum",
+          "source": "input/test",
+          "channels": 2,
+          "fftSize": 2048,
+          "points": 256
+        },
+        {
+          "id": "waveform",
+          "kind": "waveform",
+          "source": "input/test",
+          "channels": 2,
+          "fftSize": 2048,
+          "points": 256
+        },
+        {
+          "id": "scope",
+          "kind": "audio",
+          "source": "input/test",
+          "channels": 2,
+          "fftSize": 2048,
+          "points": 256
+        }
+      ]
+    }
+  }
+}

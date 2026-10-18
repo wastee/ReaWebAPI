@@ -28,6 +28,7 @@ bool Runtime::service_call(Session& session, const Work& request) {
     try { handle = services_.lookup(service); }
     catch (const Error&) { if (method == "ReaWeb_ServiceSubscribe") throw; }
     if (method == "ReaWeb_ServiceSubscribe") {
+      if (handle == jsfx_service_ && !session.jsfx) throw Error("FX_UNBOUND", "JSFX events require a bound Hosted WebView");
       size_t count = 0; for (const auto& item : session.service_subscriptions) count += item.second.size();
       if (count >= 256) throw Error("QUEUE_LIMIT", "Too many service subscriptions");
       session.service_subscriptions[handle].insert(name);
@@ -40,9 +41,12 @@ bool Runtime::service_call(Session& session, const Work& request) {
     }
     complete({{"result", {{"handle", std::to_string(handle)}}}});
   } else if (method == "ReaWeb_ServiceInvoke" && jsfx_service_ && session.jsfx && service == "jsfx" && name == "present") {
-    complete({{"result", jsfx_call(session.id, name, args[2])}});
+    complete({{"result", jsfx_result(session.id, name, args[2])}});
   } else if (method == "ReaWeb_ServiceInvoke") services_.call(service, name, args[2], session.id, std::move(complete));
-  else { services_.call(service, name, args[2], session.id, {}); complete({{"result", true}}); }
+  else {
+    if (jsfx_service_ && service == "jsfx") throw Error("INVALID_ARGUMENT", "JSFX methods require invoke");
+    services_.call(service, name, args[2], session.id, {}); complete({{"result", true}});
+  }
   return true;
 }
 void Runtime::service_event(uint64_t handle, const std::string& service, int window, const std::string& name, Json data) {

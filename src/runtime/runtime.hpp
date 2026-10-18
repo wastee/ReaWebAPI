@@ -11,6 +11,7 @@
 #include "runtime/external_transport.hpp"
 #include "runtime/external_settings.hpp"
 #include "runtime/jsfx_webui.hpp"
+#include "runtime/jsfx_control.hpp"
 #include <deque>
 #include <optional>
 #include <set>
@@ -74,6 +75,14 @@ private:
     std::shared_ptr<WebResources> resources;
     std::shared_ptr<Platform> platform;
   };
+  struct JsfxInstance {
+    std::unique_ptr<JsfxBinding> binding;
+    std::string session_id = external_token();
+    uint64_t revision = 0;
+    std::unique_ptr<JsfxControl> native;
+    std::string native_error;
+    Clock::time_point last_used = Clock::now();
+  };
   struct Session {
     int id = 0, slot = 0;
     fs::path entry;
@@ -114,10 +123,13 @@ private:
     bool failed = false;
     struct Jsfx {
       JsfxEditor editor;
-      std::unique_ptr<JsfxBinding> binding;
+      std::shared_ptr<JsfxInstance> instance;
       Json values = Json::array(), changes = Json::array();
-      int scan = 0, count = 0, editing = -1;
-      uint64_t revision = 0, host_revision = 0, activation = 1;
+      int scan = 0, count = 0;
+      std::vector<int> editing;
+      std::string gesture_id;
+      bool group_edit = false;
+      uint64_t host_revision = 0, activation = 1;
       bool initialized = false, presented = false;
       double presentation_ms = 0;
       std::string undo;
@@ -134,6 +146,7 @@ private:
   Host host_;
   ServiceRegistry services_;
   StreamHub streams_;
+  std::unique_ptr<JsfxNativeHub> jsfx_native_;
   NativeTasks tasks_;
   NativeProducers producers_;
   NativeMonitorManager monitors_;
@@ -186,12 +199,14 @@ private:
   int jsfx_poll_cursor_ = 0;
   Clock::time_point next_jsfx_discovery_{};
   std::map<void*, std::shared_ptr<JsfxEditorHost>> jsfx_blocked_;
+  std::vector<std::shared_ptr<JsfxInstance>> jsfx_instances_;
   void tick_jsfx();
   void release_jsfx(Session& session);
   void park_jsfx(Session& session);
   void attach_jsfx(Session& session, const JsfxEditor& editor);
   Json jsfx_state(Session& session);
   Json jsfx_call(int window, const std::string& method, const Json& payload);
+  Json jsfx_result(int window, const std::string& method, const Json& payload);
   void end_jsfx_edit(Session& session);
   void check_thread() const;
   void enqueue_message(Session& session, const std::string& message, bool to_web);

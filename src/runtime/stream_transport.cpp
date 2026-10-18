@@ -10,6 +10,7 @@
 #endif
 #include "runtime/stream_transport.hpp"
 #include "runtime/native_stream.hpp"
+#include "runtime/jsfx_transfer.hpp"
 #include <sha.h>
 #include <wdl_base64.h>
 #include <algorithm>
@@ -44,11 +45,18 @@ Message frame(const Bytes& bytes, unsigned opcode = 2) {
 }
 void le64(Bytes& data, size_t at, uint64_t value) { for (unsigned i = 0; i < 8; ++i) data[at + i] = static_cast<unsigned char>(value >> (8 * i)); }
 Message packet_frame(const StreamBuffer::Packet& packet, int kind) {
-  Bytes data(40 + packet.data.size());
-  data[0] = 'R'; data[1] = 'W'; data[2] = 'S'; data[3] = 1; data[4] = static_cast<unsigned char>(kind);
+  const size_t header = packet.timing ? 80 : 40;
+  Bytes data(header + packet.data.size());
+  data[0] = 'R'; data[1] = 'W'; data[2] = 'S'; data[3] = packet.timing ? 2 : 1; data[4] = static_cast<unsigned char>(kind);
   le64(data, 8, packet.sequence); uint64_t timestamp; std::memcpy(&timestamp, &packet.timestamp, 8);
   le64(data, 16, timestamp); le64(data, 24, packet.dropped); le64(data, 32, packet.data.size());
-  std::memcpy(data.data() + 40, packet.data.data(), packet.data.size()); return frame(data);
+  if (packet.timing) {
+    const auto& timing = *packet.timing;
+    le64(data, 40, timing.clock_epoch); le64(data, 48, timing.first_sample); le64(data, 56, timing.source_dropped);
+    uint64_t position; std::memcpy(&position, &timing.position, 8); le64(data, 64, position);
+    data[72] = static_cast<unsigned char>(timing.play_state); data[73] = timing.discontinuity ? 1 : 0;
+  }
+  std::memcpy(data.data() + header, packet.data.data(), packet.data.size()); return frame(data);
 }
 std::string lower(std::string value) { for (auto& c : value) if (c >= 'A' && c <= 'Z') c += 'a' - 'A'; return value; }
 std::string trim(std::string value) {
@@ -62,6 +70,7 @@ struct StreamTransport::Impl {
     explicit Client(Socket value) : socket(value) {}
     std::string input, token;
     std::shared_ptr<StreamBuffer> stream;
+    std::shared_ptr<JsfxTransfer> reliable;
     Message output;
     std::deque<Message> waiting;
     size_t offset = 0, queued_bytes = 0;
@@ -125,7 +134,7 @@ struct StreamTransport::Impl {
       if (ticket->second.connected) return reject("TICKET_USED");
       if (!ticket->second.external && ticket->second.origin != headers["origin"]) return reject("ORIGIN_MISMATCH");
       if (Time::now() - ticket->second.created > std::chrono::seconds(10)) return reject("TICKET_EXPIRED");
-      ticket->second.connected = true; client.token = ticket->first; client.stream = ticket->second.buffer;
+      ticket->second.connected = true; client.token = ticket->first; client.stream = ticket->second.buffer;client.reliable=ticket->second.reliable;
     }
     const auto key = headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     unsigned char digest[20]; char accept[32]; WDL_SHA1 sha; sha.add(key.data(), static_cast<int>(key.size())); sha.result(digest);
@@ -139,13 +148,28 @@ struct StreamTransport::Impl {
   bool incoming(Client& client) {
     while (client.input.size() >= 2) {
       const auto* data = reinterpret_cast<const unsigned char*>(client.input.data());
-      const auto opcode = data[0] & 15, length = data[1] & 127;
-      if (!(data[0] & 128) || (data[0] & 112) || !(data[1] & 128) || length > 125) return false;
-      if (client.input.size() < size_t(6 + length)) return true;
+      const auto opcode = data[0] & 15;
+      uint64_t length=data[1]&127;size_t header=2;
+      if (!(data[0] & 128) || (data[0] & 112) || !(data[1] & 128)) return false;
+      if(length>125) {
+        if(!client.reliable || opcode!=2)return false;
+        const unsigned extended=length==126?2:8;
+        if(client.input.size()<2+extended)return true;
+        length=0;for(unsigned i=0;i<extended;++i)length=(length<<8)|data[2+i];header+=extended;
+      }
+      if(length>(client.reliable?JsfxTransfer::chunk_bytes+104:125))return false;
+      if (client.input.size() < header+4+size_t(length)) return true;
       if (opcode == 8) return false;
-      if (opcode == 2 && length == 1 && (data[6] ^ data[2]) == 1) client.inflight = false;
+      if(client.reliable && opcode==2) {
+        if(client.waiting.size()>=2)return false;
+        Bytes request(size_t(length),0);
+        for(size_t i=0;i<request.size();++i)request[i]=data[header+4+i]^data[header+(i&3)];
+        try {client.waiting.push_back(frame(client.reliable->exchange(request)));}
+        catch(const Error&) {return false;}
+      }
+      else if (opcode == 2 && length == 1 && (data[header+4] ^ data[header]) == 1) client.inflight = false;
       else if (opcode != 10) return false;
-      client.input.erase(0, 6 + length); client.progress = Time::now();
+      client.input.erase(0,header+4+size_t(length));client.progress=Time::now();
     }
     return true;
   }
@@ -154,7 +178,7 @@ struct StreamTransport::Impl {
     if (!read || (read < 0 && !would_block())) { client.failed = true; return; }
     if (read > 0) {
       client.input.append(input, read);
-      if (client.input.size() > 8192) { if (!client.upgraded) reject("HANDSHAKE_TOO_LARGE"); client.failed = true; return; }
+      if (client.input.size() > (client.reliable?JsfxTransfer::chunk_bytes+104+14:8192)) { if (!client.upgraded) reject("HANDSHAKE_TOO_LARGE"); client.failed = true; return; }
       if ((!client.upgraded && !handshake(client)) || (client.upgraded && !incoming(client))) { client.failed = true; return; }
     }
     if (!client.upgraded) {
@@ -166,12 +190,13 @@ struct StreamTransport::Impl {
       if (!hub.tickets_.count(client.token)) { client.failed = true; return; }
     }
     if (!client.output) {
-      const auto reason = client.stream->closed.load();
+      const auto reason = client.reliable?(client.reliable->closed()||client.reliable->expired()?REAWEB_STREAM_CLOSED:0):client.stream->closed.load();
       if (reason) {
         const std::string code = StreamHub::code(reason); Bytes close{3, 232}; close.insert(close.end(), code.begin(), code.end());
         client.output = frame(close, 8); client.closing = true; client.waiting.clear(); client.queued_bytes = 0;
-      } else if (!client.inflight && !client.waiting.empty()) {
-        client.output = client.waiting.front(); client.waiting.pop_front(); client.queued_bytes -= client.output->size(); client.inflight = true;
+      } else if ((!client.inflight || client.reliable) && !client.waiting.empty()) {
+        client.output = client.waiting.front(); client.waiting.pop_front();
+        if(!client.reliable){client.queued_bytes -= client.output->size();client.inflight = true;}
       }
     }
     if (client.output) {

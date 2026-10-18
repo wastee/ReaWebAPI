@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "JSFX_WebUI": {
+    "entry": "index.html",
+    "width": 680,
+    "height": 600,
+    "native": {
+      "protocolVersion": 1,
+      "gmem": "ReaWebAPI_Demo_v1",
+      "base": 0,
+      "transportParam": 1,
+      "resources": [
+        {
+          "id": "asset",
+          "format": "bytes",
+          "maxBytes": 32768,
+          "persistent": true,
+          "undo": true
+        }
+      ],
+      "commands": [
+        {
+          "id": "sum",
+          "args": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "b": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "result": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
+          }
+        },
+        {
+          "id": "note",
+          "args": {
+            "type": "object",
+            "properties": {
+              "channel": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 15
+              },
+              "note": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 127
+              },
+              "velocity": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 127
+              }
+            }
+          },
+          "result": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "continuous": true,
+          "cancellable": true
+        }
+      ]
+    }
+  }
+}

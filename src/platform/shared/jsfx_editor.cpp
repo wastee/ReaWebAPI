@@ -652,6 +652,12 @@ LRESULT editor_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   if (it == attachments.end()) return DefWindowProc(window, message, wp, lp);
 #endif
   auto state = it->second;
+  if (state->prepared && message == WM_COMMAND && HIWORD(wp) == EN_KILLFOCUS) {
+    const auto control = GetDlgItem(window, LOWORD(wp));
+    // JSFX commits edit fields on focus loss, even when the value is unchanged.
+    if (control && std::find(state->hidden.begin(), state->hidden.end(), control) != state->hidden.end())
+      return 0;
+  }
   if (state->prepared && state->layout && (message == WM_DESTROY || (message == WM_SHOWWINDOW && !wp)))
     state->layout->handoff();
   if (state->prepared && message == WM_SHOWWINDOW && wp) state->conceal();

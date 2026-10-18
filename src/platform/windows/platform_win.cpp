@@ -798,6 +798,7 @@ public:
       parent = hosted_parking_;
     }
     if (!IsWindow(static_cast<HWND>(parent))) throw Error("FX_STALE", "Hosted parent is no longer available");
+    if (GetParent(hwnd_) == parent) return;
     set_visible(false);
     ShowWindow(hwnd_, SW_HIDE);
     SetParent(hwnd_, static_cast<HWND>(parent));
@@ -805,6 +806,8 @@ public:
     options_.parent = parent;
     if (controller_) controller_->NotifyParentWindowPositionChanged();
     layout();
+    // Keep composing behind the empty startup region until CapturePreview completes.
+    if (parent != hosted_parking_ && startup_.pending() && startup_region_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   }
   void prepare_dock() override {
     if (options_.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");

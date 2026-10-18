@@ -10,7 +10,8 @@ void Runtime::initialize_jsfx(JsfxDiscovery discovery) {
     [](void* context, uint64_t handle, uint64_t request, int window, const char* method, const char* payload) -> int {
       auto& runtime = *static_cast<Runtime*>(context);
       try {
-        const auto result = runtime.jsfx_call(window, method, Json::parse(payload));
+        if (!request) return REAWEB_INVALID_ARGUMENT;
+        const auto result = runtime.jsfx_result(window, method, Json::parse(payload));
         if (request) return runtime.services_.complete(handle, request, result.dump().c_str(), REAWEB_OK, nullptr);
         return REAWEB_OK;
       } catch (const std::exception& error) {
@@ -24,10 +25,8 @@ void Runtime::initialize_jsfx(JsfxDiscovery discovery) {
 void Runtime::end_jsfx_edit(Session& session) {
   if (!session.jsfx) return;
   auto& ui = *session.jsfx;
-  if (ui.editing >= 0) {
-    try { ui.binding->end(ui.editing); } catch (...) {}
-    ui.editing = -1;
-  }
+  for (int index : ui.editing) { try { ui.instance->binding->end(index); } catch (...) {} }
+  ui.editing.clear(); ui.gesture_id.clear(); ui.group_edit = false;
   if (!ui.undo.empty()) {
     if (undo_owner_ == session.id) finish_undo();
     ui.undo.clear();
@@ -36,6 +35,7 @@ void Runtime::end_jsfx_edit(Session& session) {
 void Runtime::release_jsfx(Session& session) {
   if (!session.jsfx) return;
   end_jsfx_edit(session);
+  if(session.jsfx->instance->native)session.jsfx->instance->native->close_window(session.id);
   auto host = session.jsfx->editor.host;
   if (host) { host->on_destroy({}); host->restore(); }
   if (session.window && !session.window->closed()) session.window->set_visible(false);
@@ -46,6 +46,7 @@ void Runtime::park_jsfx(Session& session) {
   auto& ui = *session.jsfx;
   if (!ui.editor.host) return;
   end_jsfx_edit(session);
+  if(ui.instance->native)ui.instance->native->close_window(session.id);
   auto host = ui.editor.host;
   host->on_destroy({});
   session.window->reparent_host(nullptr);
@@ -55,16 +56,19 @@ void Runtime::park_jsfx(Session& session) {
   ui.last_used = Clock::now();
   next_jsfx_discovery_ = {};
   ++ui.activation;
-  if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged", {{"active", false}, {"activation", ui.activation}});
+  if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged", {{"sessionId", ui.instance->session_id}, {"active", false}, {"activation", ui.activation}});
 }
 Json Runtime::jsfx_state(Session& session) {
   auto& ui = *session.jsfx;
-  auto state = ui.binding->state();
+  auto state = ui.instance->binding->state();
+  if(ui.instance->native)for(auto& parameter:state["parameters"])
+    if(parameter["index"]==ui.instance->native->parameter()) {parameter["reserved"]=true;parameter["readOnly"]=true;}
   ui.count = state["count"]; ui.initialized = bool(ui.editor.host);
   ui.scan = 0; ui.changes = Json::array(); ui.values = Json::array();
   for (const auto& p : state["parameters"])
     ui.values.push_back({{"index", p["index"]}, {"value", p["value"]}, {"normalized", p["normalized"]}, {"formatted", p["formatted"]}});
-  state["revision"] = ++ui.revision;
+  state["sessionId"] = ui.instance->session_id;
+  state["revision"] = std::to_string(++ui.instance->revision);
   state["activation"] = ui.activation;
   state["active"] = bool(ui.editor.host);
   return state;
@@ -85,7 +89,20 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
     }
   });
   if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged",
-    {{"active", true}, {"activation", ui.activation}, {"state", jsfx_state(session)}});
+    {{"sessionId", ui.instance->session_id}, {"active", true}, {"activation", ui.activation}, {"paramState", jsfx_state(session)}});
+}
+Json Runtime::jsfx_result(int window, const std::string& method, const Json& payload) {
+  Json result;
+  auto it = sessions_.find(window);
+  if (it != sessions_.end() && it->second->jsfx) result["sessionId"] = it->second->jsfx->instance->session_id;
+  try { result["data"] = jsfx_call(window, method, payload); result["ok"] = true; }
+  catch (const Error& error) {
+    result["ok"] = false; result["error"] = {{"code", error.code}, {"message", error.what()}};
+    if (!error.details.is_null()) result["error"]["details"] = error.details;
+  } catch (const std::exception& error) {
+    result["ok"] = false; result["error"] = {{"code", "SERVICE_ERROR"}, {"message", error.what()}};
+  }
+  return result;
 }
 Json Runtime::jsfx_call(int window, const std::string& method, const Json& payload) {
   check_thread();
@@ -93,13 +110,51 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   if (it == sessions_.end() || !it->second->jsfx || it->second->closing || it->second->window->closed())
     throw Error("FX_UNBOUND", "The JSFX service requires a bound Hosted WebView");
   auto& session = *it->second; auto& ui = *session.jsfx;
-  if (method == "getState") {
-    if (ui.editor.host && !ui.binding->editor_matches(ui.editor)) park_jsfx(session);
+  if (!payload.is_object()) throw Error("INVALID_ARGUMENT", "Expected a JSFX request object");
+  ui.instance->binding->resolve();
+  if(method=="getCapabilities" && ui.instance->native)return ui.instance->native->capabilities(ui.instance->session_id);
+  if (method == "getCapabilities") return {
+    {"protocolVersion", 1}, {"sessionId", ui.instance->session_id}, {"capabilityRevision", "1"}, {"status", "parameterOnly"},
+    {"streams", Json::array()}, {"dataStates", Json::array()}, {"commands", Json::array()}, {"resources", Json::array()},
+    {"features", {{"params", true}, {"paramGroups", true}, {"nativeChannel", false}}},
+    {"limits", {{"maxParametersPerGesture", 259}}}};
+  if (payload.value("sessionId", Json()) != ui.instance->session_id) throw Error("STALE_SESSION", "The JSFX instance session changed");
+  if (method == "getParamState") {
+    if (ui.editor.host && !ui.instance->binding->editor_matches(ui.editor)) park_jsfx(session);
     return jsfx_state(session);
   }
-  if (method == "present" && (!ui.editor.host || (payload.is_object() && payload.value("activation", Json()) != ui.activation))) return false;
-  if (!ui.binding->editor_matches(ui.editor)) throw Error("FX_STALE", "The JSFX editor binding is no longer active");
-  if (!payload.is_object() || payload.value("activation", Json()) != ui.activation)
+  if (method == "getDiagnostics") {
+    Json result{{"sessionId",ui.instance->session_id},{"nativeChannel",bool(ui.instance->native)},
+      {"status",ui.instance->native?ui.instance->native->capabilities(ui.instance->session_id)["status"]:Json("parameterOnly")},
+      {"active",bool(ui.editor.host)},{"gestureActive",!ui.gesture_id.empty()},{"presentationMs",ui.presentation_ms}};
+    if(ui.instance->native)result["native"]=ui.instance->native->diagnostics();
+    if(!ui.instance->native_error.empty())result["lastError"]=ui.instance->native_error;
+    return result;
+  }
+  static const std::set<std::string> extensions{
+    "openStream", "getDataState", "setDataState", "invokeCommand", "releaseCommands", "getOperation", "findOperation", "cancelOperation",
+    "beginResourceUpload", "commitResourceUpload", "abortResourceUpload", "openResourceDownload", "closeResourceDownload"};
+  if (extensions.count(method)) {
+    if(!ui.instance->native)throw Error("UNSUPPORTED", "This JSFX has no verified native data channel");
+    const bool read=method=="getDataState" || method=="getOperation" || method=="findOperation";
+    const bool cleanup=method=="cancelOperation" || method=="abortResourceUpload" || method=="closeResourceDownload" || method=="releaseCommands";
+    if(!read && !cleanup && (!ui.editor.host || !ui.instance->binding->editor_matches(ui.editor) || payload.value("activation",Json())!=ui.activation))
+      throw Error("FX_STALE", "The JSFX editor activation changed");
+    return ui.instance->native->call(method,payload,{session.id,session.generation,ui.instance->session_id,session.app->origin});
+  }
+  const bool begin = method == "beginParamEdit" || method == "beginParamEditGroup";
+  const bool end = method == "endParamEdit" || method == "endParamEditGroup";
+  const bool group = method == "beginParamEditGroup" || method == "endParamEditGroup" || method == "setParams";
+  if (end) {
+    if (ui.gesture_id.empty()) return {{"ended", false}};
+    if (payload.value("gestureId", Json()) != ui.gesture_id || group != ui.group_edit)
+      throw Error("GESTURE_BUSY", "The parameter gesture belongs to another request");
+    end_jsfx_edit(session); return {{"ended", true}};
+  }
+  if (method != "present" && !begin && method != "setParam" && method != "setParams")
+    throw Error("UNKNOWN_METHOD", "Unknown JSFX service method");
+  if (method == "present" && (!ui.editor.host || payload.value("activation", Json()) != ui.activation)) return {{"presented", false}};
+  if (!ui.instance->binding->editor_matches(ui.editor) || payload.value("activation", Json()) != ui.activation)
     throw Error("FX_STALE", "The JSFX editor activation changed");
   if (!ui.initialized) throw Error("FX_NOT_READY", "Read the host state before editing parameters");
   if (method == "present") {
@@ -107,45 +162,114 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
     ui.presentation_ms = std::chrono::duration<double, std::milli>(Clock::now() - ui.last_used).count();
     ui.presented = true; session.window->set_visible(true);
     if (session.window->visible()) ui.editor.host->reveal();
-    return true;
+    return {{"presented", true}};
   }
-  if (method == "endEdit") { end_jsfx_edit(session); return true; }
-  if (method != "beginEdit" && method != "setParam") throw Error("UNKNOWN_METHOD", "Unknown JSFX service method");
-  if (!payload.is_object() || !payload.value("index", Json()).is_number_integer()) throw Error("INVALID_ARGUMENT", "Expected a parameter index");
-  for (auto p = payload.begin(); p != payload.end(); ++p)
-    if (p.key() != "activation" && p.key() != "index" && (method != "setParam" || (p.key() != "value" && p.key() != "normalized")))
-      throw Error("INVALID_ARGUMENT", "Unexpected JSFX parameter field");
-  if (payload["index"].get<double>() < 0 || payload["index"].get<double>() > 258)
-    throw Error("INVALID_ARGUMENT", "Invalid JSFX parameter index");
-  const int param = payload.at("index").get<int>();
-  if (param < 0 || param >= ui.binding->parameter_count()) throw Error("INVALID_ARGUMENT", "Invalid JSFX parameter index");
-  if (method == "beginEdit") {
-    end_jsfx_edit(session);
+  for (auto p = payload.begin(); p != payload.end(); ++p) {
+    if (p.key() == "sessionId" || p.key() == "activation" || (!begin && p.key() == "gestureId")) continue;
+    if ((begin && p.key() == (group ? "indices" : "index")) ||
+        (!begin && (group ? p.key() == "values" : p.key() == "index" || p.key() == "normalized"))) continue;
+    throw Error("INVALID_ARGUMENT", "Unexpected JSFX parameter field");
+  }
+  const auto index = [&](const Json& value) {
+    if (!value.is_number_integer() || value.get<double>() < 0 || value.get<double>() >= ui.instance->binding->parameter_count())
+      throw Error("INVALID_ARGUMENT", "Invalid JSFX parameter index");
+    if(ui.instance->native && value==ui.instance->native->parameter())throw Error("INVALID_ARGUMENT", "The JSFX transport parameter is reserved");
+    return value.get<int>();
+  };
+  std::vector<int> indices;
+  Json values = Json::array();
+  if (begin) {
+    if (!ui.gesture_id.empty()) throw Error("GESTURE_BUSY", "Finish the active parameter gesture first");
+    auto input = group ? payload.value("indices", Json()) : Json::array({payload.value("index", Json())});
+    if (!input.is_array() || input.empty() || input.size() > 259) throw Error("INVALID_ARGUMENT", "Expected bounded parameter indices");
+    for (const auto& item : input) indices.push_back(index(item));
+  } else {
+    values = group ? payload.value("values", Json()) : Json::array({{{"index", payload.value("index", Json())}, {"normalized", payload.value("normalized", Json())}}});
+    if (!values.is_array() || values.empty() || values.size() > 259) throw Error("INVALID_ARGUMENT", "Expected bounded parameter values");
+    for (const auto& item : values) {
+      if (!item.is_object() || item.size() != 2) throw Error("INVALID_ARGUMENT", "Expected index and normalized fields");
+      indices.push_back(index(item.value("index", Json())));
+      const auto value = item.value("normalized", Json());
+      if (!value.is_number() || !std::isfinite(value.get<double>()) || value < 0 || value > 1)
+        throw Error("INVALID_ARGUMENT", "Expected a normalized value in [0,1]");
+    }
+  }
+  if (std::set<int>(indices.begin(), indices.end()).size() != indices.size()) throw Error("INVALID_ARGUMENT", "Duplicate parameter index");
+  if (begin) {
     ui.undo = transaction_call(window, "ReaWeb_BeginUndo", Json::array({"JSFX Web UI parameter"})).get<std::string>();
-    ui.editing = param; ui.last_edit = Clock::now();
-    return true;
+    ui.editing = indices; ui.group_edit = group; ui.gesture_id = external_token(); ui.last_edit = Clock::now();
+    return {{"gestureId", ui.gesture_id}};
   }
-  if (!payload.value("value", Json()).is_number() || !payload.value("normalized", Json(false)).is_boolean())
-    throw Error("INVALID_ARGUMENT", "Expected a finite value and optional normalized boolean");
-  const auto value = payload["value"].get<double>();
-  if (!std::isfinite(value)) throw Error("INVALID_ARGUMENT", "Expected a finite parameter value");
-  if (ui.editing >= 0 && ui.editing != param) throw Error("GESTURE_BUSY", "Finish the active parameter gesture first");
-  const bool discrete = ui.editing < 0;
+  const bool discrete = ui.gesture_id.empty();
+  if (discrete && (group || payload.contains("gestureId"))) throw Error("GESTURE_BUSY", "The parameter gesture has ended");
+  if (!discrete) {
+    if (payload.value("gestureId", Json()) != ui.gesture_id || group != ui.group_edit)
+      throw Error("GESTURE_BUSY", "The parameter gesture belongs to another request");
+    for (int param : indices) if (std::find(ui.editing.begin(), ui.editing.end(), param) == ui.editing.end())
+      throw Error("INVALID_ARGUMENT", "Parameter is not part of the active gesture");
+  }
   if (discrete) ui.undo = transaction_call(window, "ReaWeb_BeginUndo", Json::array({"JSFX Web UI parameter"})).get<std::string>();
-  try { ui.binding->set(param, value, payload.value("normalized", false)); }
-  catch (...) { if (discrete) end_jsfx_edit(session); throw; }
+  Json applied = Json::array(), parameters = Json::array();
+  try {
+    for (const auto& item : values) {
+      int param = item["index"];
+      ui.instance->binding->set(param, item["normalized"].get<double>(), true);
+      applied.push_back(param);
+      auto parameter = ui.instance->binding->parameter(param); parameters.push_back(parameter);
+      for (auto& change : ui.changes) if (change["index"] == param) change = parameter;
+    }
+  } catch (...) {
+    if (discrete) { try { ui.instance->binding->end(indices.front()); } catch (...) {} }
+    end_jsfx_edit(session); ui.next_poll = {};
+    if (group && !applied.empty()) throw Error("PARTIAL_WRITE", "Some parameters were applied before the host rejected a write", {{"applied", applied}});
+    throw;
+  }
   ui.last_edit = Clock::now();
   if (undo_owner_ == window) undo_deadline_ = Clock::now() + std::chrono::seconds(30);
-  if (discrete) { ui.binding->end(param); end_jsfx_edit(session); }
+  if (discrete) { ui.instance->binding->end(indices.front()); end_jsfx_edit(session); }
   ui.next_poll = Clock::now();
-  auto result = ui.binding->parameter(param);
-  result["activation"] = ui.activation;
-  result["revision"] = ++ui.revision;
-  for (auto& change : ui.changes) if (change["index"] == param) change = result;
-  return result;
+  return {{group ? "applied" : "parameter", group ? parameters : parameters.front()}, {"revision", std::to_string(++ui.instance->revision)}};
 }
 void Runtime::tick_jsfx() {
   if (!jsfx_service_) return;
+  for(auto& instance:jsfx_instances_)if(instance->native) {
+    try {
+      const bool changed=instance->native->tick(*instance->binding,[this](const std::string& label) {
+        if(undo_owner_)return false;
+        transaction_call(-1,"ReaWeb_BeginUndo",Json::array({label}));return true;
+      },[this] {if(undo_owner_==-1)finish_undo();});
+      if(undo_owner_==-1)undo_deadline_=Clock::now()+std::chrono::seconds(30);
+      if(changed) {
+        instance->session_id=external_token();instance->revision=0;
+        for(auto& item:sessions_)if(item.second->jsfx && item.second->jsfx->instance==instance) {
+          end_jsfx_edit(*item.second);
+          service_event(jsfx_service_,"jsfx",item.first,"capabilitiesChanged",
+            {{"sessionId",instance->session_id},{"capabilityRevision",instance->native->capabilities(instance->session_id)["capabilityRevision"]},{"reason","sessionChanged"}});
+        }
+      }
+      for(auto& event:instance->native->events()) {
+        if(event.first=="projectChanged") {
+          using Dirty=void(*)(void*);
+          if(auto fn=host_.native_function?reinterpret_cast<Dirty>(host_.native_function("MarkProjectDirty")):nullptr)fn(instance->binding->project());
+          continue;
+        }
+        event.second["sessionId"]=instance->session_id;
+        for(auto& item:sessions_)if(item.second->jsfx && item.second->jsfx->instance==instance && !item.second->closing)
+          service_event(jsfx_service_,"jsfx",item.first,event.first,event.second);
+      }
+    } catch(const Error& error) {
+      instance->native_error=error.code;
+      if(error.code=="FX_STALE")instance->native.reset();
+    }
+      catch(const std::exception& error) {instance->native_error=error.what();}
+  }
+  for(auto it=jsfx_instances_.begin();it!=jsfx_instances_.end();) {
+    const bool used=std::any_of(sessions_.begin(),sessions_.end(),[&](const auto& item){return item.second->jsfx && item.second->jsfx->instance==*it;});
+    if(used)(*it)->last_used=Clock::now();
+    if(!used && (*it)->native && (*it)->native->idle() && Clock::now()-(*it)->last_used>=std::chrono::seconds(60))it=jsfx_instances_.erase(it);
+    else ++it;
+  }
+  if(jsfx_native_)jsfx_native_->collect();
   const auto now = Clock::now(), deadline = now + std::chrono::milliseconds(1);
   auto item = sessions_.upper_bound(jsfx_poll_cursor_);
   const auto host_revision = host_.event_revision ? host_.event_revision("fx-changed") : 0;
@@ -156,8 +280,8 @@ void Runtime::tick_jsfx() {
     auto& ui = *s.jsfx;
     if (s.closing || s.window->closed()) { release_jsfx(s); continue; }
     try {
-      ui.binding->resolve();
-      if (ui.editor.host && !ui.binding->editor_matches(ui.editor)) {
+      ui.instance->binding->resolve();
+      if (ui.editor.host && !ui.instance->binding->editor_matches(ui.editor)) {
         if (ui.editor.host->retain_during_switch()) { end_jsfx_edit(s); continue; }
         park_jsfx(s);
       }
@@ -170,22 +294,25 @@ void Runtime::tick_jsfx() {
       if (ui.presented && s.window->visible()) ui.editor.host->reveal();
       if (!ui.presented && now - ui.last_used > std::chrono::seconds(15))
         throw Error("FX_NOT_READY", "JSFX page did not acknowledge its host state within 15 seconds");
-      if (ui.editing >= 0 && now - ui.last_edit > std::chrono::seconds(30)) end_jsfx_edit(s);
+      if (!ui.editing.empty() && now - ui.last_edit > std::chrono::seconds(30)) end_jsfx_edit(s);
       if (ui.host_revision != host_revision) { ui.host_revision = host_revision; ui.next_poll = now; }
       if (!s.ready || !ui.initialized || !s.window->visible() || now < ui.next_poll || Clock::now() >= deadline || s.output_pending >= 8) continue;
       jsfx_poll_cursor_ = s.id;
-      if (!ui.scan) ui.count = ui.binding->parameter_count();
+      if (!ui.scan) ui.count = ui.instance->binding->parameter_count();
       for (int n = 0; ui.scan < ui.count && n < 32 && Clock::now() < deadline; ++n, ++ui.scan) {
-        auto value = ui.binding->parameter(ui.scan);
+        auto value = ui.instance->binding->parameter(ui.scan);
         if (ui.values.size() <= static_cast<size_t>(ui.scan)) { ui.values.push_back(value); ui.changes.push_back(value); }
         else if (ui.values[ui.scan] != value) { ui.values[ui.scan] = value; ui.changes.push_back(value); }
       }
       if (ui.scan >= ui.count) {
-        if (!ui.changes.empty()) service_event(jsfx_service_, "jsfx", s.id, "paramChanged", {{"parameters", ui.changes}, {"revision", ++ui.revision}, {"activation", ui.activation}});
+        if (!ui.changes.empty()) service_event(jsfx_service_, "jsfx", s.id, "paramsChanged", {{"sessionId", ui.instance->session_id}, {"parameters", ui.changes}, {"revision", std::to_string(++ui.instance->revision)}, {"activation", ui.activation}});
         ui.changes = Json::array(); ui.scan = 0; ui.next_poll = now + std::chrono::milliseconds(33);
       }
     } catch (const Error& error) {
-      if (error.code == "FX_STALE") { release_jsfx(s); s.closing = true; }
+      if (error.code == "FX_STALE") {
+        jsfx_instances_.erase(std::remove(jsfx_instances_.begin(), jsfx_instances_.end(), ui.instance), jsfx_instances_.end());
+        release_jsfx(s); s.closing = true;
+      }
       else fail(s, error.what());
     } catch (const std::exception& error) { fail(s, error.what()); }
   }
@@ -222,13 +349,33 @@ void Runtime::tick_jsfx() {
       for (auto& entry : sessions_) {
         auto& candidate = *entry.second;
         if (!candidate.jsfx || candidate.closing || candidate.window->closed() || candidate.jsfx->editor.host) continue;
-        auto& previous = *candidate.jsfx->binding;
+        auto& previous = *candidate.jsfx->instance->binding;
         if (previous.project() == binding->project() && previous.target() == binding->target() && previous.guid() == binding->guid() &&
             candidate.entry == association->entry) { cached = &candidate; break; }
       }
       if (cached) { attach_jsfx(*cached, editor); continue; }
       auto ui = std::make_shared<Session::Jsfx>();
-      ui->editor = editor; ui->binding = std::move(binding);
+      for (auto identity = jsfx_instances_.begin(); identity != jsfx_instances_.end();) {
+        try { (*identity)->binding->resolve(); }
+        catch (const Error&) { identity = jsfx_instances_.erase(identity); continue; }
+        auto& previous = *(*identity)->binding;
+        if (previous.project() == binding->project() && previous.target() == binding->target() && previous.guid() == binding->guid())
+          ui->instance = *identity;
+        ++identity;
+      }
+      if (!ui->instance) {
+        if (jsfx_instances_.size() >= 1024) throw Error("RESOURCE_LIMIT", "Too many JSFX instance sessions");
+        ui->instance = std::make_shared<JsfxInstance>(); ui->instance->binding = std::move(binding);
+        if(!association->native.is_null()) {
+          try {
+            const JsfxNativeDeclaration declaration(association->native);
+            if(!jsfx_native_)jsfx_native_=std::make_unique<JsfxNativeHub>(host_,streams_);
+            ui->instance->native=std::make_unique<JsfxControl>(jsfx_native_->create(declaration,*ui->instance->binding));
+          } catch(const Error& error) {ui->instance->native_error=error.code;log_(std::string("JSFX native channel: ")+error.what());}
+        }
+        jsfx_instances_.push_back(ui->instance);
+      }
+      ui->editor = editor;
       open_impl(association->entry.u8string(), {}, "", "", true, false, true, false, ui);
     } catch (const std::exception& error) {
       editor.host->restore(); jsfx_blocked_[editor.host->parent()] = editor.host;

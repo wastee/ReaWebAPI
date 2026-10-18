@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "JSFX_WebUI": {
+    "entry": "index.html",
+    "width": 680,
+    "height": 600,
+    "native": {
+      "protocolVersion": 1,
+      "gmem": "ReaWebAPI_Demo_v1",
+      "base": 0,
+      "transportParam": 1,
+      "dataStates": [
+        {
+          "id": "curve",
+          "schemaVersion": 1,
+          "schema": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "persistent": true,
+          "undo": true
+        }
+      ]
+    }
+  }
+}

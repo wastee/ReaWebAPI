@@ -544,14 +544,19 @@
           if (!active) return;
           try {
             const buffer = event.data, view = new DataView(buffer);
-            if (buffer.byteLength < 40 || view.getUint32(0, true) !== 0x01535752 ||
+            const version = descriptor.layoutVersion === 2 ? 2 : 1, header = version === 2 ? 80 : 40;
+            if (buffer.byteLength < header || view.getUint32(0, true) !== (version << 24 | 0x535752) ||
                 view.getUint8(4) !== ['', 'frame', 'audio', 'spectrum', 'meter', 'waveform', 'binary', 'midi'].indexOf(descriptor.kind) ||
-                Number(view.getBigUint64(32, true)) !== buffer.byteLength - 40 || buffer.byteLength - 40 > descriptor.maxBytes)
+                Number(view.getBigUint64(32, true)) !== buffer.byteLength - header || buffer.byteLength - header > descriptor.maxBytes)
               throw failure('UNSUPPORTED_FORMAT', 'Invalid stream packet');
             const sequence = view.getBigUint64(8, true), timestamp = view.getFloat64(16, true), dropped = view.getBigUint64(24, true);
-            const bytes = new Uint8Array(buffer, 40);
-            const data = descriptor.format === 'float32' ? new Float32Array(buffer, 40) : bytes;
-            const packet = Object.freeze({ sequence, frameId: sequence, timestamp, producerDropped: dropped, data, bytes });
+            const bytes = new Uint8Array(buffer, header);
+            const data = descriptor.format === 'float32' ? new Float32Array(buffer, header) : bytes;
+            const timing = version === 2 ? Object.freeze({ clockEpoch: view.getBigUint64(40, true),
+              firstSample: view.getBigUint64(48, true), sourceDropped: view.getBigUint64(56, true),
+              position: view.getFloat64(64, true), playState: view.getUint8(72), discontinuity: !!view.getUint8(73) }) : undefined;
+            const packet = Object.freeze({ sequence, frameId: sequence, timestamp, producerDropped: dropped, data, bytes,
+              ...(timing ? { timing } : {}) });
             last = packet;
             if (ordered) { if (queue.length < descriptor.capacity) queue.push(packet); else ++consumerDrops; }
             announce('data', packet);

@@ -61,7 +61,7 @@ std::optional<JsfxAssociation> jsfx_association(const fs::path& effects, const s
   auto source = fs::weakly_canonical(root / fs::u8path(ident), error);
   if (error || !beneath(root, source) || !fs::is_regular_file(source)) return {};
   auto sidecar = source; sidecar.replace_extension(".json");
-  if (!fs::is_regular_file(sidecar) || fs::file_size(sidecar) > 16384) return {};
+  if (!fs::is_regular_file(sidecar) || fs::file_size(sidecar) > 65536) return {};
   std::ifstream input(sidecar);
   auto data = Json::parse(input, nullptr, false);
   if (!data.is_object() || data.value("schema", Json()) != 1 || !data.contains("JSFX_WebUI")) return {};
@@ -72,7 +72,7 @@ std::optional<JsfxAssociation> jsfx_association(const fs::path& effects, const s
   const auto width = ui.value("width", Json(640)), height = ui.value("height", Json(420));
   if (!width.is_number_integer() || !height.is_number_integer() || width.get<double>() < 100 || width.get<double>() > 2048 ||
       height.get<double>() < 100 || height.get<double>() > 2048) return {};
-  return JsfxAssociation{entry, ident, width.get<int>(), height.get<int>()};
+  return JsfxAssociation{entry, ident, width.get<int>(), height.get<int>(), ui.value("native", Json())};
 }
 JsfxBinding::JsfxBinding(Host& host, void* track, int fx)
   : JsfxBinding(host, JsfxTarget{track, nullptr, bool(fx & 0x1000000)}, fx) {}

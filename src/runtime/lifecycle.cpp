@@ -3,6 +3,7 @@
 namespace reaweb {
 void Runtime::navigate(Session& session) {
   end_jsfx_edit(session);
+  if(session.jsfx && session.jsfx->instance->native)session.jsfx->instance->native->close_window(session.id);
   if (session.jsfx) {
     session.jsfx->initialized = session.jsfx->presented = false;
     ++session.jsfx->activation;

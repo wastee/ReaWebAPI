@@ -7,6 +7,7 @@ struct JsfxAssociation {
   fs::path entry;
   std::string ident;
   int width = 640, height = 420;
+  Json native;
 };
 std::optional<JsfxAssociation> jsfx_association(const fs::path& effects, const std::string& ident);
 

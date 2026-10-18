@@ -16,6 +16,8 @@ std::string waiting_on;
 bool defer_next_presentation = false;
 bool fail_next_presentation = false;
 void* jsfx_floating = nullptr;
+double jsfx_values[2] = {.25, .5};
+int jsfx_writes = 0, jsfx_ends = 0, jsfx_fail_param = -1;
 struct FakeWindow : Window {
   WindowOptions options;
   bool is_closed = false;
@@ -190,11 +192,25 @@ int main() {
       std::ofstream(directory / "test.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html"}})";
       std::ofstream(directory / "index.html") << "<html></html>";
       auto jsfx_host = host;
+      int jsfx_undo_begin = 0, jsfx_undo_end = 0;
+      jsfx_host.begin_undo = [&](void*) { ++jsfx_undo_begin; };
+      jsfx_host.end_undo = [&](void*, const std::string&) { ++jsfx_undo_end; };
       jsfx_host.native_function = [](const char* name) -> void* {
         if (!std::strcmp(name, "TrackFX_GetCount")) return reinterpret_cast<void*>(+[](void*) { return 1; });
         if (!std::strcmp(name, "TrackFX_GetFloatingWindow")) return reinterpret_cast<void*>(+[](void*, int) -> void* { return jsfx_floating; });
         if (!std::strcmp(name, "TrackFX_GetFXGUID")) return reinterpret_cast<void*>(+[](void*, int) -> Guid* { static Guid guid{42}; return &guid; });
-        if (!std::strcmp(name, "TrackFX_GetNumParams")) return reinterpret_cast<void*>(+[](void*, int) { return 0; });
+        if (!std::strcmp(name, "TrackFX_GetNumParams")) return reinterpret_cast<void*>(+[](void*, int) { return 2; });
+        if (!std::strcmp(name, "TrackFX_GetParamEx")) return reinterpret_cast<void*>(+[](void*, int, int p, double* lo, double* hi, double* mid) {
+          *lo = 0; *hi = 1; *mid = .5; return jsfx_values[p];
+        });
+        if (!std::strcmp(name, "TrackFX_GetParamNormalized")) return reinterpret_cast<void*>(+[](void*, int, int p) { return jsfx_values[p]; });
+        if (!std::strcmp(name, "TrackFX_GetParamName") || !std::strcmp(name, "TrackFX_GetParamIdent") || !std::strcmp(name, "TrackFX_GetFormattedParamValue"))
+          return reinterpret_cast<void*>(+[](void*, int, int, char* out, int) { std::strcpy(out, "value"); return true; });
+        if (!std::strcmp(name, "TrackFX_GetParameterStepSizes")) return reinterpret_cast<void*>(+[](void*, int, int, double*, double*, double*, bool*) { return false; });
+        if (!std::strcmp(name, "TrackFX_SetParamNormalized")) return reinterpret_cast<void*>(+[](void*, int, int p, double v) {
+          if (p == jsfx_fail_param) return false; ++jsfx_writes; jsfx_values[p] = v; return true;
+        });
+        if (!std::strcmp(name, "TrackFX_EndParamEdit")) return reinterpret_cast<void*>(+[](void*, int, int) { ++jsfx_ends; return true; });
         if (!std::strcmp(name, "TrackFX_GetNamedConfigParm")) return reinterpret_cast<void*>(+[](void*, int, const char* key, char* out, int) {
           const char* value = !std::strcmp(key, "fx_type") ? "JS" : !std::strcmp(key, "fx_ident") ? "Test/test.jsfx" : nullptr;
           if (!value) return false; std::strcpy(out, value); return true;
@@ -211,9 +227,37 @@ int main() {
       const auto call = [&](const char* method, Json payload = Json::object()) {
         return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
       };
-      const auto first = call("getState")["result"];
-      CHECK(call("present", {{"activation", first["activation"]}})["result"] == true);
+      const auto capability = call("getCapabilities")["result"];
+      CHECK(capability["ok"] == true && capability["data"]["status"] == "parameterOnly");
+      const auto session_id = capability["sessionId"];
+      CHECK(call("getState", {{"sessionId", session_id}})["result"]["error"]["code"] == "UNKNOWN_METHOD");
+      CHECK(call("getParamState", {{"sessionId", "stale"}})["result"]["error"]["code"] == "STALE_SESSION");
+      CHECK(call("openStream", {{"sessionId", session_id}, {"id", "spectrum"}})["result"]["error"]["code"] == "UNSUPPORTED");
+      const auto first = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", first["activation"]}})["result"]["data"]["presented"] == true);
       CHECK(window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == true);
+      const Json context{{"sessionId", session_id}, {"activation", first["activation"]}};
+      const auto edit = [&](const char* method, Json payload = Json::object()) { payload.update(context); return call(method, payload)["result"]; };
+      auto group = edit("beginParamEditGroup", {{"indices", {0, 1}}})["data"]["gestureId"];
+      CHECK(edit("beginParamEdit", {{"index", 0}})["error"]["code"] == "GESTURE_BUSY");
+      CHECK(edit("setParams", {{"gestureId", group}, {"values", {{{"index", 0}, {"normalized", .1}}, {{"index", 1}, {"normalized", 2}}}}})["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(jsfx_writes == 0);
+      CHECK(edit("setParams", {{"gestureId", group}, {"values", {{{"index", 0}, {"normalized", .1}}, {{"index", 1}, {"normalized", .9}}}}})["ok"] == true);
+      CHECK(jsfx_values[0] == .1 && jsfx_values[1] == .9);
+      CHECK(edit("endParamEditGroup", {{"gestureId", group}})["data"]["ended"] == true);
+      CHECK(jsfx_undo_begin == 1 && jsfx_undo_end == 1 && jsfx_ends == 2);
+      CHECK(edit("setParam", {{"index", 0}, {"normalized", .3}})["data"]["parameter"]["normalized"] == .3);
+      CHECK(jsfx_undo_begin == 2 && jsfx_undo_end == 2);
+      CHECK(edit("setParam", {{"index", 0}, {"value", .4}, {"normalized", true}})["error"]["code"] == "INVALID_ARGUMENT");
+      group = edit("beginParamEditGroup", {{"indices", {0, 1}}})["data"]["gestureId"];
+      jsfx_fail_param = 1;
+      const auto partial = edit("setParams", {{"gestureId", group}, {"values", {{{"index", 0}, {"normalized", .6}}, {{"index", 1}, {"normalized", .2}}}}});
+      CHECK(partial["error"]["code"] == "PARTIAL_WRITE" && partial["error"]["details"]["applied"] == Json::array({0}));
+      CHECK(jsfx_values[0] == .6 && jsfx_values[1] == .9 && jsfx_undo_begin == 3 && jsfx_undo_end == 3);
+      jsfx_fail_param = -1;
+      CHECK(edit("endParamEditGroup", {{"gestureId", group}})["data"]["ended"] == false);
+      CHECK(result(runtime, *window, window->send("ReaWeb_ServiceSend", {"jsfx", "setParam", context}))["error"]["code"] == "INVALID_ARGUMENT");
+
       int reload_hello = 0;
       window->on_hide = [&] {
         window->document = "jsfx-reloaded";
@@ -223,29 +267,30 @@ int main() {
       CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == false);
       result(runtime, *window, reload_hello);
       CHECK(runtime.is_ready(id));
-      CHECK(call("present", {{"activation", first["activation"]}})["result"] == false);
-      const auto fresh = call("getState")["result"];
-      CHECK(fresh["activation"] > first["activation"] && fresh["revision"] > first["revision"]);
-      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == true);
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", first["activation"]}})["result"]["data"]["presented"] == false);
+      const auto fresh = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
+      CHECK(fresh["activation"] > first["activation"] && std::stoull(fresh["revision"].get<std::string>()) > std::stoull(first["revision"].get<std::string>()));
+      CHECK(fresh["sessionId"] == session_id);
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", fresh["activation"]}})["result"]["data"]["presented"] == true);
       CHECK(window->visible());
       auto floating_editor = std::make_shared<Editor>();
       jsfx_floating = floating_editor.get();
       discovery->editor = {&track, 0, true, jsfx_floating, floating_editor}; discovery->found = false;
       until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
       CHECK(windows.size() == before + 1 && floating_editor->size_requests == 1);
-      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == false);
-      const auto floating_state = call("getState")["result"];
-      CHECK(call("present", {{"activation", floating_state["activation"]}})["result"] == true);
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", fresh["activation"]}})["result"]["data"]["presented"] == false);
+      const auto floating_state = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", floating_state["activation"]}})["result"]["data"]["presented"] == true);
       jsfx_floating = nullptr; floating_editor->alive = false;
       discovery->editor = {&track, 0, false, editor.get(), editor}; discovery->found = false;
       until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
       CHECK(windows.size() == before + 1 && editor->size_requests == 2);
-      CHECK(call("present", {{"activation", floating_state["activation"]}})["result"] == false);
-      const auto returned = call("getState")["result"];
-      CHECK(call("present", {{"activation", returned["activation"]}})["result"] == true);
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", floating_state["activation"]}})["result"]["data"]["presented"] == false);
+      const auto returned = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", returned["activation"]}})["result"]["data"]["presented"] == true);
       editor->alive = false; runtime.tick();
       CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["cached"] == true);
-      CHECK(call("present", {{"activation", fresh["activation"]}})["result"] == false);
+      CHECK(call("present", {{"sessionId", session_id}, {"activation", fresh["activation"]}})["result"]["data"]["presented"] == false);
     }
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
     {

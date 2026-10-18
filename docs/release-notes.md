@@ -2,18 +2,20 @@
 
 ## English
 
-- Prevent stale JSFX parameter replies and snapshots from overwriting newer host values.
-- Reset JSFX initialization, presentation and timeout state on reload, and restore native controls after failed initialization.
-- Extend JSFX Web UI to take, input and monitoring FX and nested containers with GUID validation and verified editor ownership.
-- Fix JSFX Web UI sizing and presentation in containers and floating/chain transitions, including duplicate pages and macOS position drift. Retain the page when list selection clears and prevent native-control and small-window flashes when opening or floating FX.
-- Preserve the native FX toolbar layout and input/output meters. Fit Web UI between the meters, preserve the native bottom inset and respect `options:no_meter`.
-- Correct gesture rendering and successive-edit handling, and preserve native range pointer tracking on macOS.
+- Unify the unreleased JSFX API under `params/dataState/streams/commands/operations/resources`, with instance sessions, capability negotiation and structured errors.
+- Add coalesced parameter-write results and grouped parameter gestures with one Undo unit.
+- Add an opt-in EEL SDK for streams, structured state and commands, with read-only instance handshake and bounded, idle-aware synchronization.
+- Add reliable byte/float32 resource transfers with checksums, revision conflicts, atomic DSP commit, serialization and Undo/Redo.
+- Add document-owned continuous commands and MIDI note cleanup on blur, deactivation and disposal.
+- Fix Windows JSFX WebView first-frame stalls and spurious parameter-edit notifications when hiding native controls.
+- Add three JSFX examples and matching English/Chinese integration documentation.
 
 ## 简体中文
 
-- 修复 JSFX 参数旧回复和旧快照覆盖较新宿主值的问题。
-- 修复 JSFX 重载时的初始化、显示和超时状态重置，初始化失败后恢复原生控件。
-- 将 JSFX Web UI 扩展至 Take、输入、监听 FX 和嵌套容器，校验 GUID 与编辑器归属。
-- 修复容器及浮动、效果链切换中的 Web UI 显示和尺寸，包括重复页面与 macOS 位置漂移。取消列表选中时保留页面，修复打开及浮动 FX 时旧控件和原生小窗口闪现。
-- 保留原生 FX 标准栏布局及输入、输出电平表，Web UI 位于两表之间，保留原生底部间隔并遵循 `options:no_meter`。
-- 修正手势渲染和连续编辑处理，并保留 macOS 原生滑块的指针跟踪。
+- 将未公开的 JSFX API 统一为 `params/dataState/streams/commands/operations/resources`，提供实例会话、能力协商和结构化错误。
+- 参数合并写入返回明确结果，参数组手势共用一次撤销。
+- 新增可选 EEL SDK，支持流、结构化状态及命令，实例握手不产生撤销或工程修改，同步操作有界并减少空闲轮询。
+- 新增可靠字节与 float32 资源传输，包含校验和、修订冲突、DSP 原子提交、序列化及撤销重做。
+- 新增文档持有的持续命令及 MIDI 音符管理，在失焦、失活和销毁时释放。
+- 修复 Windows JSFX WebView 首帧合成停顿，以及隐藏原生控件时产生的多余参数编辑通知。
+- 新增三个 JSFX 示例及配套中英文接入文档。

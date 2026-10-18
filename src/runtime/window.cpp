@@ -49,7 +49,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
   if (sessions_.size() >= 32) throw Error("WINDOW_LIMIT", "At most 32 ReaWebAPI windows may be open");
   if (next_id_ == std::numeric_limits<int>::max()) throw Error("WINDOW_LIMIT", "Window id space exhausted");
-  const auto app_id = jsfx && !fs::exists(entry.parent_path() / "app.json") ? "jsfx-" + state_key(jsfx->binding->ident(), 0) :
+  const auto app_id = jsfx && !fs::exists(entry.parent_path() / "app.json") ? "jsfx-" + state_key(jsfx->instance->binding->ident(), 0) :
     dev_url.empty() ? app_identity(entry.parent_path(), launcher_source) : "dev-" + state_key(dev_url, 0);
   const auto profile = resource_ / "ReaWebAPI" / "Apps" / app_id;
   const auto app_key = (dev_url.empty() ? "app:" : "dev:") + app_id;
@@ -168,7 +168,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       if (auto s = weak.lock()) {
         if (s->jsfx) {
           bool active = false;
-          try { active = s->jsfx->binding->editor_matches(s->jsfx->editor); } catch (...) {}
+          try { active = s->jsfx->instance->binding->editor_matches(s->jsfx->editor); } catch (...) {}
           if (s->closing || !active) { release_jsfx(*s); s->closing = true; return; }
         }
         fail(*s, error);

@@ -38,7 +38,7 @@ Json Runtime::diagnostics(int id) const {
   result["streams"] = streams_.info();
   result["audioCapture"] = producers_.diagnostics();
   if (s.jsfx) result["jsfx"] = {{"cached", !s.jsfx->editor.host}, {"activation", s.jsfx->activation},
-    {"presented", s.jsfx->presented}, {"fxGuid", s.jsfx->binding->guid()}, {"fxIndex", s.jsfx->editor.fx},
+    {"presented", s.jsfx->presented}, {"fxGuid", s.jsfx->instance->binding->guid()}, {"fxIndex", s.jsfx->editor.fx},
     {"presentationMs", s.jsfx->presentation_ms}};
   result.update({{"version", REAWEB_VERSION}, {"protocol", 1}, {"window", window_state(s)},
     {"stage", s.closing ? "closing" : s.ready ? "ready" : "loading"}, {"documentGeneration", s.generation},

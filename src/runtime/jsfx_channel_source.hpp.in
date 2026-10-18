@@ -1,0 +1,4 @@
+#pragma once
+namespace reaweb {
+inline constexpr char jsfx_bridge_source[] = R"rwajsfx(@REAWEB_JSFX_BRIDGE_SOURCE@)rwajsfx";
+}

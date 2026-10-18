@@ -33,6 +33,12 @@ int main() {
     for (int i = 0; i < 3; ++i) { CHECK(audio.consume(packet)); CHECK(packet.sequence == uint64_t(i)); }
     CHECK(!audio.consume(packet)); CHECK(audio.publish(pcm, sizeof(pcm), 4, 0) == 0);
     CHECK(audio.consume(packet)); CHECK(packet.sequence == 4 && packet.dropped == 1);
+    const StreamBuffer::Timing timing{7,9007199254740993ULL,11,0.25,1,true};
+    CHECK(audio.publish(pcm,sizeof(pcm),5,0,&timing)==0);
+    CHECK(audio.consume(packet)&&packet.timing&&packet.timing->first_sample==9007199254740993ULL);
+    CHECK(packet.timing->clock_epoch==7&&packet.timing->source_dropped==11&&packet.timing->discontinuity);
+    CHECK(audio.publish(pcm,sizeof(pcm),6,0)==0);
+    CHECK(audio.consume(packet)&&!packet.timing);
     StreamHub hub; uint64_t handle = 0;
     CHECK(hub.create(REAWEB_AUDIO, "test.audio", &desc, &handle) == 0);
     uint64_t duplicate = 0; CHECK(hub.create(REAWEB_AUDIO, "test.audio", &desc, &duplicate) == REAWEB_SERVICE_EXISTS);
@@ -47,6 +53,17 @@ int main() {
     CHECK(hub.publish(REAWEB_AUDIO, handle, pcm, sizeof(pcm), 3, 0) == REAWEB_STREAM_CLOSED);
     CHECK(hub.create(REAWEB_AUDIO, "test.audio", &desc, &duplicate) == 0 && duplicate != handle);
     CHECK(hub.close(handle) == REAWEB_STREAM_CLOSED); CHECK(hub.info()["streams"].size() == 1);
+    uint64_t protected_handle=0;
+    CHECK(hub.create_jsfx(REAWEB_AUDIO,"test.jsfx",&desc,&protected_handle,7,3,{{"sessionId","opaque"},{"id","output"}})==0);
+    const auto rejected=[&](int window,uint64_t generation,bool external) {
+      try { if(external)hub.attach_external("test.jsfx",42);else hub.attach("test.jsfx",window,generation,"reaweb://same"); }
+      catch(const Error& e){return e.code=="FX_UNBOUND";}
+      return false;
+    };
+    CHECK(rejected(8,3,false)&&rejected(7,2,false)&&rejected(0,0,true));
+    const auto own=hub.attach("test.jsfx",7,3,"reaweb://same");
+    CHECK(own["layoutVersion"]==2&&own["jsfx"]["sessionId"]=="opaque");
+    hub.detach_window(7);CHECK(hub.consumers(protected_handle)==0);CHECK(hub.close(protected_handle)==0);
     std::cout << "Native stream buffers, concurrency, policies and lifetime passed\n";
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }
