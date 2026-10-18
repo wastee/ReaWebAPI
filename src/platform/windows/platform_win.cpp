@@ -612,7 +612,9 @@ public:
         SetWindowPlacement(hwnd_, &placement);
       }
       ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-      if ((options_.hosted || options_.frameless || options_.transparent) && controller_) controller_->put_IsVisible(TRUE);
+      // A controller created under a hidden HWND needs explicit first presentation,
+      // even when the cached visibility is already true.
+      if (controller_) { controller_->put_IsVisible(TRUE); visible_ = true; }
       RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
       if (startup_.focus_requested() && GetForegroundWindow() == startup_foreground_) {
         if (options_.on_present) options_.on_present();

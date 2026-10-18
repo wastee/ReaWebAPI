@@ -174,9 +174,9 @@ Run `python tests/hidden_start_smoke.py --reaper <executable> --extension <binar
 
 During the hold period, switch to another application. Verify that Show leaves it active and Focus returns to REAPER with the WebView focused.
 
-On Windows, build `windows_startup` and run `windows_startup 20 --hidden` for native visibility/focus checks. Keep real screen recordings and frame inspection separate from API/state assertions. Windows 10 and Windows 11 require separate host runs. Linux requires X11/XWayland, and input-driven resize tests require an isolated display.
+On Windows, build `windows_startup` and run `windows_startup 20 --hidden` for framed/frameless hidden creation, first Show/Focus desktop pixels, repeated Hide/Show, visible/hidden resize and early-close races. The first Show must paint without a second visibility toggle or forced focus. Run the default, `--dock` and `--undock-pending` modes for normal visible startup and docking regression. Windows 10 and Windows 11 require separate host runs. Linux requires X11/XWayland, and input-driven resize tests require an isolated display.
 
-On macOS, build `macos_startup` in `build-arm64`, then run `STARTUP_VARIANTS=4 STARTUP_RUNS=20 python3 tests/macos_startup.py`. It uses cold isolated profiles to check native hidden creation, background JS, Show without focus, Focus, Hide and Close before initialization. A logged-in graphical session is required.
+On macOS, build `macos_startup` in `build-arm64`, then run `STARTUP_VARIANTS=4,6 STARTUP_RUNS=20 python3 tests/macos_startup.py`. It uses cold isolated profiles to check framed/frameless hidden creation, background JS, first Show pixels without focus, Focus, repeated Hide/Show, resize and Close before initialization. Variants `0,1,2,3,5` check normal visible startup. A logged-in graphical session and screen-capture permission are required.
 
 ## Transparent floating windows
 

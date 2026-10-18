@@ -54,26 +54,43 @@ int main(int argc, char** argv) {
         SetCursorPos(saved.x, saved.y);
       }
       CHECK(GetForegroundWindow() == host);
-      for (int run = 0; run < count; ++run) {
-        const auto path = root / ("hidden-" + std::to_string(run)); fs::create_directories(path);
+      for (bool frameless : {false, true}) for (bool focus_first : {false, true}) for (int run = 0; run < count; ++run) {
+        const auto path = root / ("hidden-" + std::to_string(frameless) + "-" + std::to_string(focus_first) + "-" + std::to_string(run)); fs::create_directories(path);
         const auto entry = path / "index.html";
-        std::ofstream(entry) << "<!doctype html><style>html{background:#182838}</style><p>Preloaded</p>";
+        std::ofstream(entry) << "<!doctype html><style>html{background:#182838}body{margin:0}"
+          "#marker{width:100px;height:100px;background:#00ff00}</style><div id=marker></div>";
         auto platform = make_platform(path / "profile");
         bool ready = false;
         std::string error;
         WindowOptions options;
         options.entry = entry; options.title = "Hidden acceptance"; options.parent = host; options.hidden = true;
-        options.script = "window.chrome.webview.postMessage('ui-ready');";
+        options.frameless = frameless;
+        options.script = "addEventListener('DOMContentLoaded',()=>chrome.webview.postMessage('ui-ready'));";
         options.on_message = [&](std::string message) { if (message == "ui-ready") ready = true; };
         options.on_error = [&](std::string message) { error = std::move(message); };
         SetForegroundWindow(host); SetFocus(host);
         auto window = platform->open(std::move(options));
         const auto hwnd = static_cast<HWND>(window->native_handle());
+        SetWindowPos(hwnd, HWND_TOPMOST, 100, 100, 600, 420, SWP_NOACTIVATE);
         const auto pump = [&] {
           MSG msg{};
           while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
           platform->pump(); window->tick();
           CHECK(error.empty());
+        };
+        const auto painted = [&] {
+          const auto deadline = GetTickCount64() + 5000;
+          do {
+            pump(); DwmFlush();
+            POINT origin{}; ClientToScreen(hwnd, &origin);
+            const auto dc = GetDC(nullptr);
+            const auto color = GetPixel(dc, origin.x + 40, origin.y + 40);
+            ReleaseDC(nullptr, dc);
+            if (GetGValue(color) > 180 && int(GetGValue(color)) - GetRValue(color) > 70 &&
+                int(GetGValue(color)) - GetBValue(color) > 70) return;
+            Sleep(2);
+          } while (GetTickCount64() < deadline);
+          throw std::runtime_error("Hidden window did not paint page content, frameless=" + std::to_string(frameless));
         };
         const auto started = GetTickCount64();
         while (!ready || GetTickCount64() - started < 1000) {
@@ -81,19 +98,29 @@ int main(int argc, char** argv) {
           CHECK(GetForegroundWindow() == host);
           CHECK(GetTickCount64() - started < 20000); Sleep(2);
         }
-        window->show(); CHECK(window->visible() && GetForegroundWindow() == host);
+        if (focus_first) window->focus(); else window->show();
+        CHECK(window->visible() && GetForegroundWindow() == (focus_first ? hwnd : host));
+        painted(); CHECK(GetForegroundWindow() == (focus_first ? hwnd : host));
         window->focus(); CHECK(window->visible() && GetForegroundWindow() == hwnd);
-        window->set_visible(false); CHECK(!window->visible());
-        window->focus(); CHECK(window->visible());
+        painted();
+        for (int cycle = 0; cycle < 3; ++cycle) {
+          window->set_visible(false); pump(); CHECK(!window->visible());
+          SetWindowPos(hwnd, nullptr, 0, 0, 600 + cycle * 40, 420 + cycle * 30, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+          if (cycle == 1) window->focus(); else window->show();
+          CHECK(window->visible()); painted();
+          SetWindowPos(hwnd, nullptr, 0, 0, 640 + cycle * 40, 450 + cycle * 30, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+          painted();
+        }
         window->set_visible(false); window->cancel_pending_show(); window->show(); pump(); CHECK(!window->visible());
         window.reset(); platform.reset(); CHECK(!IsWindow(hwnd));
       }
-      for (int intent = 0; intent < 3; ++intent) {
-        const auto path = root / ("early-" + std::to_string(intent)); fs::create_directories(path);
+      for (bool frameless : {false, true}) for (int intent = 0; intent < 3; ++intent) {
+        const auto path = root / ("early-" + std::to_string(frameless) + "-" + std::to_string(intent)); fs::create_directories(path);
         const auto entry = path / "index.html"; std::ofstream(entry) << "<!doctype html><p>Early intent</p>";
         auto platform = make_platform(path / "profile");
         bool ready = false;
         WindowOptions options; options.entry = entry; options.hidden = true; options.parent = host;
+        options.frameless = frameless;
         options.script = "window.chrome.webview.postMessage('ready');";
         options.on_message = [&](std::string message) { ready |= message == "ready"; };
         options.on_error = [](std::string message) { throw std::runtime_error(message); };
@@ -115,13 +142,13 @@ int main(int argc, char** argv) {
           CHECK(GetTickCount64() - started < 20000); Sleep(2);
         }
       }
-      std::cout << "PASS: hidden native creation, JS preloading, no mapping/focus, Show/Focus and close, cold profiles=" << count << ", early-intent races=3\n";
+      std::cout << "PASS: framed/frameless hidden creation, JS preloading, first Show/Focus pixels, repeated Hide/Show, resize and close, cold profiles=" << count * 4 << ", early-intent races=6\n";
       return 0;
     }
     const bool undock_pending = argc > 2 && std::string(argv[2]) == "--undock-pending";
     const bool initially_docked = undock_pending || (argc > 2 && std::string(argv[2]) == "--dock");
     int captures = 0;
-    for (int variant = 0; variant < 4; ++variant) for (int run = 0; run < count; ++run) {
+    for (int variant = 0; variant < 5; ++variant) for (int run = 0; run < count; ++run) {
       const auto path = root / (std::to_string(variant) + "-" + std::to_string(run)); fs::create_directories(path);
       const auto entry = path / "index.html";
       const auto background = variant == 1 ? "#e8d8c8" : variant == 2 ? "linear-gradient(120deg,#182838,#486878)" : "#182838";
@@ -131,6 +158,7 @@ int main(int argc, char** argv) {
       std::string error;
       WindowOptions options;
       options.entry = entry; options.title = "Startup acceptance"; options.parent = host;
+      options.frameless = variant == 4;
       if (variant == 3) options.url = "http://127.0.0.1:" + std::to_string(port) + "/";
       options.on_message = [](std::string) {};
       options.on_error = [&](std::string message) { std::cerr << message << '\n'; error = std::move(message); };
@@ -192,14 +220,14 @@ int main(int argc, char** argv) {
       }
       CHECK(error.empty());
       if (docked) window->restore_floating();
-      check_floating_frame(hwnd);
+      if (variant != 4) check_floating_frame(hwnd);
       for (int cycle = 0; cycle < 3; ++cycle) {
         dock(); window->tick();
         window->restore_floating(); window->tick();
-        check_floating_frame(hwnd);
+        if (variant != 4) check_floating_frame(hwnd);
       }
       std::cout << "variant=" << variant << " run=" << run << " samples=" << samples << '\n';
     }
-    std::cout << "PASS: native first-visible frames and dock/float frame restoration, cold profiles=" << count*4 << " captures=" << captures << '\n';
+    std::cout << "PASS: native first-visible frames and dock/float frame restoration, cold profiles=" << count*5 << " captures=" << captures << '\n';
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
