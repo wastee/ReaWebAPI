@@ -669,22 +669,38 @@ LRESULT editor_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   };
   const auto fill_native_frame = [&](HDC dc) {
     if (!dc) return;
+    RECT client{}; GetClientRect(window, &client);
     const auto content = editor_content(window);
 #ifdef _WIN32
-    // Keep the host's themed background, excluding the WebUI content area.
     const auto saved = SaveDC(dc);
     if (!saved) return;
-    ExcludeClipRect(dc, content.left, content.top, content.right, content.bottom);
-    DefSubclassProc(window, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0);
-    RestoreDC(dc, saved);
+    // JSFX may leave WM_ERASEBKGND unpainted. Use its current dialog brush
+    // explicitly, including REAPER's dark-mode override of the system color.
+    auto brush = reinterpret_cast<HBRUSH>(SendMessageW(window, WM_CTLCOLORDLG,
+      reinterpret_cast<WPARAM>(dc), reinterpret_cast<LPARAM>(window)));
+    LOGBRUSH native{};
+    if (GetObjectW(brush, sizeof(native), &native) != sizeof(native) || native.lbStyle == BS_NULL)
+      brush = GetSysColorBrush(COLOR_BTNFACE);
+    // An erase DC need not clip children. Preserve the native toolbar/meters.
+    for (auto child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+      if (!(GetWindowLong(child, GWL_STYLE) & WS_VISIBLE) ||
+          (!host_meter_control(window, child) && !host_toolbar_control(window, child, content.top))) continue;
+      RECT rect{}; GetWindowRect(child, &rect);
+      MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&rect), 2);
+      ExcludeClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
+    }
 #else
-    RECT client{}; GetClientRect(window, &client);
     auto brush = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+#endif
     for (const auto& rect : {RECT{0, 0, client.right, content.top},
           RECT{0, content.top, content.left, client.bottom},
           RECT{content.right, content.top, client.right, client.bottom},
           RECT{content.left, content.bottom, content.right, client.bottom}})
       FillRect(dc, &rect, brush);
+#ifdef _WIN32
+    // The dialog owns the returned brush; do not delete or cache it.
+    RestoreDC(dc, saved);
+#else
     DeleteObject(brush);
 #endif
   };
@@ -727,6 +743,8 @@ LRESULT editor_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
 #ifdef _WIN32
   const auto result = DefSubclassProc(window, message, wp, lp);
   if (message == WM_NCDESTROY) { RemoveWindowSubclass(window, editor_proc, 1); attachments.erase(window); }
+  if (state->alive && state->prepared && (message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE))
+    InvalidateRect(window, nullptr, TRUE);
 #else
   const auto result = state->original(window, message, wp, lp);
   if (message == WM_DESTROY) attachments.erase(window);
