@@ -24,6 +24,8 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 
 Windows WebViews respect **Hide pointer while typing** and restore the pointer when it moves over REAPER's native windows. See [pointer behavior](docs/frontend.md#mouse-pointer-while-typing).
 
+For JSFX Web UI in Windows FX chains, use v0.3.8.28 or later to avoid REAPER hangs when switching window focus.
+
 ## Download and install
 
 Download a package matching your **REAPER process architecture** from [Releases](https://github.com/zaibuyidao/ReaWebAPI/releases).

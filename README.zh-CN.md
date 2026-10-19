@@ -25,6 +25,8 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 
 Windows WebView 遵循 **Hide pointer while typing** 设置，输入时隐藏光标，在 REAPER 原生窗口上移动鼠标后恢复。参见[光标行为](docs/frontend.zh-CN.md#文本输入时的鼠标光标)。
 
+Windows FX 链中的 JSFX Web UI 请使用 v0.3.8.28 或更高版本，避免切换窗口焦点时 REAPER 无响应。
+
 ## 下载与安装
 
 从 [Releases](https://github.com/zaibuyidao/ReaWebAPI/releases) 下载与 **REAPER 进程架构**一致的安装包。

@@ -7,6 +7,10 @@
 - Run `python tests/windows_cursor_reaper.py --reaper <reaper.exe> --extension <binary> --output <new-directory>` for 20 typing/movement cycles in real Arrange View. Use `--baseline` with an affected binary to verify the stuck-hidden reproduction.
 - On macOS and Linux, verify text input and pointer movement between a WebView and Arrange View, including docked/floating windows. These backends retain native pointer handling.
 
+## Windows JSFX focus
+
+Run `python tests/windows_jsfx_focus_reaper.py --reaper <reaper.exe> --extension <binary> --output <new-short-path>` on an unlocked Windows desktop. The isolated profile checks parameter readback, repeated focus transitions between WebView2 and REAPER, floating/chain transitions and editor close/reopen. The host must continue processing deferred commands after every focus change. The runner closes its test process on completion and writes `result.json`. This interactive test is excluded from `ctest`.
+
 ## External Clients
 
 - Confirm the server is disabled by default and existing WebView, Mirror and Lua Backend tools work. Enable **Preferences → Plug-ins → ReaWebAPI → External Clients**, apply, and use the [standalone browser Demo](../web/external-client/README.md) with the copied token.

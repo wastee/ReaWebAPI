@@ -81,6 +81,8 @@ The page replaces only the associated JSFX content area. Presets, Param, routing
 
 Windows uses WebView2, macOS uses WKWebView, and Linux uses the SWELL/X11 WebKit embedding path. The adapter targets REAPER 7.82 and the REAPER 7 layout family. Window recognition involves host-private controls. Unrecognized structures retain the native editor. Reopen after initialization failure to retry. The module does not convert `@gfx` code.
 
+On Windows, use v0.3.8.28 or later for FX-chain WebViews to participate correctly in native dialog focus navigation. Associated JSFX and page code need no changes.
+
 ## Optional DSP capabilities
 
 Install the matching `SDK/jsfx/reaweb_jsfx.inc` beside the effect. The SDK archive includes three self-contained examples under `SDK/jsfx/examples`: `analyzer`, `curve` and `resource`. Copy an example directory beneath REAPER's `Effects` directory. The analyzer shows raw PCM, min/max waveform and a Hann-window spectrum. Its test signal affects telemetry only. The curve example uses CAS and native Undo. The resource example imports/exports an embedded byte asset and invokes a DSP command.

@@ -212,7 +212,7 @@ void ChainLayout::cover(HWND editor, std::optional<JsfxEditorDiscovery::Size> si
   if (size) request_size(size->width, size->height);
   if (!backdrop) {
 #ifdef _WIN32
-    backdrop = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0,
+    backdrop = CreateWindowExW(WS_EX_CONTROLPARENT, L"STATIC", L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0,
       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!backdrop) return;
     if (!SetWindowSubclass(backdrop, backdrop_proc, 1, reinterpret_cast<DWORD_PTR>(this))) {

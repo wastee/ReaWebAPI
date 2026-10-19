@@ -81,6 +81,8 @@ const dispose = await jsfx.params.onChange(render);
 
 Windows 使用 WebView2，macOS 使用 WKWebView，Linux 使用 SWELL/X11 WebKit 嵌入路径。适配目标为 REAPER 7.82 及 REAPER 7 窗口布局。窗口结构识别涉及宿主内部控件，未识别结构保留原生编辑器。失败后可重新打开重试。模块不自动转换 `@gfx` 代码。
 
+Windows 请使用 v0.3.8.28 或更高版本，使 FX 链中的 WebView 正确参与原生对话框焦点导航。关联的 JSFX 和页面代码无需修改。
+
 ## 可选 DSP 能力
 
 将配套 `SDK/jsfx/reaweb_jsfx.inc` 放在插件旁。SDK 的 `SDK/jsfx/examples` 提供三个独立示例：`analyzer`、`curve`、`resource`。将示例目录复制到 REAPER 的 `Effects` 目录即可加载。分析器展示原始 PCM、min/max 波形和 Hann 窗频谱，测试信号仅用于遥测，不改变音频输出。曲线示例包含 CAS 与原生撤销，资源示例包含内嵌字节资源导入导出和 DSP 命令。

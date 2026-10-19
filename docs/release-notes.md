@@ -2,8 +2,8 @@
 
 ## English
 
-- Fix blank content on the first Show or Focus of Windows framed windows created with `hidden:true`.
+- Fix a Windows REAPER hang when switching window focus from a JSFX Web UI in an FX chain.
 
 ## 简体中文
 
-- 修复 Windows 有边框窗口以 `hidden:true` 创建后，首次 Show 或 Focus 页面空白的问题。
+- 修复 Windows 下从 FX 链中的 JSFX Web UI 切换窗口焦点时 REAPER 无响应的问题。
