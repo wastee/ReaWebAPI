@@ -669,8 +669,16 @@ LRESULT editor_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   };
   const auto fill_native_frame = [&](HDC dc) {
     if (!dc) return;
-    RECT client{}; GetClientRect(window, &client);
     const auto content = editor_content(window);
+#ifdef _WIN32
+    // Keep the host's themed background, excluding the WebUI content area.
+    const auto saved = SaveDC(dc);
+    if (!saved) return;
+    ExcludeClipRect(dc, content.left, content.top, content.right, content.bottom);
+    DefSubclassProc(window, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0);
+    RestoreDC(dc, saved);
+#else
+    RECT client{}; GetClientRect(window, &client);
     auto brush = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
     for (const auto& rect : {RECT{0, 0, client.right, content.top},
           RECT{0, content.top, content.left, client.bottom},
@@ -678,12 +686,11 @@ LRESULT editor_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           RECT{content.left, content.bottom, content.right, client.bottom}})
       FillRect(dc, &rect, brush);
     DeleteObject(brush);
+#endif
   };
   if (state->prepared && message == WM_ERASEBKGND) {
     // The host owns the preset/parameter/routing toolbar above the JSFX content.
-#ifdef _WIN32
-    DefSubclassProc(window, message, wp, lp);
-#else
+#ifndef _WIN32
     state->original(window, message, wp, lp);
 #endif
     fill_native_frame(reinterpret_cast<HDC>(wp));
