@@ -200,6 +200,13 @@ private:
   Clock::time_point next_jsfx_discovery_{};
   std::map<void*, std::shared_ptr<JsfxEditorHost>> jsfx_blocked_;
   std::vector<std::shared_ptr<JsfxInstance>> jsfx_instances_;
+  struct JsfxSize {
+    JsfxEditorDiscovery::Size size;
+    uint64_t revision = 1;
+  };
+  std::map<std::string, JsfxSize> jsfx_sizes_;
+  JsfxSize& jsfx_size(const JsfxAssociation&);
+  Json jsfx_size_state(Session&);
   void tick_jsfx();
   void release_jsfx(Session& session);
   void park_jsfx(Session& session);

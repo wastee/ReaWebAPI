@@ -69,13 +69,30 @@ During a single-parameter gesture, the helper keeps at most one write in flight 
 
 Host parameter access runs on the main thread. The limit is 256 JSFX sliders plus REAPER Bypass, Wet and Delta. Reordering resolves the same FX GUID within its original chain. Moving a take to another track invalidates its binding.
 
+## Editor size
+
+ReaWebAPI v0.3.8.31 adds `features.editorSize`. `jsfx.editor.size` is populated before `connectJSFX()` resolves. `getSize()` refreshes it. `setSize(width,height)` accepts integer content dimensions of 100..8192 CSS pixels and requires an active editor. `onSizeChange(listener)` observes the shared preference, including while the page is cached. Results contain `{width,height,customized,revision}`. Before the first explicit request, `customized` is false and dimensions come from the association, whose existing minimum-size behavior is unchanged.
+
+Explicit sizes can grow or shrink the host frame. They exclude native toolbars, meters and borders. The host converts CSS pixels to native units, including macOS points and Windows/Linux display scaling. Docked editors retain host geometry. The preference is shared by `fx_ident` and resolved HTML entry within the REAPER resource profile, persists across restarts, and is applied before chain/floating presentation. Display names do not define sharing. Layout and zoom rendering remain the page's responsibility.
+
+```js
+const jsfx = await connectJSFX(reaper);
+const renderSize = size => { if (size.customized) renderLayout(size.width, size.height); };
+renderSize(jsfx.editor.size);
+await jsfx.editor.onSizeChange(renderSize);
+// In a user resize or scale handler:
+await jsfx.editor.setSize(1035, 239);
+```
+
+Direct Service clients use `getEditorSize`, `setEditorSize({width,height,activation})` and `editorSizeChanged({sessionId,size})`. Both methods require `sessionId`. Reactivation includes `editorSize` in `visibilityChanged`. Render it before acknowledging `present`. The helper waits for pending size requests before presentation. Older runtimes report `UNSUPPORTED` through the new helper.
+
 ## Page and editor lifetime
 
 Pages are created on demand. Closing an editor or switching FX retains up to four hidden pages, released after 60 seconds idle. FX deletion or project invalidation releases them immediately. Reactivation refreshes host state and waits for rendering and `present` before showing the page. The helper manages activation tokens and presentation acknowledgements.
 
 Use `jsfx.active` and `onVisibilityChange` to pause timers, stream subscriptions and animations. Deactivation ends parameter gestures and discards pending drag values. Direct Service clients must render `visibilityChanged.paramState`, then acknowledge its `activation`. Initialization failure or a 15-second presentation timeout restores native content.
 
-Track, master, take, input and monitoring FX are supported, including nested containers, chain editors and floating editors. Floating/chain transitions reuse the same page and reapply the associated size. REAPER controls docking. Bindings validate the project, owner and FX GUIDs, not window titles or last-touched FX.
+Track, master, take, input and monitoring FX are supported, including nested containers, chain editors and floating editors. Floating/chain transitions reuse the same page and restore its shared size preference, falling back to the association size. REAPER controls docking. Bindings validate the project, owner and FX GUIDs, not window titles or last-touched FX.
 
 The page replaces only the associated JSFX content area. Presets, Param, routing, UI switching, wet/dry and bypass retain native behavior. No duplicate toolbar is created. Native side meters remain visible. `options:no_meter` removes their reserved width. Both modes retain the native bottom inset.
 

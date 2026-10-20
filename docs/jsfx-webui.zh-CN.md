@@ -69,13 +69,30 @@ const dispose = await jsfx.params.onChange(render);
 
 宿主参数访问在主线程执行，上限为 256 个 JSFX 滑块及 REAPER 的 Bypass、Wet、Delta。FX 重排后在原效果链内按 GUID 解析。Take 移到其他轨道时，原绑定失效。
 
+## 编辑器尺寸
+
+ReaWebAPI v0.3.8.31 新增 `features.editorSize`。`connectJSFX()` 返回前填充 `jsfx.editor.size`，`getSize()` 刷新该快照。`setSize(width,height)` 接受 100..8192 范围内的整数 CSS 像素内容尺寸，要求编辑器处于活动状态。`onSizeChange(listener)` 监听共享偏好，缓存中的页面也会收到更新。结果包含 `{width,height,customized,revision}`。首次显式设置前，`customized` 为 false，尺寸来自关联配置，原有最小尺寸行为保持不变。
+
+显式尺寸允许放大或缩小宿主窗口，不包含原生工具栏、仪表和边框。宿主负责 CSS 像素与原生单位的转换，包括 macOS 点单位及 Windows、Linux 显示缩放。停靠编辑器保留宿主尺寸。偏好在同一 REAPER 资源配置内按 `fx_ident` 和解析后的 HTML 路径共享，重启后保留，并在 FX 链和浮动编辑器显示前应用。显示名称不参与共享识别。页面仍负责布局与缩放绘制。
+
+```js
+const jsfx = await connectJSFX(reaper);
+const renderSize = size => { if (size.customized) renderLayout(size.width, size.height); };
+renderSize(jsfx.editor.size);
+await jsfx.editor.onSizeChange(renderSize);
+// 在用户调整尺寸或缩放比例时调用
+await jsfx.editor.setSize(1035, 239);
+```
+
+直接使用 Service 时调用 `getEditorSize`、`setEditorSize({width,height,activation})`，并订阅 `editorSizeChanged({sessionId,size})`。两个方法均要求 `sessionId`。重新激活的 `visibilityChanged` 包含 `editorSize`，应先绘制，再确认 `present`。helper 在显示前等待未完成的尺寸请求。新版 helper 在旧 Runtime 上返回 `UNSUPPORTED`。
+
 ## 页面与编辑器
 
 页面按需创建，关闭编辑器或切换 FX 后最多缓存四个隐藏页面，60 秒空闲后释放。FX 删除或工程失效时立即释放。重新激活会刷新宿主快照，页面完成渲染并确认 `present` 后显示。helper 管理激活标记及呈现确认。
 
 使用 `jsfx.active` 和 `onVisibilityChange` 暂停页面定时器、流订阅和动画。失活会结束参数手势并丢弃待提交拖动值。直接使用 Service 的页面需渲染 `visibilityChanged.paramState`，再确认对应的 `activation`。初始化失败或超过 15 秒未确认时恢复原生内容。
 
-支持轨道、主轨、Take、输入、监听 FX 及其嵌套容器，包含效果链和浮动编辑器。浮动与非浮动之间复用同一页面，重新应用关联尺寸，停靠行为由 REAPER 管理。绑定校验工程、归属者及 FX GUID，不依赖窗口标题或最后触摸的 FX。
+支持轨道、主轨、Take、输入、监听 FX 及其嵌套容器，包含效果链和浮动编辑器。浮动与非浮动之间复用同一页面，优先恢复共享尺寸偏好，否则应用关联尺寸。停靠行为由 REAPER 管理。绑定校验工程、归属者及 FX GUID，不依赖窗口标题或最后触摸的 FX。
 
 网页仅替代关联 JSFX 的内容区。预设、Param、路由、UI 切换、干湿及 bypass 控件保留原生行为，不另建标准栏。两侧原生电平表保留，`options:no_meter` 可移除其占位。两种模式均保留原生底部间隔。
 

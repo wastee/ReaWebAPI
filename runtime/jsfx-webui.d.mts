@@ -58,7 +58,7 @@ export interface JSFXCapabilities {
   dataStates: readonly JSFXDataStateDeclaration[];
   commands: readonly JSFXCommandDeclaration[];
   resources: readonly JSFXResourceDeclaration[];
-  features: { params: true; paramGroups: true; nativeChannel: boolean };
+  features: { params: true; paramGroups: true; nativeChannel: boolean; editorSize?: boolean };
   limits: { maxParametersPerGesture: number; [key: string]: number };
 }
 export interface JSFXDiagnostics {
@@ -124,6 +124,13 @@ export interface JSFXResourceDownload {
   metadata: Readonly<Record<string, unknown>>; maxChunkBytes: number; checksum: string;
 }
 export interface JSFXConnection {
+  readonly editor: {
+    readonly size: Readonly<JSFXEditorSize> | undefined;
+    getSize(): Promise<Readonly<JSFXEditorSize>>;
+    /** Persist and share content dimensions across instances of this JSFX association. */
+    setSize(width: number, height: number): Promise<Readonly<JSFXEditorSize>>;
+    onSizeChange(listener: (size: Readonly<JSFXEditorSize>) => void): Promise<JSFXDispose>;
+  };
   readonly params: JSFXParams;
   readonly dataState: JSFXDataStateAPI;
   readonly streams: { open(id: string, options?: { updateRate?: number }): Promise<ReaWebStream> };
@@ -145,6 +152,12 @@ export interface JSFXConnection {
   onCapabilitiesChange(listener: (event: { sessionId: string; capabilityRevision: string; reason: string }) => void): Promise<JSFXDispose>;
   onVisibilityChange(listener: (active: boolean) => void): Promise<JSFXDispose>;
   dispose(): Promise<void>;
+}
+export interface JSFXEditorSize {
+  width: number;
+  height: number;
+  customized: boolean;
+  revision: string;
 }
 export function connectJSFX(reaper?: {
   lifecycle: { ready: PromiseLike<{ runtime: { jsfx?: { protocolVersion: number } } }> };

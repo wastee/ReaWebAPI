@@ -35,7 +35,7 @@ public:
   virtual bool retain_during_switch() const { return false; }
   virtual std::optional<int> selected_fx() const { return {}; }
   virtual void sync_selection(int) {}
-  virtual void request_size(int, int) {}
+  virtual void request_size(int, int, bool = false) {}
   virtual void set_background(unsigned) {}
   virtual void on_destroy(std::function<void()>) {}
 };
@@ -51,7 +51,7 @@ struct JsfxEditor {
 };
 class JsfxEditorDiscovery {
 public:
-  struct Size { int width, height; };
+  struct Size { int width, height; bool exact = false; };
   using Match = std::function<std::optional<Size>(JsfxTarget, int)>;
   virtual ~JsfxEditorDiscovery() = default;
   virtual std::vector<JsfxEditor> scan(Host&, Match) = 0;

@@ -6,11 +6,15 @@
 #else
 #include <swell/swell.h>
 #include "platform/shared/swell_window.hpp"
+#ifndef __APPLE__
+#include "platform/linux/linux_icon.hpp"
+#endif
 #endif
 #include <reaper_plugin.h>
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <set>
@@ -19,6 +23,17 @@
 namespace reaweb {
 namespace {
 using Clock = std::chrono::steady_clock;
+int editor_pixels(HWND owner, int value) {
+#ifdef _WIN32
+  const auto dpi = GetDpiForWindow(owner);
+  return int(std::lround(value * (dpi ? dpi / 96.0 : 1.0)));
+#elif defined(__APPLE__)
+  (void)owner;
+  return value;
+#else
+  return value * LinuxIcon::scale(SWELL_GetOSWindow(owner, "GdkWindow"));
+#endif
+}
 bool host_meter_control(HWND editor, HWND child) {
   return child == GetDlgItem(editor, 1089) || child == GetDlgItem(editor, 1091);
 }
@@ -118,12 +133,13 @@ struct ChainLayout {
 #endif
   }
   void cover(HWND editor, std::optional<JsfxEditorDiscovery::Size> size = {});
-  void request_size(int requested_width, int requested_height) {
+  void request_size(int requested_width, int requested_height, bool exact = false) {
     if (!alive || adjusting || !IsWindow(owner) || !IsWindow(size_owner) ||
         (size_owner != owner && !IsChild(size_owner, owner)) || (GetWindowLong(size_owner, GWL_STYLE) & WS_CHILD)) return;
     RECT client{}, outer{}; GetClientRect(owner, &client); GetWindowRect(size_owner, &outer);
-    const int dx = std::max(0, requested_width - int(client.right-margins.left-margins.right));
-    const int dy = std::max(0, requested_height - int(client.bottom-margins.top-margins.bottom));
+    int dx = (exact ? editor_pixels(size_owner, requested_width) : requested_width) - int(client.right-margins.left-margins.right);
+    int dy = (exact ? editor_pixels(size_owner, requested_height) : requested_height) - int(client.bottom-margins.top-margins.bottom);
+    if (!exact) { dx = std::max(0, dx); dy = std::max(0, dy); }
     adjusting = true;
     if (dx || dy) resize_editor_owner(size_owner, std::abs(int(outer.right-outer.left))+dx,
       std::abs(int(outer.bottom-outer.top))+dy);
@@ -209,7 +225,7 @@ void ChainLayout::cover(HWND editor, std::optional<JsfxEditorDiscovery::Size> si
       parent.bottom-origin.y-content.bottom};
   }
   // Returning from a floating editor can reuse a backdrop after native layout has shrunk.
-  if (size) request_size(size->width, size->height);
+  if (size) request_size(size->width, size->height, size->exact);
   if (!backdrop) {
 #ifdef _WIN32
     backdrop = CreateWindowExW(WS_EX_CONTROLPARENT, L"STATIC", L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0,
@@ -765,6 +781,7 @@ class EditorHost final : public JsfxEditorHost {
   bool observing_ = false;
   bool revealed_ = false;
   int requested_width_ = 0, requested_height_ = 0;
+  bool requested_exact_ = false;
   bool native_valid() const {
     return state_->alive && IsWindow(state_->editor) && IsWindow(state_->owner) &&
       (state_->owner == state_->editor || IsChild(state_->owner, state_->editor)) &&
@@ -816,7 +833,7 @@ public:
     state_->prepared = true; state_->conceal();
   }
   void reveal() override {
-    if (!revealed_) request_size(requested_width_, requested_height_);
+    if (!revealed_) request_size(requested_width_, requested_height_, requested_exact_);
     state_->reveal(); revealed_ = true;
   }
   void park() override { if (state_->layout) observing_ = true; else restore(); }
@@ -827,23 +844,25 @@ public:
     }
     if (state_->layout) state_->layout->set_background(color);
   }
-  void request_size(int width, int height) override {
-    requested_width_ = width; requested_height_ = height;
+  void request_size(int width, int height, bool exact = false) override {
+    requested_width_ = width; requested_height_ = height; requested_exact_ = exact;
     if (!native_valid() || (GetWindowLong(state_->owner, GWL_STYLE) & WS_CHILD)) return;
     const auto editor = editor_content(state_->editor);
     RECT owner{}; GetWindowRect(state_->owner, &owner);
-    const int dx = std::max(0, width - int(editor.right-editor.left)), dy = std::max(0, height - int(editor.bottom-editor.top));
+    int dx = (exact ? editor_pixels(state_->owner, width) : width) - int(editor.right-editor.left);
+    int dy = (exact ? editor_pixels(state_->owner, height) : height) - int(editor.bottom-editor.top);
+    if (!exact) { dx = std::max(0, dx); dy = std::max(0, dy); }
     if (state_->layout) state_->layout->adjusting = true;
     // REAPER persists a floating window's native origin across editor recreation.
     if (dx || dy) resize_editor_owner(state_->owner, std::abs(int(owner.right-owner.left))+dx,
-      std::abs(int(owner.bottom-owner.top))+dy, bool(state_->layout));
+      std::abs(int(owner.bottom-owner.top))+dy, exact || bool(state_->layout));
     if (state_->layout) {
       state_->layout->remember(); state_->layout->adjusting = false; state_->layout->handoff_until = {};
     }
   }
   void present(void* child) override {
     if (!valid()) return;
-    if (!revealed_) request_size(requested_width_, requested_height_);
+    if (!revealed_) request_size(requested_width_, requested_height_, requested_exact_);
     resize(child);
     prepare();
   }
@@ -885,8 +904,8 @@ public:
     if (layout_->active_host.lock().get() == this && layout_->target == target_ && layout_->active_fx == fx_) restore_chain(layout_);
   }
   void set_background(unsigned color) override { layout_->set_background(color); }
-  void request_size(int width, int height) override {
-    if (layout_->backdrop) layout_->request_size(width, height);
+  void request_size(int width, int height, bool exact = false) override {
+    if (layout_->backdrop) layout_->request_size(width, height, exact);
   }
 };
 void select_chain(const std::shared_ptr<ChainLayout>& layout, const JsfxEditorDiscovery::Match& match, std::vector<JsfxEditor>& found) {
@@ -907,7 +926,7 @@ void select_chain(const std::shared_ptr<ChainLayout>& layout, const JsfxEditorDi
   }
   auto host = std::make_shared<ChainHost>(layout);
   layout->active_host = host;
-  host->request_size(size->width, size->height);
+  host->request_size(size->width, size->height, size->exact);
   layout->handoff();
   found.push_back({layout->target.track, fx, false, layout->owner, std::move(host), layout->target.take, layout->target.input});
 }
@@ -1019,7 +1038,7 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
       host->park();
       select_chain(layout, search.match, search.found);
     } else {
-      host->request_size(size->width, size->height);
+      host->request_size(size->width, size->height, size->exact);
       search.found.push_back({target.track, fx, is_floating, owner, std::move(host), target.take, target.input});
     }
   }

@@ -1,7 +1,38 @@
 #include "runtime/runtime.hpp"
 #include <cmath>
+#include <fstream>
 
 namespace reaweb {
+Runtime::JsfxSize& Runtime::jsfx_size(const JsfxAssociation& association) {
+  const auto key = association.ident + "\n" + association.entry.generic_u8string();
+  auto found = jsfx_sizes_.find(key);
+  if (found != jsfx_sizes_.end()) {
+    if (!found->second.size.exact) found->second.size = {association.width, association.height};
+    return found->second;
+  }
+  if (jsfx_sizes_.size() >= 1024) throw Error("RESOURCE_LIMIT", "Too many JSFX editor size preferences");
+  JsfxSize value{{association.width, association.height}};
+  const auto path = resource_ / "ReaWebAPI" / "JSFXEditorSizes" / (state_key(key, 0) + ".json");
+  try {
+    std::error_code error;
+    if (fs::file_size(path, error) <= 4096 && !error) {
+      std::ifstream stream(path);
+      const auto saved = Json::parse(stream);
+      if (saved.value("schema", Json()) == 1 && saved.value("key", Json()) == key &&
+          saved.value("width", Json()).is_number_integer() && saved.value("height", Json()).is_number_integer() &&
+          saved["width"] >= 100 && saved["width"] <= 8192 && saved["height"] >= 100 && saved["height"] <= 8192)
+        value.size = {saved["width"].get<int>(), saved["height"].get<int>(), true};
+    }
+  } catch (const std::exception&) {}
+  return jsfx_sizes_.emplace(key, value).first->second;
+}
+Json Runtime::jsfx_size_state(Session& session) {
+  const auto association = jsfx_association(resource_ / "Effects", session.jsfx->instance->binding->ident());
+  if (!association) throw Error("FX_UNBOUND", "The JSFX Web UI association is unavailable");
+  const auto& value = jsfx_size(*association);
+  return {{"width", value.size.width}, {"height", value.size.height}, {"customized", value.size.exact},
+    {"revision", std::to_string(value.revision)}};
+}
 void Runtime::initialize_jsfx(JsfxDiscovery discovery) {
   check_thread();
   if (jsfx_service_) return;
@@ -89,7 +120,8 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
     }
   });
   if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged",
-    {{"sessionId", ui.instance->session_id}, {"active", true}, {"activation", ui.activation}, {"paramState", jsfx_state(session)}});
+    {{"sessionId", ui.instance->session_id}, {"active", true}, {"activation", ui.activation}, {"paramState", jsfx_state(session)},
+      {"editorSize", jsfx_size_state(session)}});
 }
 Json Runtime::jsfx_result(int window, const std::string& method, const Json& payload) {
   Json result;
@@ -112,13 +144,54 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   auto& session = *it->second; auto& ui = *session.jsfx;
   if (!payload.is_object()) throw Error("INVALID_ARGUMENT", "Expected a JSFX request object");
   ui.instance->binding->resolve();
-  if(method=="getCapabilities" && ui.instance->native)return ui.instance->native->capabilities(ui.instance->session_id);
+  if(method=="getCapabilities" && ui.instance->native) {
+    auto capabilities = ui.instance->native->capabilities(ui.instance->session_id);
+    capabilities["features"]["editorSize"] = true;
+    return capabilities;
+  }
   if (method == "getCapabilities") return {
     {"protocolVersion", 1}, {"sessionId", ui.instance->session_id}, {"capabilityRevision", "1"}, {"status", "parameterOnly"},
     {"streams", Json::array()}, {"dataStates", Json::array()}, {"commands", Json::array()}, {"resources", Json::array()},
-    {"features", {{"params", true}, {"paramGroups", true}, {"nativeChannel", false}}},
+    {"features", {{"params", true}, {"paramGroups", true}, {"nativeChannel", false}, {"editorSize", true}}},
     {"limits", {{"maxParametersPerGesture", 259}}}};
   if (payload.value("sessionId", Json()) != ui.instance->session_id) throw Error("STALE_SESSION", "The JSFX instance session changed");
+  if (method == "getEditorSize") return jsfx_size_state(session);
+  if (method == "setEditorSize") {
+    if (!ui.editor.host || !ui.instance->binding->editor_matches(ui.editor) || payload.value("activation", Json()) != ui.activation)
+      throw Error("FX_STALE", "The JSFX editor activation changed");
+    for (const auto* name : {"width", "height"})
+      if (!payload.value(name, Json()).is_number_integer() || payload[name] < 100 || payload[name] > 8192)
+        throw Error("INVALID_ARGUMENT", "Expected integer JSFX content dimensions in [100,8192]");
+    for (const auto& field : payload.items())
+      if (field.key() != "sessionId" && field.key() != "activation" && field.key() != "width" && field.key() != "height")
+        throw Error("INVALID_ARGUMENT", "Unexpected JSFX editor size field");
+    const auto association = jsfx_association(resource_ / "Effects", ui.instance->binding->ident());
+    if (!association) throw Error("FX_UNBOUND", "The JSFX Web UI association is unavailable");
+    auto& value = jsfx_size(*association);
+    const int width = payload["width"], height = payload["height"];
+    if (!value.size.exact || width != value.size.width || height != value.size.height) {
+      const auto key = association->ident + "\n" + association->entry.generic_u8string();
+      Work save; save.kind = Work::Save;
+      save.path = resource_ / "ReaWebAPI" / "JSFXEditorSizes" / (state_key(key, 0) + ".json");
+      save.data = {{"schema", 1}, {"key", key}, {"width", width}, {"height", height}};
+      if (!worker_.submit(std::move(save))) throw Error("QUEUE_LIMIT", "JSFX editor size save queue is full");
+      value.size = {width, height, true}; ++value.revision;
+    }
+    const auto state = jsfx_size_state(session);
+    for (auto& item : sessions_) {
+      auto& other = *item.second;
+      if (!other.jsfx || other.closing || other.entry != session.entry) continue;
+      try {
+        if (other.jsfx->instance->binding->ident() != association->ident) continue;
+        auto& editor = other.jsfx->editor;
+        if (editor.host && editor.host->valid() && other.jsfx->instance->binding->editor_matches(editor))
+          editor.host->request_size(width, height, true);
+      } catch (const Error&) { continue; }
+      service_event(jsfx_service_, "jsfx", other.id, "editorSizeChanged",
+        {{"sessionId", other.jsfx->instance->session_id}, {"size", state}});
+    }
+    return state;
+  }
   if (method == "getParamState") {
     if (ui.editor.host && !ui.instance->binding->editor_matches(ui.editor)) park_jsfx(session);
     return jsfx_state(session);
@@ -333,7 +406,7 @@ void Runtime::tick_jsfx() {
       try {
         JsfxBinding binding(host_, target, fx);
         if (auto association = jsfx_association(resource_ / "Effects", binding.ident()))
-          return JsfxEditorDiscovery::Size{association->width, association->height};
+          return jsfx_size(*association).size;
       } catch (...) {}
       return {};
     })) {
@@ -344,7 +417,8 @@ void Runtime::tick_jsfx() {
       const auto association = jsfx_association(resource_ / "Effects", binding->ident());
       if (!association) continue;
       editor.host->prepare();
-      editor.host->request_size(association->width, association->height);
+      const auto size = jsfx_size(*association).size;
+      editor.host->request_size(size.width, size.height, size.exact);
       Session* cached = nullptr;
       for (auto& entry : sessions_) {
         auto& candidate = *entry.second;

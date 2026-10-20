@@ -47,6 +47,51 @@ async function connect(f = fixture()) {
   const { connectJSFX } = await import('../runtime/jsfx-webui.mjs');
   f.fx = await connectJSFX(f.reaper, error => f.errors.push(error)); return f;
 }
+test('editor size is initialized before connect and gates native presentation', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx');
+  let size = { width: 1380, height: 319, customized: false, revision: '1' }, complete;
+  f.reaper.host.service = () => ({ ...base, invoke: async (method, data) => {
+    if (method === 'getCapabilities') {
+      const result = await base.invoke(method, data);
+      result.data.features = { editorSize: true }; return result;
+    }
+    if (method === 'getEditorSize') return f.ok(size);
+    if (method === 'setEditorSize') {
+      assert.equal(data.activation, 1);
+      return new Promise(resolve => { complete = () => {
+        size = { width: data.width, height: data.height, customized: true, revision: '2' };
+        resolve(f.ok(size));
+      }; });
+    }
+    return base.invoke(method, data);
+  } });
+  await connect(f);
+  assert.equal(f.fx.editor.size.customized, false);
+  const pending = f.fx.editor.setSize(1035, 239);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(f.calls.some(call => call.method === 'present'), false);
+  complete(); await pending;
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(f.calls.some(call => call.method === 'present'), true);
+  assert.equal(f.fx.editor.size.width, 1035);
+  const sizes = [];
+  await f.fx.editor.onSizeChange(size => sizes.push(size.width));
+  f.events.editorSizeChanged({ sessionId: f.sessionId, size: { ...size, width: 690, revision: '3' } });
+  f.events.editorSizeChanged({ sessionId: f.sessionId, size });
+  f.events.editorSizeChanged({ sessionId: 'other', size: { ...size, width: 2070, revision: '4' } });
+  assert.deepEqual(sizes, [690]);
+  f.visibility(false, 2);
+  await assert.rejects(f.fx.editor.setSize(1380, 319), { code: 'FX_STALE' });
+  await assert.rejects(f.fx.editor.setSize(99, 319), { code: 'INVALID_ARGUMENT' });
+  await f.fx.dispose();
+});
+test('editor sizing remains optional with older runtimes', async () => {
+  const f = await connect();
+  assert.equal(f.fx.editor.size, undefined);
+  await assert.rejects(f.fx.editor.getSize(), { code: 'UNSUPPORTED' });
+  await assert.rejects(f.fx.editor.setSize(640, 420), { code: 'UNSUPPORTED' });
+  await f.fx.dispose();
+});
 function nativeFixture() {
   const f=fixture(), original=f.reaper.host.service('jsfx');
   let session=f.sessionId, capRevision='1';
@@ -192,7 +237,7 @@ test('resource SDK keeps bytes off service JSON, retries identity and releases d
 });
 test('namespace contract, immutable snapshots, protocol detection and unsupported extended capabilities', async () => {
   const f = await connect();
-  assert.deepEqual(Object.keys(f.fx).sort(), ['params','dataState','streams','commands','operations','resources','active','getCapabilities','onCapabilitiesChange','getDiagnostics','present','onVisibilityChange','dispose'].sort());
+  assert.deepEqual(Object.keys(f.fx).sort(), ['editor','params','dataState','streams','commands','operations','resources','active','getCapabilities','onCapabilitiesChange','getDiagnostics','present','onVisibilityChange','dispose'].sort());
   assert(Object.isFrozen(f.fx.params.snapshot.parameters[0]));
   assert.equal(f.fx.params.snapshot.parameters[0].normalized, .2);
   assert.equal(f.calls.filter(c => c.method === 'setParam').length, 0);

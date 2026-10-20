@@ -267,6 +267,14 @@ void exactSampleClips; void exactTrueClips;
 async function jsfxContract() {
   const { connectJSFX } = await import('../runtime/jsfx-webui.mjs');
   const jsfx = await connectJSFX(reaper);
+  const size = await jsfx.editor.setSize(1035, 239);
+  const width: number = size.width;
+  const sizeOff: () => Promise<void> = await jsfx.editor.onSizeChange(next => console.log(next.revision));
+  await sizeOff();
+  // @ts-expect-error Editor dimensions are numbers.
+  await jsfx.editor.setSize('1035', 239);
+  // @ts-expect-error Editor preferences are immutable snapshots.
+  size.width = width;
   const state = await jsfx.params.getState();
   const revision: string = state.revision;
   const result = await jsfx.params.set(0, .5);

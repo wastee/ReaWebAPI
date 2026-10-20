@@ -176,7 +176,8 @@ int main() {
         void resize(void*) override {}
         void present(void*) override {}
         void restore() override {}
-        void request_size(int, int) override { ++size_requests; }
+        int width = 0, height = 0; bool exact = false;
+        void request_size(int w, int h, bool e = false) override { ++size_requests; width = w; height = h; exact = e; }
       };
       struct Discovery final : JsfxEditorDiscovery {
         JsfxEditor editor;
@@ -238,6 +239,16 @@ int main() {
       CHECK(window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == true);
       const Json context{{"sessionId", session_id}, {"activation", first["activation"]}};
       const auto edit = [&](const char* method, Json payload = Json::object()) { payload.update(context); return call(method, payload)["result"]; };
+      CHECK(edit("getEditorSize")["data"]["customized"] == false);
+      std::ofstream(directory / "test.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html","width":800,"height":400}})";
+      CHECK(edit("getEditorSize")["data"]["width"] == 800);
+      CHECK(edit("setEditorSize", {{"width", 480}, {"height", 240}})["data"]["customized"] == true);
+      std::ofstream(directory / "test.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html","width":1024,"height":768}})";
+      CHECK(edit("getEditorSize")["data"]["width"] == 480);
+      CHECK(editor->width == 480 && editor->height == 240 && editor->exact);
+      CHECK(edit("setEditorSize", {{"width", 99}, {"height", 240}})["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(edit("setEditorSize", {{"width", 480.5}, {"height", 240}})["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(call("setEditorSize", {{"sessionId", session_id}, {"activation", 0}, {"width", 640}, {"height", 420}})["result"]["error"]["code"] == "FX_STALE");
       auto group = edit("beginParamEditGroup", {{"indices", {0, 1}}})["data"]["gestureId"];
       CHECK(edit("beginParamEdit", {{"index", 0}})["error"]["code"] == "GESTURE_BUSY");
       CHECK(edit("setParams", {{"gestureId", group}, {"values", {{{"index", 0}, {"normalized", .1}}, {{"index", 1}, {"normalized", 2}}}}})["error"]["code"] == "INVALID_ARGUMENT");
@@ -278,13 +289,14 @@ int main() {
       discovery->editor = {&track, 0, true, jsfx_floating, floating_editor}; discovery->found = false;
       until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
       CHECK(windows.size() == before + 1 && floating_editor->size_requests == 1);
+      CHECK(floating_editor->width == 480 && floating_editor->height == 240 && floating_editor->exact);
       CHECK(call("present", {{"sessionId", session_id}, {"activation", fresh["activation"]}})["result"]["data"]["presented"] == false);
       const auto floating_state = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
       CHECK(call("present", {{"sessionId", session_id}, {"activation", floating_state["activation"]}})["result"]["data"]["presented"] == true);
       jsfx_floating = nullptr; floating_editor->alive = false;
       discovery->editor = {&track, 0, false, editor.get(), editor}; discovery->found = false;
       until(runtime, [&] { return discovery->found && runtime.diagnostics(id)["jsfx"]["cached"] == false; });
-      CHECK(windows.size() == before + 1 && editor->size_requests == 2);
+      CHECK(windows.size() == before + 1 && editor->size_requests == 3);
       CHECK(call("present", {{"sessionId", session_id}, {"activation", floating_state["activation"]}})["result"]["data"]["presented"] == false);
       const auto returned = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
       CHECK(call("present", {{"sessionId", session_id}, {"activation", returned["activation"]}})["result"]["data"]["presented"] == true);
