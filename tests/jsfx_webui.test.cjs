@@ -443,3 +443,48 @@ test('visibility during registration cannot present before size and parameter in
   assert.equal(f.calls.find(c=>c.method==='present').data.activation,2);
   await f.fx.dispose();
 });
+
+test('initial size and parameter reads overlap but connect and present await both', async () => {
+  for (const first of ['getEditorSize', 'getParamState']) {
+    const f = fixture(), base = f.reaper.host.service('jsfx'), pending = new Map();
+    f.reaper.host.service = () => ({...base, invoke: async (method, data) => {
+      if (method === 'getCapabilities') {
+        const reply = await base.invoke(method, data); reply.data.features = {editorSize:true}; return reply;
+      }
+      if (method === 'getEditorSize' || method === 'getParamState') {
+        assert.equal(data.sessionId, f.sessionId);
+        return new Promise(resolve => pending.set(method, () => resolve(f.ok(method === 'getEditorSize'
+          ? {width:600,height:300,revision:'1'} : f.state([.2,.3], '1')))));
+      }
+      return base.invoke(method, data);
+    }});
+    let connected = false;
+    const opening = connect(f).then(() => { connected = true; });
+    await turn();
+    assert.equal(pending.size, 2);
+    f.event([.8,.7], '10');
+    f.events.editorSizeChanged({sessionId:f.sessionId,size:{width:900,height:400,revision:'2'}});
+    pending.get(first)(); await turn();
+    assert.equal(connected, false); assert.equal(f.calls.some(c => c.method === 'present'), false);
+    pending.get(first === 'getEditorSize' ? 'getParamState' : 'getEditorSize')(); await opening;
+    assert.equal(f.fx.editor.size.width, 900);
+    assert.deepEqual(f.fx.params.snapshot.parameters.map(p => p.normalized), [.8,.7]);
+    await f.fx.dispose(); assert.deepEqual(Object.keys(f.events), []);
+  }
+});
+
+test('failed parallel snapshot never presents or applies a late response', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx'); let finish;
+  f.reaper.host.service = () => ({...base, invoke: async (method, data) => {
+    if (method === 'getCapabilities') {
+      const reply = await base.invoke(method, data); reply.data.features = {editorSize:true}; return reply;
+    }
+    if (method === 'getEditorSize') throw new Error('size failed');
+    if (method === 'getParamState') return new Promise(resolve => { finish = () => resolve(f.ok(f.state())); });
+    return base.invoke(method, data);
+  }});
+  await assert.rejects(connect(f), /size failed/);
+  finish(); await turn();
+  assert.equal(f.calls.some(c => c.method === 'present'), false);
+  assert.deepEqual(Object.keys(f.events), []);
+});

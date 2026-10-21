@@ -8,17 +8,20 @@ namespace {
 reaper_plugin_info_t* host;
 prefs_page_register_t* page;
 std::filesystem::path resource;
-void check(bool value) { if (!value) throw std::runtime_error("Preference control mismatch"); }
+void check_impl(bool value, int line) { if (!value) throw std::runtime_error("Preference control mismatch at " + std::to_string(line)); }
+#define check(value) check_impl(value, __LINE__)
 void run() {
   std::string result;
   HWND dialog = nullptr;
   try {
+    const bool idle_test = std::filesystem::exists(resource / "preferences-test.idle");
     dialog = page->create(host->hwnd_main);
     check(dialog && page->par_id == 0x9a && std::string(page->displayname) == "ReaWebAPI");
     const auto checkbox = GetDlgItem(dialog, 1001);
     check(checkbox && !IsWindowEnabled(checkbox));
     check(IsDlgButtonChecked(dialog, 1001) == BST_UNCHECKED && !GetDlgItem(dialog, 1002));
-    for (const auto width : {900, 640, 1100}) {
+    check(GetDlgItemInt(dialog, 1004, nullptr, FALSE) == 2);
+    if (!idle_test) for (const auto width : {900, 640, 1100}) {
       SetWindowPos(dialog, nullptr, 0, 0, width, 520, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
       RECT client{}, frame{}, button{}, control{};
       GetClientRect(dialog, &client);
@@ -31,13 +34,31 @@ void run() {
       check(origin.x + client.right - button.right == control.left - origin.x &&
         origin.y + client.bottom - button.bottom == control.left - origin.x);
     }
-    CheckDlgButton(dialog, 1001, BST_CHECKED);
-    SendMessage(dialog, WM_COMMAND, MAKEWPARAM(1003, BN_CLICKED), 0);
-    check(IsDlgButtonChecked(dialog, 1001) == BST_UNCHECKED);
-    SendMessage(dialog, WM_USER * 2, 0, 0);
-    check(reaweb::startup_color_profile == reaweb::ColorProfile::Default);
-    check(!std::filesystem::exists(resource / "ReaWebAPI.ini"));
-    result = "PASS: native SWELL Preferences, disabled checkbox, resizing, Restore defaults and unchanged Default";
+    if (idle_test) {
+      SetDlgItemInt(dialog, 1004, 7, FALSE); DestroyWindow(dialog);
+      unsigned applied = 99;
+      page = reaweb::initialize_preferences(nullptr, resource, {}, [&](unsigned count) { applied = count; });
+      dialog = page->create(host->hwnd_main);
+      check(GetDlgItemInt(dialog, 1004, nullptr, FALSE) == 2 && applied == 99);
+      for (unsigned count : {7u, 0u, 32u, 2u}) {
+        SetDlgItemInt(dialog, 1004, count, FALSE);
+        check(SendMessage(dialog, WM_USER * 2, 0, 0) != 0);
+        check(applied == count && reaweb::idle_webview_preferences() == count);
+        check(GetPrivateProfileInt("ReaWebAPI", "IdleWebViews", 99, (resource / "ReaWebAPI.ini").c_str()) == count);
+      }
+      DestroyWindow(dialog); dialog = nullptr;
+      reaweb::initialize_preferences(nullptr, resource);
+      check(reaweb::idle_webview_preferences() == 2);
+      result = "PASS: native SWELL idle-container Preferences, default 2, Cancel, Apply 7/0/32/2 and persistence";
+    } else {
+      CheckDlgButton(dialog, 1001, BST_CHECKED);
+      SendMessage(dialog, WM_COMMAND, MAKEWPARAM(1003, BN_CLICKED), 0);
+      check(IsDlgButtonChecked(dialog, 1001) == BST_UNCHECKED);
+      SendMessage(dialog, WM_USER * 2, 0, 0);
+      check(reaweb::startup_color_profile == reaweb::ColorProfile::Default);
+      check(!std::filesystem::exists(resource / "ReaWebAPI.ini"));
+      result = "PASS: native SWELL Preferences, disabled checkbox, resizing, Restore defaults and unchanged Default";
+    }
   } catch (const std::exception& error) { result = std::string("FAIL: ") + error.what(); }
   if (dialog) DestroyWindow(dialog);
   std::ofstream(resource / "preferences-test.log") << result << '\n';

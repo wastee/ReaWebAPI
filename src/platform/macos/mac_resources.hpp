@@ -32,6 +32,10 @@
 }
 - (void)webView:(WKWebView*)view startURLSchemeTask:(id<WKURLSchemeTask>)task {
   (void)view;
+  if (!resources) {
+    [task didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorResourceUnavailable userInfo:nil]];
+    return;
+  }
   std::map<std::string, std::string> headers;
   for (NSString* key in task.request.allHTTPHeaderFields)
     headers[key.lowercaseString.UTF8String] = [task.request.allHTTPHeaderFields[key] UTF8String];

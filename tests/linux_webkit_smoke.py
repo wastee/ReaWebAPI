@@ -51,14 +51,19 @@ child.close()
 parent.setblocking(False)
 received = b''
 results = []
+idle_target = int(os.environ.get('REAWEB_TEST_IDLE_WEBVIEWS', '0'))
+idle_state = None
+filling = False
 
 def send(message):
     parent.sendall((json.dumps(message) + '\n').encode())
 
 def receive_until(condition, timeout=20):
-    global received
+    global received, idle_state
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and not condition():
+        if filling:
+            send(dict(id=0, op='idle'))
         if not select.select([parent], [], [], .05)[0]: continue
         chunk = parent.recv(65536)
         assert chunk, 'WebKit exited early'
@@ -67,12 +72,14 @@ def receive_until(condition, timeout=20):
             line, received = received.split(b'\n', 1)
             message = json.loads(line)
             assert message['op'] != 'error', message
+            if message['op'] == 'idle-pool':
+                idle_state = message['state']
             if message['op'] == 'message':
                 request = json.loads(message['message'])
                 results.append((message['id'], request['method'], request.get('args')))
                 response = {'id': request['id'], 'document': request['document'], 'result': {'protocol': 1, 'projectEpoch': 1, 'methods': list(json.loads((root / 'api/bindings.json').read_text())['functions'])} if request['method'] == '__reawebHello' else '7.smoke'}
                 send({'id': message['id'], 'op': 'eval', 'script': 'window.__reawebReceive(' + json.dumps(response) + ');'})
-            else: results.append((message.get('id', 0), message['op'], message.get('color')))
+            else: results.append((message.get('id', 0), message['op'], message.get('prewarmed') if message['op'] == 'container' else message.get('color')))
     assert condition(), [(row[0], row[1], str(row[2])[:200]) for row in results]
 
 def geometry(id, target, focused=False):
@@ -93,11 +100,17 @@ def mapped(window):
 
 try:
     receive_until(lambda: any(row[1] == 'ready' for row in results))
+    if idle_target:
+        send(dict(id=0, op='idle-pool', target=idle_target))
+        filling = True
+        receive_until(lambda: idle_state is not None and idle_state['ready'] == idle_target)
+        filling = False
     bridge = '(() => {\n' + (root / 'runtime/reaper-api.generated.js').read_text() + (root / 'runtime/reaper.js').read_text() + '\n})();'
     script = bridge + '\nwindow.token="kept"; reaper.GetAppVersion().then(v => reaper.CountTracks(v === "7.smoke" ? 0 : 999));'
     send(dict(id=1, op='open', uri=page.as_uri(), script=script))
     geometry(1, parents[0])
     receive_until(lambda: (1, 'CountTracks', [0]) in results)
+    if idle_target: assert (1, 'container', True) in results
     for background, expected in [('#182838', 0x182838), ('#e8d8c8', 0xe8d8c8), ('rgba(0,0,0,.5)', 0xffffff), ('#182838', 0x182838)]:
         results[:] = [row for row in results if row[1] != 'background']
         send(dict(id=1, op='eval', script=f'document.body.style.background={json.dumps(background)};'))
@@ -145,6 +158,13 @@ try:
     send(dict(id=2, op='open', uri=page.as_uri(), script=script, lifecycleReload=True))
     geometry(2, parents[0])
     receive_until(lambda: (2, 'CountTracks', [0]) in results)
+    if idle_target:
+        assert (2, 'container', True) in results
+        filling = True
+        receive_until(lambda: idle_state is not None and idle_state['taken'] == 2 and idle_state['ready'] == idle_target)
+        filling = False
+        send(dict(id=0, op='idle-pool', target=0))
+        receive_until(lambda: idle_state['target'] == 0 and idle_state['ready'] == 0 and idle_state['pending'] == 0)
     send(dict(id=1, op='close'))
     send(dict(id=2, op='eval', script='reaper.GetTrack(0, 0);'))
     receive_until(lambda: (2, 'GetTrack', [0, 0]) in results)

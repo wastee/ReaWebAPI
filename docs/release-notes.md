@@ -2,16 +2,12 @@
 
 ## English
 
-- Prepare and retain the shared Windows WebView2 environment on the first host idle tick, with controlled initialization retries.
-- Register independent JSFX event subscriptions concurrently and clean up failed or late registrations.
-- Add bounded native startup timings and JSFX connection measures without changing first-frame gating.
-- Query independent Runtime Studio App metadata concurrently.
-- Preserve Windows maximized state during first presentation, instance reuse, Hide/Show and Dock/Undock.
+- Preload a shared pool of blank WebViews for Apps and JSFX on Windows, macOS and Linux, with idle replenishment, diagnostics and a configurable target of 0–32 containers, default 2.
+- Read initial JSFX editor size and parameters concurrently while preserving instance validation, size restoration and parameter consistency.
+- Prevent the first non-activating Show on macOS from briefly taking keyboard focus.
 
 ## 简体中文
 
-- Windows 在首次主线程空闲回调中准备并保留共享 WebView2 环境，支持受控的初始化重试。
-- JSFX 独立事件订阅改为并发注册，清理失败连接和迟到的订阅。
-- 新增有界的原生启动计时及 JSFX 连接计时，保持现有首帧门控。
-- Runtime Studio 并发查询互不依赖的 App 元数据。
-- 修复 Windows 首次显示、实例复用、隐藏显示及停靠切换时丢失最大化状态。
+- Windows、macOS 和 Linux 为普通 App 与 JSFX 预加载共享空白 WebView 容器池，空闲时补充，提供诊断及 0–32 个容器的数量设置，默认 2。
+- 并发读取 JSFX 初始编辑器尺寸与参数，保留实例校验、尺寸恢复和参数一致性。
+- 修复 macOS 首次不激活显示窗口时短暂取得键盘焦点的问题。

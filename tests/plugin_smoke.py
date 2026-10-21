@@ -1,5 +1,6 @@
 """Native plugin ABI test; Windows --webview also exercises WebView2 with a mock REAPER host."""
 import argparse
+import configparser
 import ctypes as C
 from ctypes import wintypes as W
 import json
@@ -28,6 +29,7 @@ parser.add_argument('--titles', action='store_true', help='Verify HTML and expli
 parser.add_argument('--studio', action='store_true', help='Exercise the v0.1.8 Runtime Studio UI')
 parser.add_argument('--resource-root', type=Path, help='Reuse a dedicated test resource directory across host processes')
 parser.add_argument('--empty', action='store_true', help='Use an empty project for demo tests')
+parser.add_argument('--idle-webviews', type=int, choices=range(33), help='Set the idle container target in the isolated profile')
 args = parser.parse_args()
 if args.dev: args.modern = True
 server_process = None
@@ -37,6 +39,10 @@ if args.webview and sys.platform != 'win32':
 
 root = args.resource_root.resolve() if args.resource_root else args.dll.resolve().parent / ('plugin-smoke-resource-' + str(os.getpid()))
 root.mkdir(parents=True, exist_ok=True)
+if not args.webview and args.idle_webviews is None:
+    args.idle_webviews = 0  # ABI-only hosts do not run a native UI event loop.
+if args.idle_webviews is not None:
+    (root / 'ReaWebAPI.ini').write_text(f'[ReaWebAPI]\nIdleWebViews={args.idle_webviews}\n', encoding='utf-8')
 resource = C.create_string_buffer(str(root).encode('utf-8'))
 version = C.create_string_buffer(b'7.mock')
 guid = C.create_string_buffer(bytes(range(16)), 16)
@@ -378,6 +384,21 @@ class Info(C.Structure):
     _fields_ = [('version', C.c_int), ('hwnd', C.c_void_p), ('register', REGISTER), ('get_func', GETFUNC)]
 
 library = C.CDLL(str(args.dll.resolve()))
+if sys.platform.startswith('linux'):
+    # REAPER initializes SWELL before the extension entry point. The ABI-only host supplies INI reads.
+    @C.CFUNCTYPE(C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_char_p)
+    def read_ini_integer(section, key, default, filename):
+        settings = configparser.ConfigParser()
+        settings.read(os.fsdecode(filename), encoding='utf-8')
+        try: return settings.getint(section.decode(), key.decode(), fallback=default)
+        except ValueError: return default
+    @C.CFUNCTYPE(C.c_int)
+    def unused_swell(): return 0
+    @GETFUNC
+    def swell_func(name):
+        return C.cast(read_ini_integer if name == b'GetPrivateProfileInt' else unused_swell, C.c_void_p).value
+    library.SWELL_dllMain.argtypes = [C.c_void_p, C.c_uint, GETFUNC]
+    assert library.SWELL_dllMain(None, 1, swell_func) == 1
 entry = library.ReaperPluginEntry
 entry.argtypes = [C.c_void_p, C.POINTER(Info)]
 entry.restype = C.c_int

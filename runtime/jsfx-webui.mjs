@@ -290,15 +290,16 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
     }));
     await Promise.all(subscriptions);
     timing('subscriptions', subscribing);
-    if (capabilities.features?.editorSize) {
-      const sizeStarted = globalThis.performance?.now();
-      applySize(await invoke('getEditorSize'));
-      timing('editorSize', sizeStarted);
-    }
-    const paramsStarted = globalThis.performance?.now();
-    await refresh();
+    const snapshotStarted = globalThis.performance?.now();
+    const [size, parameters] = await Promise.all([
+      capabilities.features?.editorSize ? invoke('getEditorSize').then(value => {
+        timing('editorSize', snapshotStarted); return value;
+      }) : undefined,
+      invoke('getParamState').then(value => { timing('parameters', snapshotStarted); return value; })
+    ]);
+    if (size) applySize(size);
+    apply(parameters);
     connecting = false;
-    timing('parameters', paramsStarted);
     timing('connect', started);
   } catch (error) {
     disposed = true; ++capabilityRequest;

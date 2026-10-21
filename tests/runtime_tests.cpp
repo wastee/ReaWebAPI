@@ -11,6 +11,8 @@ using namespace reaweb;
 namespace {
 int platform_count = 0;
 int platform_pumps = 0;
+int platform_idles = 0;
+unsigned platform_capacity = 0;
 std::vector<fs::path> profiles;
 std::string waiting_on;
 bool defer_next_presentation = false;
@@ -106,6 +108,8 @@ struct FakeWindow : Window {
 std::vector<std::weak_ptr<FakeWindow>> windows;
 struct FakePlatform : Platform {
   void pump() override { ++platform_pumps; }
+  void set_idle_capacity(unsigned count) override { platform_capacity = count; }
+  void idle() override { ++platform_idles; }
   std::string clipboard;
   void desktop(const std::string& method, const Json& args, DesktopReply reply) override {
     if (method == "ReaWeb_ClipboardWriteText") { clipboard = args[0]; reply({{"result", true}}); }
@@ -320,10 +324,24 @@ int main() {
 #else
       CHECK(platform_count == 0);
 #endif
+      runtime.configure_webviews(5);
+      runtime.tick();
+      CHECK(platform_count == 1 && platform_capacity == 5 && platform_idles > 0 && windows.empty());
+      const auto idles = platform_idles;
+      runtime.configure_webviews(0); runtime.tick();
+      CHECK(platform_capacity == 0 && platform_idles == idles);
+      runtime.configure_webviews(5); runtime.tick();
+      CHECK(platform_capacity == 5 && platform_idles > idles);
+      bool invalid_capacity = false;
+      try { runtime.configure_webviews(33); } catch (const Error& e) { invalid_capacity = e.code == "INVALID_ARGUMENT"; }
+      CHECK(invalid_capacity && platform_capacity == 5);
       defer_next_presentation = true;
       const auto id = runtime.open(entry.u8string()); auto window = windows.back().lock();
+      const auto busy_idles = platform_idles;
+      runtime.tick(); CHECK(platform_idles == busy_idles);
       result(runtime, *window, window->send("__reawebHello", {1}));
       CHECK(runtime.is_ready(id) && !window->visible());
+      runtime.tick(); CHECK(platform_idles == busy_idles);
       result(runtime, *window, window->send("ReaWeb_SetBounds", {{{"width", 900}}}));
       CHECK(window->wants_visible && !window->visible());
       runtime.set_docked(id, true);

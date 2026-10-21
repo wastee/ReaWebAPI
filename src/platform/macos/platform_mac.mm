@@ -3,6 +3,7 @@
 #include "platform/shared/page_background.hpp"
 #include "platform/shared/transparency.hpp"
 #include "platform/shared/startup.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include "platform/shared/drag_regions.hpp"
 #include "platform/shared/window_menu.hpp"
 #import <Cocoa/Cocoa.h>
@@ -23,6 +24,26 @@ void open_external(const std::string& url) {
     throw reaweb::Error("EXTERNAL_OPEN_FAILED", "The system could not open this link");
 }
 }
+
+@interface ReaWebIdleDelegate : NSObject <WKNavigationDelegate> {
+@public
+  std::function<void(bool)> completed;
+}
+@end
+@implementation ReaWebIdleDelegate
+- (void)webView:(WKWebView*)view didFinishNavigation:(WKNavigation*)navigation {
+  (void)view; (void)navigation; if (completed) completed(true);
+}
+- (void)webView:(WKWebView*)view didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
+  (void)view; (void)navigation; (void)error; if (completed) completed(false);
+}
+- (void)webView:(WKWebView*)view didFailNavigation:(WKNavigation*)navigation withError:(NSError*)error {
+  (void)view; (void)navigation; (void)error; if (completed) completed(false);
+}
+- (void)webViewWebContentProcessDidTerminate:(WKWebView*)view {
+  (void)view; if (completed) completed(false);
+}
+@end
 
 @interface ReaWebDelegate : NSObject <WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate> {
 @public
@@ -192,6 +213,31 @@ namespace reaweb {
 namespace {
 NSString* ns(const std::string& text) { return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding]; }
 char dock_icon_owner;
+class MacIdleView final : public std::enable_shared_from_this<MacIdleView> {
+  ReaWebNativeView* view_;
+  ReaWebIdleDelegate* delegate_;
+public:
+  bool ready = false, failed = false;
+  MacIdleView(WKWebsiteDataStore* data, WKProcessPool* pool) {
+    auto config = [WKWebViewConfiguration new];
+    config.websiteDataStore = data; config.processPool = pool;
+    [config setURLSchemeHandler:[ReaWebSchemeHandler new] forURLScheme:@"reaweb"];
+    view_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
+    delegate_ = [ReaWebIdleDelegate new]; view_.navigationDelegate = delegate_;
+  }
+  ~MacIdleView() { delegate_->completed = {}; view_.navigationDelegate = nil; [view_ stopLoading]; }
+  void start() {
+    const auto weak = weak_from_this();
+    delegate_->completed = [weak](bool success) {
+      if (auto self = weak.lock()) { self->ready = success; self->failed = !success; }
+    };
+    [view_ loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
+  }
+  ReaWebNativeView* take() {
+    delegate_->completed = {}; view_.navigationDelegate = nil;
+    auto view = view_; view_ = nil; return view;
+  }
+};
 class MacWindow final : public Window, public std::enable_shared_from_this<MacWindow> {
   std::unique_ptr<SwellWindow> window_;
   ReaWebNativeView* webview_;
@@ -205,6 +251,14 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
     if (!window_) return nil;
     auto content = (__bridge NSView*)GetDlgItem(static_cast<HWND>(window_->handle()), 0);
     return content.window.contentView == content ? content.window : nil;
+  }
+  void set_host_visible(bool visible) {
+    if (visible && !delegate_->options.hosted) if (auto native = floating_window()) {
+      // SWELL may promote the first SW_SHOWNOACTIVATE to an activating show.
+      native.contentView.hidden = NO;
+      [native orderFront:nil]; return;
+    }
+    window_->set_visible(visible);
   }
   void configure_floating() {
     const auto& options = delegate_->options;
@@ -249,6 +303,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   ReaWebDelegate* delegate_;
   mutable Json normal_;
   bool maximized_ = false;
+  bool controller_prewarmed_ = false;
   StartupPresentation startup_;
   __weak NSWindow* startup_key_ = NSApp.keyWindow;
   bool snapshot_pending_ = false;
@@ -324,19 +379,24 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
     icon_window_ = native;
   }
 public:
-  MacWindow(WindowOptions options, WKWebsiteDataStore* data, WKProcessPool* pool) : startup_(options.hidden) {
+  MacWindow(WindowOptions options, WKWebsiteDataStore* data, WKProcessPool* pool,
+      std::shared_ptr<MacIdleView> prepared = {}) : startup_(options.hidden) {
     delegate_ = [ReaWebDelegate new];
     delegate_->options = std::move(options);
     mark_startup(StartupTiming::ControllerStart);
     delegate_->entryURI = delegate_->options.url.empty() ? file_uri(delegate_->options.entry) : delegate_->options.url;
     delegate_->navigationURI = delegate_->entryURI;
     delegate_->isClosed = false;
-    auto config = [WKWebViewConfiguration new];
-    config.websiteDataStore = data;
-    config.processPool = pool;
-    if (delegate_->options.resources) {
-      auto handler = [ReaWebSchemeHandler new];
+    WKWebViewConfiguration* config;
+    if (prepared) {
+      webview_ = prepared->take(); controller_prewarmed_ = true;
+      config = webview_.configuration;
+      auto handler = (ReaWebSchemeHandler*)[config urlSchemeHandlerForURLScheme:@"reaweb"];
       handler->resources = delegate_->options.resources;
+    } else {
+      config = [WKWebViewConfiguration new];
+      config.websiteDataStore = data; config.processPool = pool;
+      auto handler = [ReaWebSchemeHandler new]; handler->resources = delegate_->options.resources;
       [config setURLSchemeHandler:handler forURLScheme:@"reaweb"];
     }
     [config.userContentController addScriptMessageHandler:delegate_ name:@"reaweb"];
@@ -346,7 +406,7 @@ public:
       (delegate_->options.frameless ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : ""))
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
-    webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
+    if (!prepared) webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
     mark_startup(StartupTiming::ControllerReady);
     webview_->dropEnabled = false; webview_->sourceClosed = false;
     webview_->receiveDrop = delegate_->options.on_drop;
@@ -524,7 +584,7 @@ public:
       delegate_->options.on_error("WKWebView initial frame did not become available within 15 seconds"); return;
     }
     if (startup_.present()) {
-      window_->set_visible(true);
+      set_host_visible(true);
       if (!delegate_->options.hosted) mark_startup(StartupTiming::Revealed);
       if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
       if (!delegate_->options.hosted && startup_.focus_requested() && NSApp.active && NSApp.keyWindow == startup_key_) {
@@ -555,7 +615,7 @@ public:
   void set_icon_visible(bool visible) override { icon_visible_ = visible; apply_icon(); }
   void set_visible(bool visible) override {
     startup_.request(visible);
-    window_->set_visible(visible && !startup_.pending());
+    set_host_visible(visible && !startup_.pending());
   }
   void show() override {
     if (closed() || startup_.cancelled()) return;
@@ -599,7 +659,7 @@ public:
     if (maximized_ && window_->visible() && !webview_.window.zoomed) [webview_.window zoom:nil];
   }
   Json diagnostics() const override {
-    return {{"backend", "WKWebView"}, {"browserVersion", [[[NSBundle bundleForClass:[WKWebView class]] objectForInfoDictionaryKey:@"CFBundleVersion"] UTF8String] ?: "system"}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
+    return {{"backend", "WKWebView"}, {"controllerPrewarmed", controller_prewarmed_}, {"browserVersion", [[[NSBundle bundleForClass:[WKWebView class]] objectForInfoDictionaryKey:@"CFBundleVersion"] UTF8String] ?: "system"}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
   }
   bool frameless_active() const override {
     auto native = floating_window();
@@ -618,6 +678,7 @@ public:
 class MacPlatform final : public Platform {
   WKWebsiteDataStore* data_;
   WKProcessPool* pool_;
+  IdlePool<MacIdleView> idle_;
 public:
   explicit MacPlatform(const fs::path& path) {
     // Public WebKit APIs select a persistent profile; WebKit owns its physical storage location.
@@ -684,7 +745,14 @@ public:
     }
   }
   std::shared_ptr<Window> open(WindowOptions options) override {
-    @autoreleasepool { return std::make_shared<MacWindow>(std::move(options), data_, pool_); }
+    @autoreleasepool { return std::make_shared<MacWindow>(std::move(options), data_, pool_, idle_.take()); }
+  }
+  void set_idle_capacity(unsigned count) override { idle_.capacity(count); }
+  Json idle_diagnostics() const override { return idle_.diagnostics(); }
+  void idle() override {
+    @autoreleasepool {
+      idle_.maintain([this] { auto view = std::make_shared<MacIdleView>(data_, pool_); view->start(); return view; });
+    }
   }
 };
 }

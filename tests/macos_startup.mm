@@ -12,12 +12,51 @@ using namespace reaweb;
 reaper_plugin_info_t* host;
 fs::path resource;
 int id = 0, samples = 0, variant = 0;
+bool pooled = false;
+DWORD open_delay = 0;
 DWORD started;
 int hidden_stage = 0;
 int hidden_cycles = 0;
 DWORD hidden_ready = 0;
 __weak NSWindow* hidden_key;
+::id key_observer;
+bool unexpected_key = false;
+DWORD host_focus_since = 0;
 void tick();
+WKWebView* find_view();
+NSWindow* host_window() {
+  ::id native = (__bridge ::id)host->hwnd_main;
+  return [native isKindOfClass:NSWindow.class] ? native : [native window];
+}
+void focus_trace(const char* event, NSWindow* changed = nil) {
+  auto view = find_view();
+  const auto number = [](NSWindow* window) { return window ? window.windowNumber : -1; };
+  Json value{{"event", event}, {"ms", GetTickCount() - started}, {"stage", hidden_stage},
+    {"active", bool(NSApp.active)}, {"expected", number(hidden_key)}, {"key", number(NSApp.keyWindow)},
+    {"host", number(host_window())}, {"view", number(view.window)}, {"viewVisible", bool(view.window.visible)},
+    {"viewKey", bool(view.window.keyWindow)}, {"changed", number(changed)}};
+  std::ofstream(resource / "startup-focus.jsonl", std::ios::app) << value.dump() << '\n';
+}
+bool prepare_hidden_host() {
+  // The evaluation dialog is modeless and is not reported by NSApp.modalWindow.
+  for (NSWindow* window in NSApp.windows) if (window.visible && [window.title hasPrefix:@"About REAPER"]) {
+    std::vector<NSView*> queue{window.contentView};
+    while (!queue.empty()) {
+      auto view = queue.back(); queue.pop_back();
+      if ([view isKindOfClass:NSButton.class] && [[(NSButton*)view title] hasPrefix:@"Still Evaluating"] && [(NSButton*)view isEnabled]) {
+        focus_trace("dismiss-evaluation-dialog", window); [(NSButton*)view performClick:nil]; break;
+      }
+      for (NSView* child in view.subviews) queue.push_back(child);
+    }
+    host_focus_since = 0; return false;
+  }
+  if (!NSApp.active || NSApp.keyWindow != host_window()) {
+    [NSApp activateIgnoringOtherApps:YES]; [host_window() makeKeyWindow];
+    host_focus_since = 0; return false;
+  }
+  if (!host_focus_since) host_focus_since = GetTickCount();
+  return GetTickCount() - host_focus_since >= 200;
+}
 bool page_painted(WKWebView* view) {
   using Capture = CGImageRef (*)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
   static auto capture = reinterpret_cast<Capture>(dlsym(RTLD_DEFAULT, "CGWindowListCreateImage"));
@@ -36,6 +75,12 @@ bool page_painted(WKWebView* view) {
   return green;
 }
 void finish(const std::string& text) {
+  if (variant == 4 || variant == 6) focus_trace(text.c_str());
+  if (key_observer) { [NSNotificationCenter.defaultCenter removeObserver:key_observer]; key_observer = nil; }
+  if (id) {
+    auto diagnostics = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_GetDiagnostics"));
+    if (diagnostics) std::ofstream(resource / "startup-diagnostics.json") << diagnostics(id);
+  }
   std::ofstream(resource / "startup-test.log", std::ios::app) << text << '\n';
   host->Register("-timer", reinterpret_cast<void*>(tick));
   PostMessage(host->hwnd_main, WM_CLOSE, 0, 0);
@@ -56,15 +101,26 @@ void hidden_tick() {
   const auto close = reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_Close"));
   const auto path = (resource / "Scripts/startup-test/index.html").string();
   if (!id) {
+    if (!prepare_hidden_host()) return;
     hidden_key = NSApp.keyWindow;
+    focus_trace("before-hidden-open");
+    key_observer = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil usingBlock:^(NSNotification* note) {
+      focus_trace("became-key", note.object);
+      if ((hidden_stage == 0 || hidden_stage == 5) && note.object != hidden_key) unexpected_key = true;
+    }];
     id = open(path.c_str(), variant == 6 ? "{\"instanceKey\":\"startup-test.lua\",\"hidden\":true,\"frameless\":true}" :
       "{\"instanceKey\":\"startup-test.lua\",\"hidden\":true}");
+    focus_trace("after-hidden-open");
     if (!id) throw std::runtime_error("Hidden OpenEx failed");
   }
   auto view = find_view();
   if (hidden_stage == 0) {
+    if (pooled && view) {
+      auto diagnostics = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_GetDiagnostics"));
+      if (!Json::parse(diagnostics(id)).value("controllerPrewarmed", false)) throw std::runtime_error("Prepared hidden container was not used");
+    }
     if (view && view.window.visible) throw std::runtime_error("Hidden window was ordered on screen");
-    if (NSApp.keyWindow != hidden_key) throw std::runtime_error("Hidden startup changed the key window");
+    if (unexpected_key || NSApp.keyWindow != hidden_key) throw std::runtime_error("Hidden startup changed the key window");
     const auto receive = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_Receive"));
     if (std::string(receive(id)) == "hidden-ready") hidden_ready = GetTickCount();
     if (!hidden_ready || GetTickCount() - hidden_ready < 1000) return;
@@ -76,11 +132,11 @@ void hidden_tick() {
       throw std::runtime_error("Show did not preserve key window");
     hidden_stage = 5;
   } else if (hidden_stage == 5) {
-    if (NSApp.keyWindow != hidden_key) throw std::runtime_error("First Show changed the key window");
+    if (unexpected_key || NSApp.keyWindow != hidden_key) throw std::runtime_error("First Show changed the key window");
     if (!page_painted(view)) return;
+    hidden_stage = 4;
     if (!reinterpret_cast<bool(*)(int)>(host->GetFunc("ReaWeb_Focus"))(id))
       throw std::runtime_error("Focus failed");
-    hidden_stage = 4;
   } else if (hidden_stage == 4) {
     auto responder = view.window.firstResponder;
     if (!NSApp.active || !view.window.keyWindow || ![responder isKindOfClass:NSView.class] ||
@@ -142,6 +198,7 @@ void tick() {
       return;
     }
     if (!IsWindowVisible(host->hwnd_main)) return;
+    if (GetTickCount() - started < open_delay) return;
     if (variant == 4 || variant == 6) {
       if (host->GetFunc("ReaWeb_OpenEx")) hidden_tick();
       return;
@@ -182,6 +239,10 @@ void tick() {
         writeToFile:[NSString stringWithUTF8String:(resource / "startup-failure.png").c_str()] atomically:YES];
       throw std::runtime_error("First visible native frame is blank or missing page content");
     }
+    if (pooled) {
+      auto diagnostics = reinterpret_cast<const char*(*)(int)>(host->GetFunc("ReaWeb_GetDiagnostics"));
+      if (!Json::parse(diagnostics(id)).value("controllerPrewarmed", false)) throw std::runtime_error("Prepared container was not used");
+    }
     if (++samples == 20) finish("PASS: first-visible native content, samples=" + std::to_string(samples) +
       " elapsedMs=" + std::to_string(GetTickCount() - started));
   } catch (const std::exception& error) { finish(std::string("FAIL: ") + error.what()); }
@@ -193,6 +254,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   resource = fs::u8path(reinterpret_cast<const char*(*)()>(host->GetFunc("GetResourcePath"))());
   if (!fs::exists(resource / "startup-test.enabled")) return 0;
   std::ifstream(resource / "startup-test.enabled") >> variant;
+  pooled = fs::exists(resource / "startup-test.pooled");
+  std::ifstream(resource / "startup-test.delay") >> open_delay;
   const auto page = resource / "Scripts/startup-test/index.html"; fs::create_directories(page.parent_path());
   const auto background = variant == 1 ? "#e8d8c8" : variant == 2 ? "linear-gradient(120deg,#182838,#486878)" : "#182838";
   std::ofstream(page) << "<!doctype html><style>html{min-height:100%;background:" << background

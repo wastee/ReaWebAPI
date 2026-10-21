@@ -2,6 +2,7 @@
 #include "platform/shared/navigation.hpp"
 #include "platform/shared/page_background.hpp"
 #include "platform/shared/drag_regions.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include <gtk/gtk.h>
 #include <gtk/gtkx.h>
 #include <gdk/gdkx.h>
@@ -31,6 +32,32 @@ void open_external(const std::string& url) {
     throw Error("EXTERNAL_OPEN_FAILED", message);
   }
 }
+class GtkIdleView {
+  WebKitWebView* view_ = nullptr;
+public:
+  bool ready = false, failed = false;
+  explicit GtkIdleView(WebKitWebContext* context) {
+    view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, nullptr));
+    g_object_ref_sink(view_);
+    g_signal_connect(view_, "load-changed", G_CALLBACK(+[](WebKitWebView*, WebKitLoadEvent event, gpointer data) {
+      if (event == WEBKIT_LOAD_FINISHED) static_cast<GtkIdleView*>(data)->ready = true;
+    }), this);
+    g_signal_connect(view_, "load-failed", G_CALLBACK(+[](WebKitWebView*, WebKitLoadEvent, const char*, GError*, gpointer data) -> gboolean {
+      static_cast<GtkIdleView*>(data)->failed = true; return TRUE;
+    }), this);
+    g_signal_connect(view_, "web-process-terminated", G_CALLBACK(+[](WebKitWebView*, WebKitWebProcessTerminationReason, gpointer data) {
+      static_cast<GtkIdleView*>(data)->failed = true;
+    }), this);
+    webkit_web_view_load_uri(view_, "about:blank");
+  }
+  ~GtkIdleView() {
+    if (view_) { g_signal_handlers_disconnect_by_data(view_, this); gtk_widget_destroy(GTK_WIDGET(view_)); g_object_unref(view_); }
+  }
+  WebKitWebView* take() {
+    g_signal_handlers_disconnect_by_data(view_, this);
+    auto view = view_; view_ = nullptr; return view;
+  }
+};
 class Page {
   LinuxChannel& channel_;
   int id_;
@@ -238,7 +265,7 @@ public:
     XFlush(display);
     return true;
   }
-  Page(LinuxChannel& channel, WebKitWebContext* context, const Json& request)
+  Page(LinuxChannel& channel, WebKitWebContext* context, const Json& request, std::shared_ptr<GtkIdleView> prepared = {})
     : channel_(channel), id_(request.at("id").get<int>()), uri_(request.at("uri").get<std::string>()) {
     frameless_ = request.value("frameless", false); resizable_ = request.value("resizable", true);
     transparent_ = request.value("transparent", false);
@@ -251,7 +278,10 @@ public:
     if (frameless_ && !window_moves_supported()) throw Error("HOST_UNAVAILABLE", "Frameless windows require an X11 window manager with _NET_WM_MOVERESIZE support");
     intercept_reload_ = request.value("lifecycleReload", false);
     navigation_uri_ = uri_;
-    manager_ = webkit_user_content_manager_new();
+    if (prepared) {
+      view_ = prepared->take();
+      manager_ = webkit_web_view_get_user_content_manager(view_); g_object_ref(manager_);
+    } else manager_ = webkit_user_content_manager_new();
     g_signal_connect(manager_, "script-message-received::reaweb", G_CALLBACK(+[](WebKitUserContentManager*, WebKitJavascriptResult* result, gpointer data) {
       auto self = static_cast<Page*>(data);
       const auto uri = webkit_web_view_get_uri(self->view_);
@@ -278,7 +308,7 @@ public:
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(manager_, script);
     webkit_user_script_unref(script);
-    view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, "user-content-manager", manager_, nullptr));
+    if (!prepared) view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", context, "user-content-manager", manager_, nullptr));
     if (transparent_) {
       g_object_set_data(G_OBJECT(view_), "reaweb-alpha", this);
       webkit_web_view_set_background_color(view_, &background_);
@@ -289,7 +319,8 @@ public:
       resources_ = std::make_shared<WebResources>(fs::u8path(resource_root), uri_.substr(9, end - 9));
       g_object_set_data(G_OBJECT(view_), "reaweb-resources", resources_.get());
     }
-    g_object_ref_sink(view_);
+    if (!prepared) g_object_ref_sink(view_);
+    channel_.send({{"id", id_}, {"op", "container"}, {"prewarmed", bool(prepared)}});
     auto settings = webkit_web_view_get_settings(view_);
     webkit_settings_set_enable_developer_extras(settings, TRUE);
     webkit_settings_set_enable_javascript(settings, TRUE);
@@ -599,6 +630,8 @@ struct Process {
   LinuxChannel channel{3};
   WebKitWebContext* context = nullptr;
   std::map<int, std::unique_ptr<Page>> pages;
+  IdlePool<GtkIdleView> idle;
+  Json last_idle;
   explicit Process(const char* data) {
     auto cache = (fs::path(data) / "Cache").string();
     auto manager = webkit_website_data_manager_new("base-data-directory", data, "base-cache-directory", cache.c_str(), nullptr);
@@ -611,7 +644,7 @@ struct Process {
     channel.send({{"op", "ready"}, {"protocol", 1}, {"version", REAWEB_VERSION}, {"frameless", window_moves_supported()}, {"browserVersion",
       std::to_string(webkit_get_major_version()) + "." + std::to_string(webkit_get_minor_version()) + "." + std::to_string(webkit_get_micro_version())}});
   }
-  ~Process() { pages.clear(); g_object_unref(context); }
+  ~Process() { pages.clear(); idle.capacity(0); g_object_unref(context); }
   int fd() const { return channel.fd(); }
   void desktop(const Json& request) {
     const auto token = request.at("request").get<std::string>();
@@ -733,11 +766,18 @@ struct Process {
     channel.pump([this](const Json& request) {
       const int id = request.at("id");
       const auto op = request.at("op").get<std::string>();
+      if (op == "idle-pool") { idle.capacity(request.at("target").get<unsigned>()); }
+      if (op == "idle") { idle.maintain([this] { return std::make_shared<GtkIdleView>(context); }); }
+      if (op == "idle-pool" || op == "idle") {
+        const auto state = idle.diagnostics();
+        if (state != last_idle) { channel.send({{"op", "idle-pool"}, {"state", state}}); last_idle = state; }
+        return;
+      }
       if (op == "desktop") { desktop(request); return; }
       try {
         if (op == "open") {
           if (pages.size() >= 32 || pages.count(id)) throw std::runtime_error("WebKit window limit exceeded");
-          pages.emplace(id, std::make_unique<Page>(channel, context, request));
+          pages.emplace(id, std::make_unique<Page>(channel, context, request, idle.take()));
         } else if (op == "close") pages.erase(id);
         else if (auto it = pages.find(id); it != pages.end()) it->second->command(request);
       } catch (const std::exception& error) { channel.send({{"id", id}, {"op", "error"}, {"error", error.what()}}); }

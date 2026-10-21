@@ -225,6 +225,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
     auto resource = load<const char* (*)()>(rec, "GetResourcePath");
     add_registration("prefpage", initialize_preferences(instance, fs::u8path(resource()), [](const ExternalSettings& settings) {
       if (runtime) runtime->configure_external(settings);
+    }, [](unsigned count) {
+      if (runtime) runtime->configure_webviews(count);
     }));
     auto enum_projects = load<ReaProject* (*)(int, char*, int)>(rec, "EnumProjects");
     auto count_selected = load<int (*)(ReaProject*)>(rec, "CountSelectedTracks");
@@ -362,6 +364,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       }};
     runtime = std::make_unique<Runtime>(std::move(host), fs::u8path(resource()), log_error, std::move(dock));
     runtime->schedule_webview_warmup();
+    runtime->configure_webviews(idle_webview_preferences());
     runtime->initialize_jsfx(make_jsfx_editor_discovery());
     try { runtime->configure_external(external_preferences()); }
     catch (const std::exception& error) { log_error(std::string("External Client: ") + error.what()); }

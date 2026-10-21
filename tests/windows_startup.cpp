@@ -5,7 +5,7 @@
 #include <thread>
 
 using namespace reaweb;
-#define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
+#define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed at " + std::to_string(__LINE__) + ": " #value); } while (false)
 
 static void check_floating_frame(HWND hwnd) {
   CHECK(!(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD));
@@ -39,6 +39,74 @@ int main(int argc, char** argv) {
     struct Destroy { HWND hwnd; ~Destroy() { DestroyWindow(hwnd); } } destroy{host};
     ShowWindow(host, SW_SHOW); SetForegroundWindow(host);
     const int count = argc > 1 ? std::stoi(argv[1]) : 20;
+    const bool pooled = argc > 3 && std::string(argv[3]) == "--pooled";
+    const auto create_platform = [&](const fs::path& path) {
+      auto platform = make_platform(path);
+      if (pooled) {
+        platform->set_idle_capacity(1);
+        const auto deadline = GetTickCount64() + 20000;
+        while (platform->idle_diagnostics()["ready"] != 1) {
+          MSG message{};
+          while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+          platform->pump(); platform->idle(); CHECK(GetTickCount64() < deadline); Sleep(2);
+        }
+      }
+      return platform;
+    };
+    if (argc > 2 && std::string(argv[2]) == "--pool") {
+      auto platform = make_platform(root / "pool-profile");
+      const auto foreground = GetForegroundWindow();
+      const auto pump = [&] {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+        platform->pump(); Sleep(2);
+      };
+      const auto fill = [&](int capacity) {
+        platform->set_idle_capacity(capacity);
+        const auto deadline = GetTickCount64() + 20000;
+        while (platform->idle_diagnostics()["ready"] != capacity) {
+          pump(); platform->idle(); CHECK(GetTickCount64() < deadline);
+          CHECK(GetForegroundWindow() == foreground);
+        }
+      };
+      fill(5);
+      std::vector<std::shared_ptr<Window>> windows;
+      std::vector<int> messages(7, 0);
+      std::string error;
+      for (int i = 0; i < 7; ++i) {
+        const auto directory = root / ("app-" + std::to_string(i)); fs::create_directories(directory);
+        const auto entry = directory / "index.html";
+        std::ofstream(entry) << "<!doctype html><p>app-" << i << "</p>";
+        WindowOptions options; options.entry = entry; options.hidden = true;
+        options.parent = host; options.hosted = i % 2 != 0; options.frameless = i == 2;
+        options.resources = std::make_shared<WebResources>(directory, "pool-app-" + std::to_string(i));
+        options.url = options.resources->origin() + "/index.html";
+        options.script = "addEventListener('DOMContentLoaded',()=>{const clean=localStorage.getItem('owner')===null;localStorage.setItem('owner',document.body.textContent);chrome.webview.postMessage((clean?'':'dirty:')+document.body.textContent);});";
+        options.on_message = [&, i](std::string text) { if (text == "app-" + std::to_string(i)) ++messages[i]; else error = text; };
+        options.on_error = [&](std::string text) { error = std::move(text); };
+        windows.push_back(platform->open(std::move(options)));
+      }
+      CHECK(platform->idle_diagnostics()["taken"] == 5);
+      platform->set_idle_capacity(0);
+      const auto deadline = GetTickCount64() + 20000;
+      while (std::any_of(messages.begin(), messages.end(), [](int n) { return n != 1; })) {
+        pump(); CHECK(error.empty()); CHECK(GetTickCount64() < deadline);
+        for (auto& window : windows) { window->tick(); CHECK(!window->visible()); }
+      }
+      for (int i = 0; i < 7; ++i) CHECK(windows[i]->diagnostics()["controllerPrewarmed"] == (i < 5));
+      fill(5); fill(2); CHECK(platform->idle_diagnostics()["ready"] == 2);
+      for (auto& window : windows) window->evaluate("chrome.webview.postMessage(document.body.textContent)");
+      while (std::any_of(messages.begin(), messages.end(), [](int n) { return n != 2; })) {
+        pump(); CHECK(error.empty()); CHECK(GetTickCount64() < deadline);
+      }
+      windows.clear(); platform->set_idle_capacity(0);
+      platform->set_idle_capacity(5); platform->idle(); platform->set_idle_capacity(0);
+      const auto finish = GetTickCount64() + 1000;
+      while (GetTickCount64() < finish) pump();
+      CHECK(platform->idle_diagnostics()["pending"] == 0);
+      std::cout << "PASS: five idle containers, mixed hosted/floating Apps, isolation, depletion fallback, refill, shrink, disable and late creation cleanup\n";
+      return 0;
+    }
     if (argc > 2 && (std::string(argv[2]) == "--hidden" || std::string(argv[2]) == "--maximized")) {
       if (GetForegroundWindow() != host) {
         POINT saved{}; GetCursorPos(&saved); SetCursorPos(50, 100);
@@ -61,7 +129,7 @@ int main(int argc, char** argv) {
         const auto entry = path / "index.html";
         std::ofstream(entry) << "<!doctype html><style>html{background:#182838}body{margin:0}"
           "#marker{width:100px;height:100px;background:#00ff00}</style><div id=marker></div>";
-        auto platform = make_platform(path / "profile");
+        auto platform = create_platform(path / "profile");
         bool ready = false;
         std::string error;
         WindowOptions options;
@@ -119,7 +187,7 @@ int main(int argc, char** argv) {
       for (bool frameless : {false, true}) for (int intent = 0; intent < 3; ++intent) {
         const auto path = root / ("early-" + std::to_string(frameless) + "-" + std::to_string(intent)); fs::create_directories(path);
         const auto entry = path / "index.html"; std::ofstream(entry) << "<!doctype html><p>Early intent</p>";
-        auto platform = make_platform(path / "profile");
+        auto platform = create_platform(path / "profile");
         bool ready = false;
         WindowOptions options; options.entry = entry; options.hidden = true; options.parent = host;
         options.frameless = frameless;
@@ -154,7 +222,7 @@ int main(int argc, char** argv) {
         const auto path = root / ("maximized-" + std::to_string(frameless) + "-" + std::to_string(scenario) + "-" + std::to_string(run));
         fs::create_directories(path);
         const auto entry = path / "index.html"; std::ofstream(entry) << "<!doctype html><p>Maximized startup</p>";
-        auto platform = make_platform(path / "profile");
+        auto platform = create_platform(path / "profile");
         bool ready = false;
         std::string error;
         WindowOptions options; options.entry = entry; options.parent = host; options.hidden = hidden; options.frameless = frameless;
@@ -220,7 +288,7 @@ int main(int argc, char** argv) {
       const auto background = variant == 1 ? "#e8d8c8" : variant == 2 ? "linear-gradient(120deg,#182838,#486878)" : "#182838";
       std::ofstream(entry) << "<!doctype html><style>html{min-height:100%;background:" << background
         << "}body{margin:0}#marker{width:100px;height:100px;background:#00ff00}</style><div id=marker></div>";
-      auto platform = make_platform(path / "profile");
+      auto platform = create_platform(path / "profile");
       std::string error;
       WindowOptions options;
       options.entry = entry; options.title = "Startup acceptance"; options.parent = host;

@@ -38,4 +38,4 @@ Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned proje
 
 [Transparent Window](../web/transparent/README.md) demonstrates desktop Alpha, translucent panels, rounded corners and shadows. It is included in the SDK as `transparent/`.
 
-The JSFX helper registers independent startup subscriptions concurrently after its capability handshake. It preserves parameter and editor-size readiness on return. See [startup timing](../docs/devtools.md#startup-timing).
+The JSFX helper registers independent startup subscriptions concurrently after its capability handshake, then reads initial size and parameters concurrently. It returns only after both are applied, preserving newer events. See [startup timing](../docs/devtools.md#startup-timing).

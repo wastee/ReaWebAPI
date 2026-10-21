@@ -414,13 +414,14 @@ void Runtime::tick() {
   if (ticking_) return;
   ticking_ = true;
   struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
-#ifdef _WIN32
   if (platform_warmup_pending_) {
     platform_warmup_pending_ = false;
     // The host timer runs on the STA UI thread, after extension registration.
+#ifndef _WIN32
+    if (idle_webviews_)
+#endif
     try { prepare_platform(); } catch (const std::exception&) {}
   }
-#endif
   sync_external();
   tick_jsfx();
   if (auto platform = platform_.lock()) platform->pump();
@@ -637,6 +638,14 @@ void Runtime::tick() {
       }
     } catch (const std::exception& e) { fail(s, e.what()); }
     ++it;
+  }
+  if (idle_webviews_ && Clock::now() < deadline &&
+      std::none_of(sessions_.begin(), sessions_.end(), [](const auto& item) {
+        const auto& s = *item.second;
+        return !s.ready || s.outstanding || s.closing ||
+          (s.window->presentation_pending() && s.window->visibility_requested());
+      })) {
+    if (auto platform = platform_.lock()) platform->idle();
   }
 }
 }

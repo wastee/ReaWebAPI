@@ -33,6 +33,7 @@ Json Runtime::diagnostics(int id) const {
   }
   const auto& s = *it->second;
   Json result = s.window->diagnostics();
+  result["idleWebViews"] = s.app->platform->idle_diagnostics();
   result["startup"] = s.startup_timing->snapshot();
   result["startup"]["windowId"] = s.id;
   result["startup"]["documentGeneration"] = s.generation;

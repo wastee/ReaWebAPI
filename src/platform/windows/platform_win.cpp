@@ -3,6 +3,7 @@
 #include "platform/shared/page_background.hpp"
 #include "platform/shared/transparency.hpp"
 #include "platform/shared/startup.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include "platform/shared/drag_regions.hpp"
 #include <windows.h>
 #include <dwmapi.h>
@@ -52,6 +53,60 @@ void open_external(const std::string& url) {
     throw Error("EXTERNAL_OPEN_FAILED", "The system could not open this link");
 }
 constexpr wchar_t window_class[] = L"ReaWebAPI.Window";
+class WinIdleView final : public std::enable_shared_from_this<WinIdleView> {
+  HWND parent_ = nullptr;
+  ComPtr<ICoreWebView2Controller> controller_;
+  ComPtr<ICoreWebView2> view_;
+  EventRegistrationToken loaded_{}, process_{};
+public:
+  bool ready = false, failed = false;
+  explicit WinIdleView(HINSTANCE instance) {
+    parent_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"", WS_POPUP,
+      0, 0, 860, 640, nullptr, nullptr, instance, nullptr);
+    if (!parent_) throw std::runtime_error("Cannot create an idle WebView host");
+  }
+  ~WinIdleView() {
+    if (controller_) controller_->Close();
+    view_.Reset(); controller_.Reset();
+    if (parent_) DestroyWindow(parent_);
+  }
+  void start(ICoreWebView2Environment* environment) {
+    auto weak = weak_from_this();
+    check(environment->CreateCoreWebView2Controller(parent_,
+      Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>([weak](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+        auto self = weak.lock();
+        if (!self) { if (controller) controller->Close(); return S_OK; }
+        try {
+          check(result, "Prepare idle WebView");
+          if (!controller) throw std::runtime_error("Idle WebView controller unavailable");
+          self->controller_ = controller;
+          check(controller->put_IsVisible(FALSE), "Hide idle WebView");
+          check(controller->get_CoreWebView2(&self->view_), "Idle WebView");
+          check(self->view_->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+            [weak](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+              if (auto slot = weak.lock()) {
+                BOOL success = FALSE; args->get_IsSuccess(&success);
+                slot->ready = success != FALSE; slot->failed = !success;
+              }
+              return S_OK;
+            }).Get(), &self->loaded_), "Idle WebView navigation");
+          check(self->view_->add_ProcessFailed(Callback<ICoreWebView2ProcessFailedEventHandler>(
+            [weak](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs*) -> HRESULT {
+              if (auto slot = weak.lock()) slot->failed = true;
+              return S_OK;
+            }).Get(), &self->process_), "Idle WebView process");
+          check(self->view_->Navigate(L"about:blank"), "Load idle WebView");
+        } catch (const std::exception&) { self->failed = true; }
+        return S_OK;
+      }).Get()), "Prepare idle WebView controller");
+  }
+  ComPtr<ICoreWebView2Controller> attach(HWND parent) {
+    if (!ready || failed || FAILED(controller_->put_ParentWindow(parent))) return {};
+    view_->remove_NavigationCompleted(loaded_); view_->remove_ProcessFailed(process_);
+    view_.Reset();
+    return std::move(controller_);
+  }
+};
 class DragSource final : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IDropSource> {
 public:
   std::function<bool()> alive;
@@ -105,6 +160,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   bool maximized_ = false;
   std::string browser_version_;
   Json environment_timing_;
+  bool controller_prewarmed_ = false;
   void mark_startup(StartupTiming::Stage stage) { if (options_.startup_timing) options_.startup_timing->mark(stage); }
   bool visible_ = true;
   bool drop_enabled_ = false, dragging_ = false;
@@ -375,7 +431,7 @@ public:
   }
   void fail(const std::string& error) { closed_ = true; options_.on_error(error); }
   bool environment_wait_cancelled() const { return closed_ || startup_.cancelled(); }
-  void initialize(ICoreWebView2Environment* environment, Json timing = nullptr) {
+  void initialize(ICoreWebView2Environment* environment, Json timing = nullptr, ComPtr<ICoreWebView2Controller> prepared = {}) {
     if (environment_wait_cancelled()) return;
     environment_timing_ = std::move(timing);
     mark_startup(StartupTiming::EnvironmentReady);
@@ -386,6 +442,15 @@ public:
     LPWSTR version = nullptr;
     if (SUCCEEDED(environment->get_BrowserVersionString(&version))) browser_version_ = utf8(version);
     CoTaskMemFree(version);
+    if (prepared) {
+      controller_ = std::move(prepared); controller_prewarmed_ = true;
+      mark_startup(StartupTiming::ControllerReady);
+      check(controller_->get_CoreWebView2(&webview_), "get_CoreWebView2");
+      check(controller_->put_IsVisible(TRUE), "Activate prepared WebView");
+      configure();
+      if (visible() && GetFocus() == hwnd_) controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+      return;
+    }
     auto weak = weak_from_this();
     const auto hr = environment->CreateCoreWebView2Controller(hwnd_, Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
       [weak](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
@@ -752,7 +817,7 @@ public:
     reply({{"result", result == DRAGDROP_S_DROP && (effect & DROPEFFECT_COPY) != 0}});
   }
   Json diagnostics() const override {
-    return {{"backend", "WebView2"}, {"browserVersion", browser_version_}, {"environmentStartup", environment_timing_}, {"controllerReady", controller_ != nullptr},
+    return {{"backend", "WebView2"}, {"browserVersion", browser_version_}, {"environmentStartup", environment_timing_}, {"controllerPrewarmed", controller_prewarmed_}, {"controllerReady", controller_ != nullptr},
       {"controllerVisible", visible_}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
   }
   bool frameless_active() const override { return options_.frameless && !closed_ && floating(); }
@@ -871,6 +936,7 @@ struct EnvironmentState {
   std::string error;
 };
 class WinPlatform final : public Platform {
+  IdlePool<WinIdleView> idle_;
   std::shared_ptr<EnvironmentState> state_ = std::make_shared<EnvironmentState>();
   HINSTANCE instance_ = nullptr;
   bool com_ = false;
@@ -936,6 +1002,7 @@ public:
     catch (...) { UnregisterClassW(window_class, instance_); OleUninitialize(); com_ = false; throw; }
   }
   ~WinPlatform() override {
+    idle_.capacity(0);
     if (clipboard_owner_) DestroyWindow(clipboard_owner_);
     state_.reset(); UnregisterClassW(window_class, instance_);
     if (com_) OleUninitialize();
@@ -1023,10 +1090,22 @@ public:
     if (!state_->error.empty()) throw std::runtime_error(state_->error);
     if (options.startup_timing) options.startup_timing->mark(StartupTiming::EnvironmentWait);
     auto window = std::make_shared<WinWindow>(std::move(options), instance_);
+    auto prepared = idle_.take();
     if (state_->environment) window->initialize(state_->environment.Get(), {{"mode", ready ? "reused" : "waiting"}, {"initializationMs",
-      std::chrono::duration<double, std::milli>(state_->completed - state_->started).count()}});
+      std::chrono::duration<double, std::milli>(state_->completed - state_->started).count()}},
+      prepared ? prepared->attach(static_cast<HWND>(window->native_handle())) : ComPtr<ICoreWebView2Controller>{});
     else state_->waiting.push_back(window);
     return window;
+  }
+  void set_idle_capacity(unsigned count) override { idle_.capacity(count); }
+  Json idle_diagnostics() const override { return idle_.diagnostics(); }
+  void idle() override {
+    if (state_->status != EnvironmentState::Status::Ready) return;
+    idle_.maintain([this] {
+      auto view = std::make_shared<WinIdleView>(instance_);
+      view->start(state_->environment.Get());
+      return view;
+    });
   }
 };
 }

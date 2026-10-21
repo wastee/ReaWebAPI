@@ -1,18 +1,32 @@
 #include "runtime/runtime.hpp"
 #include "bridge_script.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include <limits>
 
 namespace reaweb {
+void Runtime::configure_webviews(unsigned idle_count) {
+  check_thread();
+  if (idle_count > max_idle_webviews) throw Error("INVALID_ARGUMENT", "Idle WebView count must be 0..32");
+  idle_webviews_ = idle_count;
+  if (auto platform = platform_.lock()) platform->set_idle_capacity(idle_count);
+  if (idle_count) schedule_webview_warmup();
+#ifndef _WIN32
+  else warmed_platform_.reset();
+#endif
+}
 std::shared_ptr<Platform> Runtime::prepare_platform() {
   auto platform = platform_.lock();
   if (!platform) {
     const auto data = resource_ / "ReaWebAPI" / "WebViewData";
     fs::create_directories(data);
     platform = make_platform(data);
+    platform->set_idle_capacity(idle_webviews_);
     platform_ = platform;
   }
 #ifdef _WIN32
   warmed_platform_ = platform;
+#else
+  if (idle_webviews_) warmed_platform_ = platform;
 #endif
   return platform;
 }

@@ -5,6 +5,7 @@
 #include "platform/linux/linux_icon.hpp"
 #include "platform/linux/linux_alpha.hpp"
 #include "platform/shared/transparency.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
@@ -42,6 +43,8 @@ public:
   std::string error;
   std::string version;
   bool frameless_supported = false;
+  Json idle_state;
+  std::map<int, bool> prewarmed;
   std::map<int, unsigned long> alpha_frames;
   std::map<int, WindowOptions> listeners;
   std::map<int, Json> inspectors;
@@ -94,6 +97,7 @@ public:
     try {
       channel_->pump([this](const Json& message) {
         const auto op = message.at("op").get<std::string>();
+        if (op == "idle-pool") { idle_state = message.at("state"); return; }
         if (op == "desktop-result") {
           auto it = desktop_.find(message.at("request").get<std::string>());
           if (it != desktop_.end()) { auto reply = std::move(it->second.reply); desktop_.erase(it); reply(message.at("response")); }
@@ -108,6 +112,7 @@ public:
         if (op == "parked") { parked_.insert(message.at("id").get<int>()); return; }
         auto it = listeners.find(message.at("id").get<int>());
         if (it == listeners.end()) return;
+        if (op == "container") { prewarmed[it->first] = message.at("prewarmed").get<bool>(); return; }
         if (op == "loaded") {
           if (it->second.startup_timing) it->second.startup_timing->mark(StartupTiming::Loaded);
           return;
@@ -292,6 +297,7 @@ public:
     window_->resize = {};
     window_->before_destroy = {};
     process_->listeners.erase(id_);
+    process_->prewarmed.erase(id_);
     process_->inspectors.erase(id_);
     process_->backgrounds.erase(id_);
     try {
@@ -575,7 +581,8 @@ public:
     auto it = process_->inspectors.find(id_);
     if (it != process_->inspectors.end()) inspector.update(it->second);
     inspector["embeddedSupported"] = true;
-    return {{"backend", "WebKitGTK"}, {"browserVersion", process_->version}, {"helperProtocol", 1}, {"devtools", inspector}, {"iconError", icon_.last_error}, {"windowFeatures", window_capabilities()}};
+    const auto pooled = process_->prewarmed.find(id_);
+    return {{"backend", "WebKitGTK"}, {"controllerPrewarmed", pooled != process_->prewarmed.end() && pooled->second}, {"browserVersion", process_->version}, {"helperProtocol", 1}, {"devtools", inspector}, {"iconError", icon_.last_error}, {"windowFeatures", window_capabilities()}};
   }
 };
 class LinuxPlatform final : public Platform {
@@ -583,6 +590,13 @@ class LinuxPlatform final : public Platform {
   std::shared_ptr<LinuxProcess> process_;
   std::vector<std::weak_ptr<LinuxWindow>> windows_;
   int next_id_ = 0;
+  unsigned idle_count_ = 0;
+  std::chrono::steady_clock::time_point idle_retry_{};
+  void prepare_process() {
+    if (process_ && (process_->error.empty() || !process_->listeners.empty())) return;
+    process_ = std::make_shared<LinuxProcess>(data_);
+    process_->send({{"id", 0}, {"op", "idle-pool"}, {"target", idle_count_}});
+  }
 public:
   explicit LinuxPlatform(fs::path data) : data_(std::move(data)) {}
   std::shared_ptr<Window> open(WindowOptions options) override {
@@ -590,11 +604,24 @@ public:
       const auto reason = LinuxAlpha::unavailable();
       if (!reason.empty()) throw Error("TRANSPARENCY_UNAVAILABLE", reason);
     }
-    if (!process_ || (!process_->error.empty() && process_->listeners.empty())) process_ = std::make_shared<LinuxProcess>(data_);
+    prepare_process();
     if (options.frameless) process_->require_frameless();
     auto window = std::make_shared<LinuxWindow>(process_, ++next_id_, std::move(options));
     windows_.push_back(window);
     return window;
+  }
+  void set_idle_capacity(unsigned count) override {
+    if (count > max_idle_webviews) throw Error("INVALID_ARGUMENT", "Idle WebView count must be 0..32");
+    idle_count_ = count;
+    if (process_ && process_->error.empty()) process_->send({{"id", 0}, {"op", "idle-pool"}, {"target", count}});
+  }
+  Json idle_diagnostics() const override { return process_ ? process_->idle_state : Json(); }
+  void idle() override {
+    if (std::chrono::steady_clock::now() < idle_retry_) return;
+    try {
+      prepare_process();
+      process_->send({{"id", 0}, {"op", "idle"}});
+    } catch (const std::exception&) { idle_retry_ = std::chrono::steady_clock::now() + std::chrono::seconds(1); }
   }
   void desktop(const std::string& method, const Json& args, DesktopReply reply) override {
     if (!process_) throw Error("HOST_UNAVAILABLE", "WebKit is not running");

@@ -1,5 +1,6 @@
 #include "plugin/preferences.hpp"
 #include "platform/shared/color_profile.hpp"
+#include "platform/shared/idle_pool.hpp"
 #include <algorithm>
 #include <string>
 #include <cstring>
@@ -20,6 +21,9 @@ ColorProfile saved_profile = ColorProfile::Default;
 ExternalSettings saved_external;
 std::string external_read_error;
 std::function<void(const ExternalSettings&)> external_apply;
+unsigned saved_idle_webviews = default_idle_webviews;
+std::function<void(unsigned)> webviews_apply;
+constexpr int idle_control = 1004;
 constexpr int frame_control = 1000, profile_control = 1001, restore_control = 1003;
 constexpr int enable_control = 1010, port_control = 1011, token_control = 1012, copy_control = 1013, regenerate_control = 1014;
 
@@ -74,6 +78,7 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
     EnableWindow(GetDlgItem(window, profile_control), supports_srgb_profile());
     CheckDlgButton(window, enable_control, saved_external.enabled ? BST_CHECKED : BST_UNCHECKED);
     SetDlgItemInt(window, port_control, saved_external.port, FALSE);
+    SetDlgItemInt(window, idle_control, saved_idle_webviews, FALSE);
     show_token(window);
     if (!external_read_error.empty()) error_message(window, external_read_error.c_str());
     resize(window);
@@ -100,7 +105,7 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
     return TRUE;
   }
   if (message == WM_COMMAND && ((LOWORD(command) == enable_control && HIWORD(command) == BN_CLICKED) ||
-      (LOWORD(command) == port_control && HIWORD(command) == EN_CHANGE))) {
+      ((LOWORD(command) == port_control || LOWORD(command) == idle_control) && HIWORD(command) == EN_CHANGE))) {
     EnableWindow(GetDlgItem(GetParent(window), 0x478), TRUE);
     return TRUE;
   }
@@ -112,12 +117,16 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
       CheckDlgButton(window, profile_control, BST_UNCHECKED);
       CheckDlgButton(window, enable_control, BST_UNCHECKED);
       SetDlgItemInt(window, port_control, 9123, FALSE);
+      SetDlgItemInt(window, idle_control, default_idle_webviews, FALSE);
     }
     EnableWindow(GetDlgItem(GetParent(window), 0x478), TRUE); // REAPER Preferences Apply
     return TRUE;
   }
   if (message == WM_USER * 2) {
     try {
+      BOOL idle_valid = FALSE;
+      const auto idle = GetDlgItemInt(window, idle_control, &idle_valid, FALSE);
+      if (!idle_valid || idle > max_idle_webviews) throw Error("INVALID_ARGUMENT", "Idle WebView count must be an integer from 0 to 32.");
       auto settings = saved_external;
       settings.enabled = IsDlgButtonChecked(window, enable_control) == BST_CHECKED;
       BOOL translated = FALSE;
@@ -126,6 +135,16 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
       settings.port = static_cast<uint16_t>(port);
       if (settings.enabled && settings.token.empty()) settings.token = external_token();
       save_external(settings); show_token(window);
+      if (idle != saved_idle_webviews) {
+#ifdef _WIN32
+        const bool written = WritePrivateProfileStringW(L"ReaWebAPI", L"IdleWebViews", std::to_wstring(idle).c_str(), settings_file.c_str()) != FALSE;
+#else
+        const bool written = WritePrivateProfileString("ReaWebAPI", "IdleWebViews", std::to_string(idle).c_str(), settings_file.c_str()) != FALSE;
+#endif
+        if (!written) throw Error("SETTINGS_IO", "Could not save the idle WebView count.");
+        saved_idle_webviews = idle;
+        if (webviews_apply) webviews_apply(idle);
+      }
     } catch (const std::exception& error) { error_message(window, error.what()); return FALSE; }
 #ifdef _WIN32
     const auto profile = IsDlgButtonChecked(window, profile_control) == BST_CHECKED ? ColorProfile::SRGB : ColorProfile::Default;
@@ -147,11 +166,19 @@ prefs_page_register_t page{"reawebapi", "ReaWebAPI", create, 0x9a, "", 0, nullpt
 }
 
 const ExternalSettings& external_preferences() { return saved_external; }
+unsigned idle_webview_preferences() { return saved_idle_webviews; }
 prefs_page_register_t* initialize_preferences(REAPER_PLUGIN_HINSTANCE instance, const std::filesystem::path& resource,
-    std::function<void(const ExternalSettings&)> apply_external) {
+    std::function<void(const ExternalSettings&)> apply_external, std::function<void(unsigned)> apply_webviews) {
   module = instance;
   settings_file = resource / "ReaWebAPI.ini";
   external_apply = std::move(apply_external);
+  webviews_apply = std::move(apply_webviews);
+#ifdef _WIN32
+  saved_idle_webviews = GetPrivateProfileIntW(L"ReaWebAPI", L"IdleWebViews", default_idle_webviews, settings_file.c_str());
+#else
+  saved_idle_webviews = GetPrivateProfileInt("ReaWebAPI", "IdleWebViews", default_idle_webviews, settings_file.c_str());
+#endif
+  if (saved_idle_webviews > max_idle_webviews) saved_idle_webviews = default_idle_webviews;
   external_read_error.clear(); saved_external = {};
   try {
     saved_external = read_external_settings(settings_file);

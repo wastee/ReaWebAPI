@@ -50,6 +50,8 @@ WebView2 没有公开的嵌入式检查器控制器。ReaWebAPI 通过 [`OpenDev
 
 ## 启动计时
 
+`controllerPrewarmed` 表示该窗口是否使用预备的空白容器。`idleWebViews` 提供共享池的目标数量 `target`、就绪数量 `ready`、未就绪数量 `pending`，以及当前平台实例累计的创建 `created`、取用 `taken` 和失败 `failed` 次数。取用容器不表示页面已加载或显示。Linux 从辅助进程异步接收这些计数。
+
 `(await reaper.debug.getDiagnostics()).startup` 为每个窗口保留一条有界的原生计时记录。`kind` 为 `create`、`navigation` 或 `cachedReopen`。`windowId` 和 `documentGeneration` 标识文档，JSFX 另带 `sessionId` 和 `activation`。各阶段以 App 打开请求、观察到的 JSFX 发现、后续导航或缓存复激活为起点，单位为毫秒。FX 发现计时从现有扫描检测到编辑器后开始，不包含此前的轮询间隔。
 
 可用阶段包括环境等待、Controller 创建、导航完成、Runtime 握手、首帧准备和原生揭示。Windows 的 `environmentStartup.initializationMs` 是完整的环境初始化尝试耗时。`environmentReadyMs` 减去 `environmentWaitStartMs` 是本窗口的剩余等待，包含原生宿主窗口创建。`mode` 区分环境已就绪与初始化中。导航与缓存复开不记录未重复执行的阶段。Linux 的 Controller 就绪与加载完成是从 WebKit 辅助进程收到的观察值，不提供独立的不透明页面快照确认。

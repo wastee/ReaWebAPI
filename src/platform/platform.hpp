@@ -103,6 +103,9 @@ public:
   virtual ~Platform() = default;
   virtual std::shared_ptr<Window> open(WindowOptions options) = 0;
   virtual void pump() {}
+  virtual void set_idle_capacity(unsigned) {}
+  virtual void idle() {}
+  virtual Json idle_diagnostics() const { return nullptr; }
   virtual void desktop(const std::string&, const Json&, DesktopReply) { throw Error("HOST_UNAVAILABLE", "Desktop integration unavailable"); }
 };
 std::unique_ptr<Platform> make_platform(const fs::path& shared_data);

@@ -17,7 +17,7 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 - [Browser files and media](docs/browser-media.md): opt-in Blob exports and document-scoped, read-only media URLs with bounded streaming and seeking.
 - Docked and floating WebViews retain browser content during resizing, with the native background following the page's opaque HTML/body background color. Default Windows title bars and borders retain system styling after undocking.
 - New windows prepare their initial rendered page before becoming visible on Windows and macOS. Existing Apps need no startup changes.
-- Windows prepares and retains the shared WebView2 environment on the first host idle tick. Controllers and pages remain demand-created. [Startup diagnostics](docs/devtools.md#startup-timing) separate native presentation from page initialization.
+- Windows, macOS and Linux prepare a shared pool of blank WebViews during host idle time, used by both Apps and JSFX. [Startup diagnostics](docs/devtools.md#startup-timing) report pool usage and separate native presentation from page initialization.
 - Windows/Linux [DevTools](docs/devtools.md) with a resizable right-hand panel, floating mode and saved layout preferences. Ctrl+Shift+I toggles visibility. Windows offers a borderless embedded panel, native floating window and page context-menu controls.
 - macOS [Web Inspector](docs/devtools.md#macos) supports a right-hand embedded panel, native floating window and saved layout preferences. Option+Command+I and the page context menu control the same inspection session.
 - WebView context menus provide docking and DevTools controls. Docker tab menus add reload, App folder and close actions. PNG, ICO and SVG window icons from HTML favicons or `reaper.window.setIcon(path)` survive docking and reloads, with visibility applied immediately by `reaper.window.setIconVisible(boolean)`, including the default startup icon. Floating Docker title bars follow the active WebView's icon settings on Windows, macOS and Linux.
@@ -52,6 +52,8 @@ For manual installation, place the native binary in `UserPlugins/`. On Linux, pl
 Run `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` from the Action List to open the example.
 
 **Preferences > Plug-ins > ReaWebAPI** provides **Use sRGB for WebView rendering on Windows**, unchecked by default. On Windows, checking it requests an sRGB display profile for all ReaWebAPI WebViews after restarting REAPER. **Restore defaults** clears the checkbox. Apply/OK saves changes. The checkbox is disabled on macOS and Linux. See [color profiles](docs/frontend.md#webview-color-profile).
+
+**Preloaded WebView containers** sets the number of unused containers to maintain, from 0 to 32, default 2. Apply/OK takes effect immediately. Zero disables preloading, and Restore defaults selects 2. The pool loads only blank pages and replenishes during idle time. App resources, scripts and JSFX state load when opened. Used containers never return to the pool. If none is ready, opening falls back to normal creation. Preloading uses additional memory and does not eliminate page initialization or first-frame preparation.
 
 ## Development
 

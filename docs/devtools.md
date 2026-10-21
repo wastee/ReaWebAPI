@@ -50,6 +50,8 @@ Production resources retain `reaweb://<appId>/...` URLs in Console, Sources and 
 
 ## Startup timing
 
+`controllerPrewarmed` identifies a window created from a prepared blank container. `idleWebViews` reports the shared pool's `target`, `ready`, `pending`, `created`, `taken` and `failed` counts. Counts cover the current platform lifetime, not App sessions. Consuming a container is independent of page loading and presentation. Linux receives these counters asynchronously from its helper.
+
 `(await reaper.debug.getDiagnostics()).startup` retains one bounded native timing record per window. `kind` is `create`, `navigation` or `cachedReopen`. `windowId` and `documentGeneration` identify the document, with `sessionId` and `activation` for JSFX. Milestones are milliseconds from the App open request, observed JSFX discovery, subsequent navigation or cached reactivation. Discovery timing starts after the existing scan detects an editor, excluding the preceding polling interval.
 
 Available milestones cover environment waiting, controller creation, navigation completion, Runtime handshake, first-frame preparation and native reveal. Windows `environmentStartup.initializationMs` is the complete environment attempt duration. The difference between `environmentReadyMs` and `environmentWaitStartMs` is this window's remaining wait, including native host construction. `mode` distinguishes a ready environment from an in-progress initialization. Navigation and cached reopen omit stages they do not repeat. On Linux, controller readiness and load completion are observations received from the WebKit helper. Linux has no separate opaque-page snapshot confirmation.

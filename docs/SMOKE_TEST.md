@@ -198,6 +198,10 @@ Keep ordinary `hidden_start_smoke`, frameless native input and Linux Docker divi
 
 ## Startup diagnostics and subscription concurrency
 
+For the shared idle pool, run `windows_startup 1 --pool` and repeat the existing startup modes with `--pooled` as the final argument. On macOS use `STARTUP_POOLED=1` with `macos_startup.py`. On Linux use `REAWEB_TEST_IDLE_WEBVIEWS=5` with `linux_webkit_smoke.py`. Check consumption, replenishment, depletion fallback, App isolation, hidden loading and focus. In Preferences, verify default 2, Cancel, Apply, Restore defaults, persistence and live changes to 0 and 32 without closing active Apps. `--idle-webviews 0` on the startup probes disables the pool for comparison.
+
+The macOS hidden-start test dismisses the evaluation dialog through its enabled button and waits for stable main-window focus before opening the WebView. Keep the test desktop idle. `startup-focus.jsonl` records key-window transitions, including transient focus changes during hidden loading and first Show. Repeat with `STARTUP_POOLED=0 STARTUP_IDLE_WEBVIEWS=0` to check cold creation.
+
 `ctest` covers bounded timing records and JSFX subscription ordering, early/late registration cleanup, visibility during initialization and old-runtime sizing. Windows also covers shared environment failures, controlled retries, window closure and callbacks after teardown.
 
 Run `python tests/plugin_smoke.py --dll <Windows-extension> --webview --startup --resource-root <isolated-profile>` to sample idle preparation, first/new windows, identity reuse and fully closed reopen. `startup.json` separates native milestones and browser resource/data timings. Repeat with fresh profiles and after restarting with the same profile. Compare medians and slower samples under the same machine load.

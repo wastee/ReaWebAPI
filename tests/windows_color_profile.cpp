@@ -49,12 +49,25 @@ void check_layout(HWND dialog) {
   CHECK(client.right - button.right == checkbox.left && client.bottom - button.bottom == checkbox.left);
   int controls = 0;
   for (auto child = GetWindow(dialog, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) ++controls;
-  CHECK(controls == 13);
+  CHECK(controls == 16);
+  CHECK(GetDlgItem(dialog, 1004));
   for (const auto id : {1009, 1010, 1011, 1012, 1013, 1014}) CHECK(GetDlgItem(dialog, id));
 }
 
 int main(int argc, char**) {
   try {
+    const auto confirmation_timer = SetTimer(nullptr, 0, 20, [](HWND, UINT, UINT_PTR, DWORD) {
+      EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
+        wchar_t title[64]{}; GetWindowTextW(window, title, 64);
+        if (std::wstring(title) == L"ReaWebAPI settings") {
+          auto button = GetDlgItem(window, IDOK);
+          if (!button) button = GetDlgItem(window, IDCANCEL); // MB_OK may expose its sole button as IDCANCEL.
+          if (button) PostMessageW(button, BM_CLICK, 0, 0);
+        }
+        return TRUE;
+      }, 0);
+    });
+    struct StopTimer { UINT_PTR id; ~StopTimer() { KillTimer(nullptr, id); } } stop_timer{confirmation_timer};
     const bool srgb = argc > 1;
     const auto root = fs::current_path() / ("color-profile-test-" + std::to_string(GetCurrentProcessId()));
     fs::create_directories(root);
@@ -71,6 +84,7 @@ int main(int argc, char**) {
     EnableWindow(apply, FALSE);
     auto dialog = page->create(parent);
     CHECK(dialog && IsWindowEnabled(GetDlgItem(dialog, 1001)));
+    CHECK(GetDlgItemInt(dialog, 1004, nullptr, FALSE) == 2);
     check_layout(dialog);
     for (const auto width : {1000, 640, 1200}) {
       SetWindowPos(dialog, nullptr, 0, 0, width, 520, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -102,6 +116,21 @@ int main(int argc, char**) {
     CHECK(startup_color_profile == ColorProfile::SRGB);
     DestroyWindow(dialog);
     initialize_preferences(module, root);
+    unsigned applied_idle = 99;
+    page = initialize_preferences(module, root, {}, [&](unsigned count) { applied_idle = count; });
+    dialog = page->create(parent);
+    SetDlgItemInt(dialog, 1004, 7, FALSE); DestroyWindow(dialog);
+    dialog = page->create(parent); CHECK(GetDlgItemInt(dialog, 1004, nullptr, FALSE) == 2);
+    for (unsigned count : {7u, 0u, 32u}) {
+      SetDlgItemInt(dialog, 1004, count, FALSE); SendMessageW(dialog, WM_USER * 2, 0, 0);
+      CHECK(applied_idle == count && idle_webview_preferences() == count);
+      CHECK(GetPrivateProfileIntW(L"ReaWebAPI", L"IdleWebViews", 99, ini.c_str()) == count);
+    }
+    SetDlgItemInt(dialog, 1004, 33, FALSE); SendMessageW(dialog, WM_USER * 2, 0, 0);
+    CHECK(applied_idle == 32 && idle_webview_preferences() == 32);
+    SendDlgItemMessageW(dialog, 1003, BM_CLICK, 0, 0); SendMessageW(dialog, WM_USER * 2, 0, 0);
+    CHECK(applied_idle == 2 && idle_webview_preferences() == 2);
+    DestroyWindow(dialog);
     CHECK(startup_color_profile == ColorProfile::Default);
     CHECK(WritePrivateProfileStringW(L"ReaWebAPI", L"WebViewColorProfile", L"invalid", ini.c_str()));
     initialize_preferences(module, root);

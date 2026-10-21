@@ -10,9 +10,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 for name in ('reaper', 'extension', 'effect', 'output'):
     parser.add_argument('--' + name, type=Path, required=True)
 parser.add_argument('--sdk', type=Path, default=Path(__file__).resolve().parents[1] / 'runtime/jsfx-webui.mjs')
+parser.add_argument('--idle-webviews', type=int, choices=range(33), help='Override the idle container target in the disposable profile')
 args = parser.parse_args()
 root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=False)
+if args.idle_webviews is not None:
+    (root / 'ReaWebAPI.ini').write_text(f'[ReaWebAPI]\nIdleWebViews={args.idle_webviews}\n', encoding='utf-8')
 (root / 'UserPlugins').mkdir()
 shutil.copy2(args.extension, root / 'UserPlugins' / args.extension.name)
 if sys.platform == 'darwin':
@@ -42,7 +45,7 @@ setInterval(async()=>{
     const guid='{'+[[3,2,1,0],[5,4],[7,6],[8,9],[10,11,12,13,14,15]].map(group=>group.map(i=>hex[i]).join('')).join('-')+'}';
     const message=document.getElementById('message');
     await reaper.SetExtState('StartupProbe',guid,JSON.stringify({token,native,
-      startup:d.startup,presentationMs:d.jsfx.presentationMs,
+      startup:d.startup,presentationMs:d.jsfx.presentationMs,controllerPrewarmed:d.controllerPrewarmed,idleWebViews:d.idleWebViews,
       measures:performance.getEntriesByType('measure').filter(x=>x.name.startsWith('reaweb.jsfx.')).map(x=>x.toJSON()),
       navigation:performance.getEntriesByType('navigation')[0]?.toJSON(),
       resources:performance.getEntriesByType('resource').slice(0,64).map(({initiatorType,startTime,duration})=>({initiatorType,startTime,duration})),

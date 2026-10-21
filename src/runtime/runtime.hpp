@@ -23,6 +23,7 @@ public:
   Runtime(Host host, fs::path resource, std::function<void(const std::string&)> log, DockApi dock = {});
   ~Runtime();
   void schedule_webview_warmup() { check_thread(); platform_warmup_pending_ = true; }
+  void configure_webviews(unsigned idle_count);
   int open(const std::string& path, const fs::path& base = {});
   int open_instance(const std::string& path, const std::string& instance_key, const std::string& name = {}, bool multiple = false, bool hidden = false, bool frameless = false, bool resizable = true, bool transparent = false);
   int open_ex(const std::string& path, const std::string& options);
@@ -159,6 +160,7 @@ private:
   std::weak_ptr<Platform> platform_;
   std::shared_ptr<Platform> warmed_platform_;
   bool platform_warmup_pending_ = false;
+  unsigned idle_webviews_ = 0;
   std::shared_ptr<Platform> prepare_platform();
   std::map<std::string, std::weak_ptr<App>> apps_;
   std::map<int, std::shared_ptr<Session>> sessions_;

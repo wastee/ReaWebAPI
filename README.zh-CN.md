@@ -18,7 +18,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - [浏览器文件与媒体](docs/browser-media.md)，支持可选的 Blob 导出，以及绑定文档生命周期的只读媒体 URL、有界流式读取和跳转。
 - 停靠和浮动 WebView 缩放时保留浏览器画面，原生背景跟随页面 HTML/body 的不透明背景色。默认 Windows 窗口取消停靠后的标题栏和边框保留系统样式。
 - Windows 和 macOS 在页面首帧准备完成后显示新窗口，现有 App 无需修改启动代码。
-- Windows 在首次主线程空闲回调中准备并保留共享 WebView2 环境，Controller 和页面仍按需创建。[启动诊断](docs/devtools.zh-CN.md#启动计时)区分原生显示与页面初始化耗时。
+- Windows、macOS 和 Linux 在宿主空闲时准备空白 WebView 容器池，普通 App 与 JSFX 共用。[启动诊断](docs/devtools.zh-CN.md#启动计时)提供容器池使用情况，并区分原生显示与页面初始化耗时。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。
 - WebView 右键菜单提供停靠和 DevTools 控制。Docker 页签菜单另提供刷新、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
@@ -53,6 +53,8 @@ Windows FX 链中的 JSFX Web UI 请使用 v0.3.8.28 或更高版本，避免切
 在 Action List 运行 `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` 即可打开示例。
 
 **Preferences > Plug-ins > ReaWebAPI** 提供 **Use sRGB for WebView rendering on Windows** 复选框，默认不勾选。Windows 上勾选后重启 REAPER，将为全部 ReaWebAPI WebView 请求固定 sRGB 显示配置。**Restore defaults** 取消勾选，通过 Apply/OK 保存修改。macOS 和 Linux 上该复选框禁用。参见[色彩配置](docs/frontend.zh-CN.md#webview-色彩配置)。
+
+**Preloaded WebView containers** 设置待命的空闲容器数量，范围为 0..32，默认 2。Apply/OK 后立即生效，0 关闭预加载，Restore defaults 恢复为 2。容器池仅加载空白页，在宿主空闲时补充。App 资源、脚本和 JSFX 状态仍在打开时加载，使用过的容器不会放回池中。没有就绪容器时按原方式创建。预加载会增加内存占用，不能省去页面初始化和首帧准备。
 
 ## 开发
 
