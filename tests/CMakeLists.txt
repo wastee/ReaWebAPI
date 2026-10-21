@@ -289,6 +289,14 @@ if(UNIX AND NOT APPLE AND REAWEB_BUILD_EXTENSION)
   target_link_libraries(linux_navigation PRIVATE reaweb_core PkgConfig::WEBKIT X11::X11)
 endif()
 if(WIN32 AND REAWEB_BUILD_EXTENSION)
+  add_executable(windows_environment windows_environment.cpp)
+  target_link_libraries(windows_environment PRIVATE reaweb_core
+    "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
+    ole32 oleaut32 user32 gdi32 shlwapi shell32 version advapi32 uuid comctl32)
+  target_include_directories(windows_environment PRIVATE "${webview2_SOURCE_DIR}/build/native/include")
+  target_compile_definitions(windows_environment PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_options(windows_environment PRIVATE /utf-8)
+  add_test(NAME windows_environment COMMAND windows_environment)
   add_executable(windows_cursor EXCLUDE_FROM_ALL windows_cursor.cpp)
   target_link_libraries(windows_cursor PRIVATE reaweb_core
     "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"

@@ -108,6 +108,11 @@ public:
         if (op == "parked") { parked_.insert(message.at("id").get<int>()); return; }
         auto it = listeners.find(message.at("id").get<int>());
         if (it == listeners.end()) return;
+        if (op == "loaded") {
+          if (it->second.startup_timing) it->second.startup_timing->mark(StartupTiming::Loaded);
+          return;
+        }
+        if (op == "navigating" && it->second.startup_timing) it->second.startup_timing->mark(StartupTiming::ControllerReady);
         if (op == "alpha-frame") { alpha_frames[it->first] = message.at("parent").get<unsigned long>(); return; }
         if (op == "background") { backgrounds[it->first] = message.at("color").get<unsigned>(); return; }
         if (op == "devtools-state") { inspectors[it->first] = message.at("state"); return; }
@@ -200,6 +205,7 @@ public:
     return true;
   }
   LinuxWindow(std::shared_ptr<LinuxProcess> process, int id, WindowOptions options) : process_(std::move(process)), id_(id), initial_hidden_(options.hidden), wants_visible_(!options.hidden) {
+    if (options.startup_timing) options.startup_timing->mark(StartupTiming::ControllerStart);
     frameless_ = options.frameless; resizable_ = options.resizable;
     transparent_ = options.transparent;
     icon_.decorations = !frameless_;

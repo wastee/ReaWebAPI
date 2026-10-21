@@ -88,6 +88,7 @@ function resourceChannel(info, upload, total, renew, validate, failure) {
 
 /** Connect only from a JSFX Hosted WebView. REAPER owns parameter state. */
 export async function connectJSFX(reaper = globalThis.reaper, onError = console.error) {
+  const started = globalThis.performance?.now();
   const failure = (code, message, details) => Object.assign(new Error(message), { code, details });
   const runtime = await reaper.lifecycle.ready;
   const version = runtime?.runtime?.jsfx?.protocolVersion;
@@ -101,6 +102,7 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
   const sizeListeners = new Set();
   let editorSize, pendingSize = Promise.resolve();
   let capabilityRequest = 0;
+  let connecting = true;
   const closeTransfers = () => {
     const cleanup = [...transfers].map(([transferId, transfer]) => {
       transfer.close(); return invoke(transfer.upload ? 'abortResourceUpload' : 'closeResourceDownload', { transferId });
@@ -113,6 +115,22 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
   let sessionId, state, revision = 0n, activation = 0, active = false, disposed = false, disposePromise;
   let gesture, running, queue = [], capabilities, continuousFocused = true;
   const stops = [];
+  const timing = (phase, start) => {
+    try {
+      if (start === undefined) return;
+      const name = 'reaweb.jsfx.' + phase;
+      performance.clearMeasures(name);
+      performance.measure(name, { start, end: performance.now(), detail: { sessionId, activation } });
+    } catch {}
+  };
+  const listen = async (name, callback) => {
+    try {
+      const off = await service.on(name, callback);
+      // A registration can complete after another registration has failed.
+      if (disposed) await off();
+      else stops.push(off);
+    } catch (error) { disposed = true; throw error; }
+  };
   const freeze = value => {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) {
       for (const item of Object.values(value)) freeze(item);
@@ -179,7 +197,7 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
   const getCapabilities = async () => {
     if (disposed) throw failure('FX_UNBOUND', 'JSFX connection is disposed');
     const request = ++capabilityRequest, next = await invoke('getCapabilities');
-    if (request !== capabilityRequest) return capabilities;
+    if (disposed || request !== capabilityRequest) return capabilities;
     if (next.protocolVersion !== 1) throw failure('PROTOCOL_MISMATCH', 'Unsupported JSFX protocol version');
     if (sessionId && next.sessionId !== sessionId) {
       gesture = undefined; cancelQueued(failure('STALE_SESSION', 'The JSFX instance session changed'));
@@ -187,15 +205,21 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
       await closeConsumers();
     }
     revisionOf(next.capabilityRevision);
-    if (request !== capabilityRequest) return capabilities;
+    if (disposed || request !== capabilityRequest) return capabilities;
     if (sessionId === next.sessionId && capabilities && revisionOf(next.capabilityRevision) < revisionOf(capabilities.capabilityRevision)) return capabilities;
     sessionId = next.sessionId; capabilities = freeze(next); return capabilities;
   };
   const present = async () => {
+    const started = globalThis.performance?.now();
     await pendingSize;
+    timing('sizeWait', started);
     if (!active || disposed) return { presented: false };
     const at = activation;
-    try { return await invoke('present', { activation: at }); }
+    try {
+      const result = await invoke('present', { activation: at });
+      timing('present', started);
+      return result;
+    }
     catch (error) { if (!disposed && active && activation === at) throw error; return { presented: false }; }
   };
   const applySize = next => {
@@ -204,13 +228,15 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
   };
   try {
     await getCapabilities();
+    timing('capabilities', started);
+    const subscribing = globalThis.performance?.now();
+    const subscriptions = [];
     if (capabilities.features?.editorSize) {
-      stops.push(await service.on('editorSizeChanged', event => {
+      subscriptions.push(listen('editorSizeChanged', event => {
         if (!disposed && event.sessionId === sessionId) applySize(event.size);
       }));
-      applySize(await invoke('getEditorSize'));
     }
-    stops.push(await service.on('paramsChanged', event => {
+    subscriptions.push(listen('paramsChanged', event => {
       if (disposed || event.sessionId !== sessionId || event.activation < activation || (state && (!active || event.activation !== activation))) return;
       if (event.activation > activation) { activation = event.activation; revision = 0n; observed.clear(); }
       // Before the first snapshot only the delta is available.
@@ -222,24 +248,28 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
             observed.set(parameter.index, { revision: nr, parameter });
       } else merge(event.parameters, event.revision, event.activation);
     }));
-    stops.push(await service.on('capabilitiesChanged', event => {
+    subscriptions.push(listen('capabilitiesChanged', event => {
       if (disposed || (event.sessionId === sessionId && revisionOf(event.capabilityRevision) <= revisionOf(capabilities.capabilityRevision))) return;
-      getCapabilities().then(async () => { if (!state) await refresh(); notify(capabilityListeners, event); }).catch(onError);
+      getCapabilities().then(async () => {
+        if (disposed) return;
+        if (!state && !connecting) await refresh();
+        notify(capabilityListeners, event);
+      }).catch(onError);
     }));
-    stops.push(await service.on('dataStateChanged', event => {
+    subscriptions.push(listen('dataStateChanged', event => {
       if (disposed || event.sessionId !== sessionId) return;
       const next = revisionOf(event.revision);
       if ((dataRevisions.get(event.id) ?? -1n) >= next) return;
       dataRevisions.set(event.id, next); notify(dataListeners, freeze(event));
     }));
-    stops.push(await service.on('operationChanged', event => {
+    subscriptions.push(listen('operationChanged', event => {
       if (disposed || event.sessionId !== sessionId) return;
       const next = revisionOf(event.revision);
       if ((operationRevisions.get(event.operationId) ?? -1n) >= next) return;
       if (!operationRevisions.has(event.operationId) && operationRevisions.size >= 256) operationRevisions.delete(operationRevisions.keys().next().value);
       operationRevisions.set(event.operationId, next); notify(operationListeners, freeze(event));
     }));
-    stops.push(await service.on('visibilityChanged', event => {
+    subscriptions.push(listen('visibilityChanged', event => {
       if (disposed || event.sessionId !== sessionId || event.activation < activation) return;
       if (event.activation > activation) { revision = 0n; observed.clear(); }
       activation = event.activation; active = event.active; gesture = undefined;
@@ -249,7 +279,7 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
       if (event.paramState) apply(event.paramState);
       if (event.editorSize) applySize(event.editorSize);
       notify(visibility, active);
-      if (active) {
+      if (active && !connecting) {
         const at = activation;
         getCapabilities().then(async () => {
           if (disposed || !active || activation !== at) return;
@@ -258,8 +288,23 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
         }).catch(onError);
       }
     }));
+    await Promise.all(subscriptions);
+    timing('subscriptions', subscribing);
+    if (capabilities.features?.editorSize) {
+      const sizeStarted = globalThis.performance?.now();
+      applySize(await invoke('getEditorSize'));
+      timing('editorSize', sizeStarted);
+    }
+    const paramsStarted = globalThis.performance?.now();
     await refresh();
-  } catch (error) { await Promise.allSettled(stops.map(off => off())); throw error; }
+    connecting = false;
+    timing('parameters', paramsStarted);
+    timing('connect', started);
+  } catch (error) {
+    disposed = true; ++capabilityRequest;
+    await Promise.allSettled(stops.map(off => Promise.resolve().then(off)));
+    throw error;
+  }
   // The caller renders the initial snapshot before native presentation.
   setTimeout(() => present().catch(onError), 0);
   const validIndex = index => {

@@ -22,6 +22,7 @@ class Runtime {
 public:
   Runtime(Host host, fs::path resource, std::function<void(const std::string&)> log, DockApi dock = {});
   ~Runtime();
+  void schedule_webview_warmup() { check_thread(); platform_warmup_pending_ = true; }
   int open(const std::string& path, const fs::path& base = {});
   int open_instance(const std::string& path, const std::string& instance_key, const std::string& name = {}, bool multiple = false, bool hidden = false, bool frameless = false, bool resizable = true, bool transparent = false);
   int open_ex(const std::string& path, const std::string& options);
@@ -92,6 +93,7 @@ private:
     std::optional<std::pair<std::string, std::string>> instance;
     std::shared_ptr<App> app;
     std::shared_ptr<Window> window;
+    std::shared_ptr<StartupTiming> startup_timing = std::make_shared<StartupTiming>();
     std::unique_ptr<Bridge> bridge;
     std::deque<Work> queue;
     std::deque<std::string> to_web, to_host;
@@ -134,6 +136,7 @@ private:
       double presentation_ms = 0;
       std::string undo;
       Clock::time_point next_poll{}, last_edit{}, last_used = Clock::now();
+      Clock::time_point discovered = Clock::now();
     };
     std::shared_ptr<Jsfx> jsfx;
     bool lifecycle_enabled = false, allow_reload = false;
@@ -154,6 +157,9 @@ private:
   fs::path resource_;
   std::function<void(const std::string&)> log_;
   std::weak_ptr<Platform> platform_;
+  std::shared_ptr<Platform> warmed_platform_;
+  bool platform_warmup_pending_ = false;
+  std::shared_ptr<Platform> prepare_platform();
   std::map<std::string, std::weak_ptr<App>> apps_;
   std::map<int, std::shared_ptr<Session>> sessions_;
   std::map<std::string, Json> state_cache_;

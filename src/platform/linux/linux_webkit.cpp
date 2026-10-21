@@ -342,7 +342,10 @@ public:
     g_signal_connect(view_, "load-changed", G_CALLBACK(+[](WebKitWebView*, WebKitLoadEvent event, gpointer data) {
       auto page = static_cast<Page*>(data);
       if (event == WEBKIT_LOAD_STARTED) page->page_ready_ = false;
-      if (event == WEBKIT_LOAD_FINISHED) { page->page_ready_ = true; page->prepare_alpha(); }
+      if (event == WEBKIT_LOAD_FINISHED) {
+        page->page_ready_ = true; page->prepare_alpha();
+        try { page->channel_.send({{"id", page->id_}, {"op", "loaded"}}); } catch (...) {}
+      }
       if (event == WEBKIT_LOAD_STARTED) {
         auto self = static_cast<Page*>(data);
         if (self->resources_) self->resources_->clear_media();

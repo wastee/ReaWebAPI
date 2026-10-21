@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
     struct Destroy { HWND hwnd; ~Destroy() { DestroyWindow(hwnd); } } destroy{host};
     ShowWindow(host, SW_SHOW); SetForegroundWindow(host);
     const int count = argc > 1 ? std::stoi(argv[1]) : 20;
-    if (argc > 2 && std::string(argv[2]) == "--hidden") {
+    if (argc > 2 && (std::string(argv[2]) == "--hidden" || std::string(argv[2]) == "--maximized")) {
       if (GetForegroundWindow() != host) {
         POINT saved{}; GetCursorPos(&saved); SetCursorPos(50, 100);
         INPUT input[2]{};
@@ -54,6 +54,8 @@ int main(int argc, char** argv) {
         SetCursorPos(saved.x, saved.y);
       }
       CHECK(GetForegroundWindow() == host);
+    }
+    if (argc > 2 && std::string(argv[2]) == "--hidden") {
       for (bool frameless : {false, true}) for (bool focus_first : {false, true}) for (int run = 0; run < count; ++run) {
         const auto path = root / ("hidden-" + std::to_string(frameless) + "-" + std::to_string(focus_first) + "-" + std::to_string(run)); fs::create_directories(path);
         const auto entry = path / "index.html";
@@ -143,6 +145,70 @@ int main(int argc, char** argv) {
         }
       }
       std::cout << "PASS: framed/frameless hidden creation, JS preloading, first Show/Focus pixels, repeated Hide/Show, resize and close, cold profiles=" << count * 4 << ", early-intent races=6\n";
+      return 0;
+    }
+    if (argc > 2 && std::string(argv[2]) == "--maximized") {
+      for (bool frameless : {false, true}) for (int scenario = 0; scenario < 5; ++scenario) for (int run = 0; run < count; ++run) {
+        std::cout << "maximized frameless=" << frameless << " scenario=" << scenario << " run=" << run << std::endl;
+        const bool hidden = scenario == 2 || scenario == 3;
+        const auto path = root / ("maximized-" + std::to_string(frameless) + "-" + std::to_string(scenario) + "-" + std::to_string(run));
+        fs::create_directories(path);
+        const auto entry = path / "index.html"; std::ofstream(entry) << "<!doctype html><p>Maximized startup</p>";
+        auto platform = make_platform(path / "profile");
+        bool ready = false;
+        std::string error;
+        WindowOptions options; options.entry = entry; options.parent = host; options.hidden = hidden; options.frameless = frameless;
+        options.script = "addEventListener('DOMContentLoaded',()=>chrome.webview.postMessage('ready'));";
+        options.on_message = [&](std::string message) { ready |= message == "ready"; };
+        options.on_error = [&](std::string message) { error = std::move(message); };
+        SetForegroundWindow(host); SetFocus(host);
+        auto window = platform->open(std::move(options));
+        const auto hwnd = static_cast<HWND>(window->native_handle());
+        window->restore_placement({{"x", 100}, {"y", 100}, {"width", 600}, {"height", 420}, {"maximized", true}});
+        SetForegroundWindow(host); SetFocus(host);
+        const auto check_maximized = [&](const char* phase) {
+          if (!IsZoomed(hwnd) || window->placement().at("maximized") != true) {
+            WINDOWPLACEMENT saved{sizeof(saved)}; GetWindowPlacement(hwnd, &saved);
+            throw std::runtime_error(std::string(phase) + ": lost maximized state, showCmd=" + std::to_string(saved.showCmd));
+          }
+        };
+        const auto dock = [&] {
+          window->prepare_dock();
+          SetWindowLongPtrW(hwnd, GWL_STYLE, WS_CHILD | WS_VISIBLE); SetParent(hwnd, host);
+        };
+        CHECK(window->presentation_pending() && !window->visible());
+        if (scenario == 1) { window->focus(); check_maximized("early focus"); }
+        if (scenario == 4) {
+          dock(); window->restore_floating();
+          CHECK(window->presentation_pending() && !window->visible());
+        }
+        const auto started = GetTickCount64();
+        do {
+          MSG message{};
+          while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+          window->tick(); CHECK(error.empty());
+          if (hidden) { CHECK(!IsWindowVisible(hwnd)); CHECK(GetForegroundWindow() == host); }
+          CHECK(GetTickCount64() - started < 20000); Sleep(2);
+        } while (!ready || GetTickCount64() - started < 1000 || (!hidden && window->presentation_pending()));
+        if (hidden) {
+          // Runtime::show preserves focus around native placement restoration.
+          if (scenario == 2) window->without_focus([&] { window->show(); }); else window->focus();
+          CHECK(window->visible()); CHECK(GetForegroundWindow() == (scenario == 2 ? host : hwnd));
+        }
+        check_maximized("first presentation");
+        for (int cycle = 0; cycle < 3; ++cycle) {
+          window->focus(); check_maximized("focus"); CHECK(GetForegroundWindow() == hwnd && "after focus");
+          window->set_visible(false); SetForegroundWindow(host);
+          window->without_focus([&] { window->show(); });
+          check_maximized("Hide/Show"); CHECK(GetForegroundWindow() == host);
+          ShowWindow(hwnd, SW_MINIMIZE); window->focus();
+          check_maximized("minimized focus"); CHECK(GetForegroundWindow() == hwnd && "after minimized focus");
+          dock(); window->set_visible(true); CHECK(window->placement().at("maximized") == true);
+          window->restore_floating(); check_maximized("undocking"); CHECK(GetForegroundWindow() == hwnd && "after undocking");
+        }
+        window.reset(); platform.reset(); CHECK(!IsWindow(hwnd));
+      }
+      std::cout << "PASS: maximized first presentation, early focus, hidden Show/Focus, minimize restore and dock/undock, cold profiles=" << count * 10 << '\n';
       return 0;
     }
     const bool undock_pending = argc > 2 && std::string(argv[2]) == "--undock-pending";

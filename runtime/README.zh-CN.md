@@ -37,3 +37,5 @@
 [无边框窗口示例](../web/frameless/README.md)提供可缩放和固定尺寸 Lua 启动脚本及原生 HTML 拖动区。SDK 安装包将此示例放在 `frameless/` 目录。
 
 [透明窗口示例](../web/transparent/README.md)演示桌面 Alpha、半透明面板、圆角和阴影，SDK 将其放在 `transparent/`。
+
+JSFX helper 在能力握手后并发注册独立的启动订阅，返回时仍保证参数与编辑器尺寸已初始化。参见[启动计时](../docs/devtools.zh-CN.md#启动计时)。

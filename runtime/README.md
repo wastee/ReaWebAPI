@@ -37,3 +37,5 @@ Pure JavaScript apps use the REAPER Mirror and Runtime APIs. For Lua-owned proje
 [Frameless Window](../web/frameless/README.md) provides resizable and fixed-size Lua launchers with native HTML drag regions. The packaged SDK includes this example in `frameless/`.
 
 [Transparent Window](../web/transparent/README.md) demonstrates desktop Alpha, translucent panels, rounded corners and shadows. It is included in the SDK as `transparent/`.
+
+The JSFX helper registers independent startup subscriptions concurrently after its capability handshake. It preserves parameter and editor-size readiness on return. See [startup timing](../docs/devtools.md#startup-timing).

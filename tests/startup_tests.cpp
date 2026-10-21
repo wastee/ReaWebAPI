@@ -1,10 +1,21 @@
 #include "platform/shared/startup.hpp"
+#include "platform/shared/startup_timing.hpp"
 #include <stdexcept>
 #include <iostream>
 using reaweb::StartupPresentation;
 #define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
 int main() {
   try {
+    reaweb::StartupTiming timing;
+    timing.mark(reaweb::StartupTiming::Handshake);
+    const auto first_timing = timing.snapshot();
+    timing.mark(reaweb::StartupTiming::Handshake);
+    CHECK(timing.snapshot() == first_timing);
+    CHECK(first_timing["milestones"]["runtimeHandshakeMs"] >= 0);
+    CHECK(!first_timing["milestones"].contains("revealCompleteMs"));
+    timing.reset("cachedReopen");
+    CHECK(timing.snapshot()["milestones"].size() == 1);
+    CHECK(timing.snapshot()["kind"] == "cachedReopen");
     StartupPresentation hidden;
     const auto first = hidden.navigate();
     hidden.request(false); hidden.prepared(first);

@@ -87,6 +87,10 @@ void open_external(const std::string& url) {
   if (!isClosed && navigationStarted) navigationStarted();
   if (!isClosed && options.on_navigation) options.on_navigation();
 }
+- (void)webView:(WKWebView*)webView didFinishNavigation:(WKNavigation*)navigation {
+  (void)webView; (void)navigation;
+  if (!isClosed && options.startup_timing) options.startup_timing->mark(reaweb::StartupTiming::Loaded);
+}
 - (void)webView:(WKWebView*)webView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
   (void)webView; (void)navigation;
   if (error.code != NSURLErrorCancelled) {
@@ -248,11 +252,13 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   StartupPresentation startup_;
   __weak NSWindow* startup_key_ = NSApp.keyWindow;
   bool snapshot_pending_ = false;
+  void mark_startup(StartupTiming::Stage stage) { if (delegate_->options.startup_timing) delegate_->options.startup_timing->mark(stage); }
   unsigned snapshot_requested_ = ~0u;
   void prepare_startup() {
     snapshot_requested_ = startup_.generation();
     if (!startup_.pending() || snapshot_pending_ || closed()) return;
     snapshot_pending_ = true;
+    mark_startup(StartupTiming::FrameRequested);
     auto weak = weak_from_this();
     const auto generation = startup_.generation();
     auto configuration = [WKSnapshotConfiguration new];
@@ -262,7 +268,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
         self->snapshot_pending_ = false;
         if (generation != self->startup_.generation()) {
           if (self->snapshot_requested_ == self->startup_.generation()) self->prepare_startup();
-        } else if (image && !error) self->startup_.prepared(generation);
+        } else if (image && !error) { self->mark_startup(StartupTiming::FrameReady); self->startup_.prepared(generation); }
         else {
           self->delegate_->isClosed = true;
           self->delegate_->options.on_error("WKWebView could not prepare the initial frame");
@@ -321,6 +327,7 @@ public:
   MacWindow(WindowOptions options, WKWebsiteDataStore* data, WKProcessPool* pool) : startup_(options.hidden) {
     delegate_ = [ReaWebDelegate new];
     delegate_->options = std::move(options);
+    mark_startup(StartupTiming::ControllerStart);
     delegate_->entryURI = delegate_->options.url.empty() ? file_uri(delegate_->options.entry) : delegate_->options.url;
     delegate_->navigationURI = delegate_->entryURI;
     delegate_->isClosed = false;
@@ -340,6 +347,7 @@ public:
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
     webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
+    mark_startup(StartupTiming::ControllerReady);
     webview_->dropEnabled = false; webview_->sourceClosed = false;
     webview_->receiveDrop = delegate_->options.on_drop;
     webview_->toggleDock = delegate_->options.on_dock_toggle;
@@ -517,6 +525,7 @@ public:
     }
     if (startup_.present()) {
       window_->set_visible(true);
+      if (!delegate_->options.hosted) mark_startup(StartupTiming::Revealed);
       if (maximized_ && !webview_.window.zoomed) [webview_.window zoom:nil];
       if (!delegate_->options.hosted && startup_.focus_requested() && NSApp.active && NSApp.keyWindow == startup_key_) {
         if (delegate_->options.on_present) delegate_->options.on_present();

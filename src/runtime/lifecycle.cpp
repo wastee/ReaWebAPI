@@ -2,6 +2,8 @@
 
 namespace reaweb {
 void Runtime::navigate(Session& session) {
+  if (session.generation) session.startup_timing->reset("navigation");
+  session.startup_timing->mark(StartupTiming::Navigation);
   end_jsfx_edit(session);
   if(session.jsfx && session.jsfx->instance->native)session.jsfx->instance->native->close_window(session.id);
   if (session.jsfx) {

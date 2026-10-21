@@ -3,6 +3,20 @@
 #include <limits>
 
 namespace reaweb {
+std::shared_ptr<Platform> Runtime::prepare_platform() {
+  auto platform = platform_.lock();
+  if (!platform) {
+    const auto data = resource_ / "ReaWebAPI" / "WebViewData";
+    fs::create_directories(data);
+    platform = make_platform(data);
+    platform_ = platform;
+  }
+#ifdef _WIN32
+  warmed_platform_ = platform;
+#endif
+  return platform;
+}
+
 int Runtime::open(const std::string& path, const fs::path& base) {
   return open_impl(path, base, "");
 }
@@ -45,6 +59,7 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
 
 int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable, bool transparent, std::shared_ptr<Session::Jsfx> jsfx) {
   check_thread();
+  const auto requested = Clock::now();
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
   if (sessions_.size() >= 32) throw Error("WINDOW_LIMIT", "At most 32 ReaWebAPI windows may be open");
@@ -72,17 +87,13 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       app->resources = std::make_shared<WebResources>(entry.parent_path(), app_id);
       app->origin = app->resources->origin();
     } else app->origin = dev_url.substr(0, dev_url.find('/', 7));
-    app->platform = platform_.lock();
-    if (!app->platform) {
-      const auto data = resource_ / "ReaWebAPI" / "WebViewData";
-      fs::create_directories(data);
-      app->platform = make_platform(data);
-      platform_ = app->platform;
-    }
+    app->platform = prepare_platform();
     apps_[app_key] = app;
   }
   const auto id = ++next_id_;
   auto session = std::make_shared<Session>();
+  session->startup_timing->reset("create", jsfx ? jsfx->discovered : requested);
+  if (jsfx) session->startup_timing->mark(StartupTiming::Discovered, jsfx->discovered);
   session->id = id;
   session->jsfx = std::move(jsfx);
   if (session->jsfx) jsfx_platform_ = app->platform;
@@ -196,7 +207,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, window_resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }, hidden, frameless, resizable, transparent, bool(session->jsfx)});
+    }, hidden, frameless, resizable, transparent, bool(session->jsfx), session->startup_timing});
   session->window->set_media_resources(window_resources);
   if (session->jsfx) session->jsfx->editor.host->resize(session->window->native_handle());
   sessions_.emplace(id, session);

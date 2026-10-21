@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dll', type=Path, required=True)
 parser.add_argument('--webview', action='store_true')
 parser.add_argument('--latency', action='store_true', help='Measure startup and API round-trips with real WebView2 and a 30 ms mock host tick')
+parser.add_argument('--startup', action='store_true', help='Measure idle startup, window creation, reuse and reopen in WebView2')
 parser.add_argument('--demo', action='store_true', help='Exercise the shipped demo UI in the real WebView')
 parser.add_argument('--starter', action='store_true', help='Exercise the SDK starter in the real WebView')
 parser.add_argument('--dev', action='store_true', help='Exercise Vite modules, Worker, fetch and CSS HMR through OpenDev')
@@ -423,7 +424,9 @@ try:
     captured_seen = False
     assert open_window(b'missing.html') == 0
     saved_error = get_error()
+    first_tick_started = time.perf_counter()
     timer()
+    first_tick_ms = (time.perf_counter() - first_tick_started) * 1000
     assert b'does not exist' in saved_error and saved_error == get_error()
     missing = C.create_string_buffer(b'missing.html')
     arguments = (C.c_void_p * 1)(C.addressof(missing))
@@ -450,6 +453,10 @@ try:
         args.webview = False
     if args.webview and args.latency:
         from web_latency import run_windows
+        run_windows(globals())
+        args.webview = False
+    if args.webview and args.startup:
+        from web_startup import run_windows
         run_windows(globals())
         args.webview = False
     if args.webview:
@@ -567,7 +574,7 @@ try:
     }
   };
   const el = id => document.getElementById(id);
-  if (!el('status').textContent.startsWith('Connected to ReaWebAPI 0.1.8')) throw new Error(el('status').textContent);
+  if (!el('status').textContent.startsWith('Connected to ReaWebAPI ' + (await reaper.lifecycle.ready).version)) throw new Error(el('status').textContent);
   if (!sessionStorage.getItem('studioReload')) {
     sessionStorage.setItem('studioReload', 'yes');
     await reaper.window.reload(); return;
@@ -845,7 +852,7 @@ try:
             identity = ''.join(chr(ord(c) + 32) if 'A' <= c <= 'Z' else c for c in identity)
         app_hash = 14695981039346656037
         for byte in identity.encode('utf-8'): app_hash = ((app_hash ^ byte) * 1099511628211) & ((1 << 64) - 1)
-        app_id = ('dev-' if args.dev else 'local-') + f'{app_hash:016x}-0'
+        app_id = 'dev-' + f'{app_hash:016x}-0' if args.dev else 'plugin-smoke'
         state_folder = root / 'ReaWebAPI' / 'Apps' / app_id / 'WindowState'
         state_folder.mkdir(parents=True, exist_ok=True)
         state_files = []
@@ -954,6 +961,8 @@ try:
                     if not title.value.startswith('NATIVE DOCK:') or (handle, title.value) in native_steps:
                         continue
                     native_steps.add((handle, title.value))
+                    if args.starter and title.value in ('NATIVE DOCK:1', 'NATIVE DOCK:3'):
+                        assert user32.GetWindowLongPtrW(handle, -16) & 0x01000000, 'Starter lost its maximized floating state'
                     assert not user32.GetDlgItem(handle, 0x1800), 'Removed docking toolbar is still present'
                     viewport = json.loads((folder / ('viewport-' + title.value.split(':')[1] + '.json')).read_text())
                     client = W.RECT()

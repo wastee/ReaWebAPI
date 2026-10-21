@@ -2,6 +2,7 @@
 #include "core/core.hpp"
 #include "runtime/icon.hpp"
 #include "web/web_resources.hpp"
+#include "platform/shared/startup_timing.hpp"
 #include <memory>
 
 namespace reaweb {
@@ -36,6 +37,7 @@ struct WindowOptions {
   bool resizable = true;
   bool transparent = false;
   bool hosted = false;
+  std::shared_ptr<StartupTiming> startup_timing;
 };
 class Window {
   std::shared_ptr<WebResources> media_resources_;

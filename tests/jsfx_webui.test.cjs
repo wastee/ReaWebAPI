@@ -368,3 +368,78 @@ test('bounded discrete queues reject overflow instead of silently merging indepe
   for (let n = 0; n < 17; ++n) { f.blocked.shift().resolve(); await writes[n]; await turn(); }
   assert.equal(f.calls.filter(c => c.method === 'setParam').length, 17); await f.fx.dispose();
 });
+
+test('independent subscriptions start together and snapshots wait for every registration', async () => {
+  for (const sizing of [false, true]) {
+    const f = fixture(), base = f.reaper.host.service('jsfx'), pending = [], registered = [];
+    f.reaper.host.service = () => ({
+      invoke: async (method, data) => {
+        if (method === 'getEditorSize') return f.ok({width:600,height:300,revision:'1'});
+        const reply = await base.invoke(method,data);
+        if (method === 'getCapabilities') reply.data.features = {editorSize:sizing};
+        return reply;
+      },
+      on: (name, fn) => {
+        registered.push(name); f.events[name] = fn;
+        return new Promise(resolve => pending.push(() => resolve(async () => { delete f.events[name]; })));
+      }
+    });
+    const connecting = connect(f);
+    await turn();
+    assert.deepEqual(new Set(registered), new Set(['paramsChanged','capabilitiesChanged','dataStateChanged','operationChanged','visibilityChanged', ...(sizing?['editorSizeChanged']:[])]));
+    assert.equal(f.calls.filter(c=>c.method==='getParamState').length,0);
+    f.event([.7,.8], '50');
+    if (sizing) f.events.editorSizeChanged({sessionId:f.sessionId,size:{width:900,height:400,revision:'2'}});
+    for (const finish of pending.slice(1)) finish();
+    await turn();
+    assert.equal(f.calls.filter(c=>c.method==='getParamState').length,0);
+    pending[0](); await connecting;
+    assert.equal(f.fx.params.snapshot.parameters[0].normalized,.7);
+    if (sizing) assert.equal(f.fx.editor.size.width,900);
+    await f.fx.dispose(); assert.deepEqual(Object.keys(f.events),[]);
+  }
+});
+
+test('failed connection invalidates callbacks and disposes early and late registrations', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx'), pending = new Map(), stopped = [];
+  f.reaper.host.service = () => ({...base,on:(name,fn)=>{
+    f.events[name]=fn;
+    return new Promise((resolve,reject)=>pending.set(name,{resolve:()=>resolve(()=>{stopped.push(name);delete f.events[name];}),reject}));
+  }});
+  const {connectJSFX} = await import('../runtime/jsfx-webui.mjs');
+  const opening = connectJSFX(f.reaper,error=>f.errors.push(error));
+  const rejected = assert.rejects(opening, /subscription failed/);
+  await turn();
+  pending.get('paramsChanged').resolve(); await turn();
+  pending.get('operationChanged').reject(new Error('subscription failed')); delete f.events.operationChanged;
+  await rejected;
+  assert.deepEqual(stopped,['paramsChanged']);
+  const calls = f.calls.length;
+  f.events.visibilityChanged({sessionId:f.sessionId,activation:2,active:true,paramState:f.state([.8,.8],20,2)});
+  f.events.capabilitiesChanged({sessionId:f.sessionId,capabilityRevision:'2'});
+  for (const [name,p] of pending) if (!['paramsChanged','operationChanged'].includes(name)) p.resolve();
+  await turn(); await turn();
+  assert.equal(f.calls.length,calls);
+  assert.deepEqual(Object.keys(f.events),[]);
+  assert.equal(new Set(stopped).size,4);
+  assert.deepEqual(f.errors,[]);
+});
+
+test('visibility during registration cannot present before size and parameter initialization', async () => {
+  const f=fixture(),base=f.reaper.host.service('jsfx'); let release;
+  f.reaper.host.service=()=>({...base,on:async(name,fn)=>{
+    const off=await base.on(name,fn);
+    if(name==='visibilityChanged') {
+      fn({sessionId:f.sessionId,activation:2,active:true,paramState:f.state([.9,.8],30,2)});
+      await new Promise(resolve=>{release=resolve;});
+    }
+    return off;
+  }});
+  const opening=connect(f); await turn(); await turn();
+  assert.equal(f.calls.some(c=>c.method==='present'),false);
+  release(); await opening;
+  await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.fx.params.snapshot.activation,2);
+  assert.equal(f.calls.find(c=>c.method==='present').data.activation,2);
+  await f.fx.dispose();
+});

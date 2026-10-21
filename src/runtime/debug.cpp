@@ -33,6 +33,13 @@ Json Runtime::diagnostics(int id) const {
   }
   const auto& s = *it->second;
   Json result = s.window->diagnostics();
+  result["startup"] = s.startup_timing->snapshot();
+  result["startup"]["windowId"] = s.id;
+  result["startup"]["documentGeneration"] = s.generation;
+  if (s.jsfx) {
+    result["startup"]["sessionId"] = s.jsfx->instance->session_id;
+    result["startup"]["activation"] = s.jsfx->activation;
+  }
   result["webRuntime"] = web_runtime(s);
   result["system"] = system_diagnostics();
   result["streams"] = streams_.info();

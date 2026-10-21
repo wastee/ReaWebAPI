@@ -180,6 +180,8 @@ During the hold period, switch to another application. Verify that Show leaves i
 
 On Windows, build `windows_startup` and run `windows_startup 20 --hidden` for framed/frameless hidden creation, first Show/Focus desktop pixels, repeated Hide/Show, visible/hidden resize and early-close races. The first Show must paint without a second visibility toggle or forced focus. Run the default, `--dock` and `--undock-pending` modes for normal visible startup and docking regression. Windows 10 and Windows 11 require separate host runs. Linux requires X11/XWayland, and input-driven resize tests require an isolated display.
 
+Run `windows_startup 1 --maximized` for saved maximized placement during first presentation, early Focus, hidden Show/Focus, minimize/restore and repeated Dock/Undock, including undocking before the first frame. Show must preserve foreground focus. The `plugin_smoke.py --webview --starter` check covers instance reuse and verifies the maximized state before docking, after undocking and in saved WindowState.
+
 On macOS, build `macos_startup` in `build-arm64`, then run `STARTUP_VARIANTS=4,6 STARTUP_RUNS=20 python3 tests/macos_startup.py`. It uses cold isolated profiles to check framed/frameless hidden creation, background JS, first Show pixels without focus, Focus, repeated Hide/Show, resize and Close before initialization. Variants `0,1,2,3,5` check normal visible startup. A logged-in graphical session and screen-capture permission are required.
 
 ## Transparent floating windows
@@ -193,3 +195,11 @@ Use the transparent Demo against a changing native background. Check clear margi
 - Linux: run `tests/linux_transparent.py` with `REAWEB_TEST_ISOLATED_DISPLAY=1` and `REAWEB_TEST_REAPER` on a dedicated composited X11 display. It checks actual 32-bit hosts, desktop Alpha and input in real REAPER. Stop the compositor and repeat with `REAWEB_TEST_NO_COMPOSITOR=1` to verify explicit rejection. Record the window manager, compositor, WebKitGTK and rendering backend. Native Wayland is unsupported.
 
 Keep ordinary `hidden_start_smoke`, frameless native input and Linux Docker divider tests in the regression run. Pixel samples do not replace first-presentation recordings or hardware-specific GPU, DPI and multi-display acceptance.
+
+## Startup diagnostics and subscription concurrency
+
+`ctest` covers bounded timing records and JSFX subscription ordering, early/late registration cleanup, visibility during initialization and old-runtime sizing. Windows also covers shared environment failures, controlled retries, window closure and callbacks after teardown.
+
+Run `python tests/plugin_smoke.py --dll <Windows-extension> --webview --startup --resource-root <isolated-profile>` to sample idle preparation, first/new windows, identity reuse and fully closed reopen. `startup.json` separates native milestones and browser resource/data timings. Repeat with fresh profiles and after restarting with the same profile. Compare medians and slower samples under the same machine load.
+
+Run `python tests/jsfx_startup_reaper.py --reaper <executable> --extension <binary> --effect <1175-directory> --output <new-directory>` to check 20 tracks, multiple instances on one track, cached reopen and simultaneous floating editors. `--sdk <jsfx-webui.mjs>` selects a baseline helper. Each sample checks parameter identity and records native and browser timings. The test copies its fixture into a disposable profile. If REAPER does not execute command-line scripts, run that profile's generated `launch.lua` through its Action List. Use the existing editor-size, focus, hidden-start and native startup tests for presentation regressions. UI acceptance runs serially on each desktop.

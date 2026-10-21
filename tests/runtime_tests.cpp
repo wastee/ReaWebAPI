@@ -309,6 +309,17 @@ int main() {
       int activations = 0;
       auto startup_docks = docks; startup_docks.activate = [&](void*) { ++activations; };
       Runtime runtime(host, root / "StartupProfile", [](const std::string&) {}, startup_docks);
+      runtime.schedule_webview_warmup();
+      CHECK(platform_count == 0);
+      runtime.tick();
+      CHECK(windows.empty());
+#ifdef _WIN32
+      CHECK(platform_count == 1);
+      runtime.schedule_webview_warmup(); runtime.tick();
+      CHECK(platform_count == 1);
+#else
+      CHECK(platform_count == 0);
+#endif
       defer_next_presentation = true;
       const auto id = runtime.open(entry.u8string()); auto window = windows.back().lock();
       result(runtime, *window, window->send("__reawebHello", {1}));

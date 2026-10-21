@@ -63,6 +63,8 @@ Runtime::~Runtime() {
   jsfx_instances_.clear();
   jsfx_native_.reset();
   apps_.clear();
+  jsfx_platform_.reset();
+  warmed_platform_.reset();
 }
 void Runtime::check_thread() const {
   if (std::this_thread::get_id() != main_thread_)
@@ -412,6 +414,13 @@ void Runtime::tick() {
   if (ticking_) return;
   ticking_ = true;
   struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
+#ifdef _WIN32
+  if (platform_warmup_pending_) {
+    platform_warmup_pending_ = false;
+    // The host timer runs on the STA UI thread, after extension registration.
+    try { prepare_platform(); } catch (const std::exception&) {}
+  }
+#endif
   sync_external();
   tick_jsfx();
   if (auto platform = platform_.lock()) platform->pump();
@@ -526,6 +535,7 @@ void Runtime::tick() {
         if (data["args"] != Json::array({1})) throw Error("PROTOCOL_MISMATCH", "Unsupported bridge protocol");
         if (s->ready && s->document != document) throw Error("DOCUMENT_STALE", "Reload the page to start a new document");
         s->document = document; s->ready = true;
+        s->startup_timing->mark(StartupTiming::Handshake);
         auto query = data; query["method"] = "ReaWeb_GetCapabilities"; query["args"] = Json::array();
         response = s->bridge->dispatch_request(query);
         response["result"]["webRuntime"] = web_runtime(*s);
@@ -569,6 +579,10 @@ void Runtime::tick() {
         catch (const std::exception& error) { s.last_error = error.what(); log_(s.last_error); }
       }
       s.window->tick();
+#ifdef __linux__
+      if (!s.jsfx && !s.closing && !s.window->closed() && s.window->visible())
+        s.startup_timing->mark(StartupTiming::Revealed);
+#endif
       if (!s.closing && !s.window->closed()) refresh_icon(s);
       if (!s.lifecycle_action.empty() && Clock::now() >= s.lifecycle_deadline) {
         append_log(s, {{"level", "warn"}, {"source", "runtime"}, {"message", "Lifecycle cleanup timed out after 2000 ms"}});

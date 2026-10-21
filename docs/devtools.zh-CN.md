@@ -47,3 +47,13 @@ WebView2 没有公开的嵌入式检查器控制器。ReaWebAPI 通过 [`OpenDev
 `(await reaper.debug.getDiagnostics()).devtools` 返回实际模式、宽度比例、嵌入支持情况及后端状态。macOS 的 `visible` 反映本地 WebKit 检查器状态，Windows 的可见状态仅反映 ReaWebAPI 已识别的原生窗口。验证步骤见[手动检查清单](SMOKE_TEST.md#devtools-acceptance)。
 
 生产资源在 Console、Sources 和 Network 中使用 `reaweb://<appId>/...` URL。原生 Inspector 会话、快捷键及 Embedded/Floating 控制保持原有行为。
+
+## 启动计时
+
+`(await reaper.debug.getDiagnostics()).startup` 为每个窗口保留一条有界的原生计时记录。`kind` 为 `create`、`navigation` 或 `cachedReopen`。`windowId` 和 `documentGeneration` 标识文档，JSFX 另带 `sessionId` 和 `activation`。各阶段以 App 打开请求、观察到的 JSFX 发现、后续导航或缓存复激活为起点，单位为毫秒。FX 发现计时从现有扫描检测到编辑器后开始，不包含此前的轮询间隔。
+
+可用阶段包括环境等待、Controller 创建、导航完成、Runtime 握手、首帧准备和原生揭示。Windows 的 `environmentStartup.initializationMs` 是完整的环境初始化尝试耗时。`environmentReadyMs` 减去 `environmentWaitStartMs` 是本窗口的剩余等待，包含原生宿主窗口创建。`mode` 区分环境已就绪与初始化中。导航与缓存复开不记录未重复执行的阶段。Linux 的 Controller 就绪与加载完成是从 WebKit 辅助进程收到的观察值，不提供独立的不透明页面快照确认。
+
+`revealCompleteMs` 表示现有原生揭示路径完成，不代表显示器物理上屏或业务数据就绪。JSFX 的 `presentationMs` 含义保持不变。重叠阶段不能累加，前端与原生时钟不能直接相减。
+
+HTML、脚本和样式加载可使用浏览器 Navigation/Resource Timing。JSFX 在 `performance.getEntriesByType('measure')` 中提供 `reaweb.jsfx.` 前缀的有界记录，涵盖能力就绪、订阅、编辑器尺寸、参数、连接、未完成尺寸请求等待与 present 确认。每阶段仅保留最新一条，`detail` 带实例与激活标识。`present` 包含现有尺寸等待，不代表物理显示延迟。Runtime Studio 以 `reaweb.demo.appInfo` 记录独立元数据查询。App 自有首屏数据和布局可使用单独的 User Timing 记录。计时不增加显示前置条件。

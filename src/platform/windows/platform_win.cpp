@@ -104,6 +104,8 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   RECT floating_rect_{};
   bool maximized_ = false;
   std::string browser_version_;
+  Json environment_timing_;
+  void mark_startup(StartupTiming::Stage stage) { if (options_.startup_timing) options_.startup_timing->mark(stage); }
   bool visible_ = true;
   bool drop_enabled_ = false, dragging_ = false;
   WinIcon icon_;
@@ -150,6 +152,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
     ComPtr<IStream> stream;
     if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) { fail("Cannot allocate the initial WebView2 capture"); return; }
     snapshot_pending_ = true;
+    mark_startup(StartupTiming::FrameRequested);
     const auto generation = startup_.generation();
     const auto hr = webview_->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream.Get(),
       Callback<ICoreWebView2CapturePreviewCompletedHandler>([weak = weak_from_this(), stream, generation](HRESULT result) -> HRESULT {
@@ -157,7 +160,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
           self->snapshot_pending_ = false;
           if (generation != self->startup_.generation()) {
             if (self->snapshot_requested_ == self->startup_.generation()) self->prepare_startup();
-          } else if (SUCCEEDED(result)) { self->startup_.prepared(generation); self->tick(); }
+          } else if (SUCCEEDED(result)) { self->mark_startup(StartupTiming::FrameReady); self->startup_.prepared(generation); self->tick(); }
           else self->fail("WebView2 could not prepare the initial frame");
         }
         return S_OK;
@@ -371,8 +374,12 @@ public:
     if (hosted_parking_) DestroyWindow(hosted_parking_);
   }
   void fail(const std::string& error) { closed_ = true; options_.on_error(error); }
-  void initialize(ICoreWebView2Environment* environment) {
-    if (closed_) return;
+  bool environment_wait_cancelled() const { return closed_ || startup_.cancelled(); }
+  void initialize(ICoreWebView2Environment* environment, Json timing = nullptr) {
+    if (environment_wait_cancelled()) return;
+    environment_timing_ = std::move(timing);
+    mark_startup(StartupTiming::EnvironmentReady);
+    mark_startup(StartupTiming::ControllerStart);
     if (options_.hosted && (!hwnd_ || !IsWindow(hwnd_) || !IsWindow(static_cast<HWND>(options_.parent)))) {
       closed_ = true; return;
     }
@@ -393,6 +400,7 @@ public:
           check(result, "CreateCoreWebView2Controller");
           if (!controller) throw std::runtime_error("WebView2 controller is unavailable");
           self->controller_ = controller;
+          self->mark_startup(StartupTiming::ControllerReady);
           check(controller->get_CoreWebView2(&self->webview_), "get_CoreWebView2");
           self->configure();
           if (self->visible() && GetFocus() == self->hwnd_)
@@ -553,6 +561,7 @@ public:
     check(webview_->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
       [weak](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
         BOOL success = FALSE; args->get_IsSuccess(&success);
+        if (success) if (auto self = weak.lock()) self->mark_startup(StartupTiming::Loaded);
         if (!success) {
           COREWEBVIEW2_WEB_ERROR_STATUS status{}; args->get_WebErrorStatus(&status);
           if (status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED)
@@ -611,11 +620,12 @@ public:
         GetWindowPlacement(hwnd_, &placement); placement.showCmd = SW_SHOWMAXIMIZED;
         SetWindowPlacement(hwnd_, &placement);
       }
-      ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+      ShowWindow(hwnd_, SW_SHOWNA);
       // A controller created under a hidden HWND needs explicit first presentation,
       // even when the cached visibility is already true.
       if (controller_) { controller_->put_IsVisible(TRUE); visible_ = true; }
       RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+      if (!options_.hosted) mark_startup(StartupTiming::Revealed);
       if (startup_.focus_requested() && GetForegroundWindow() == startup_foreground_) {
         if (options_.on_present) options_.on_present();
         if (!(GetWindowLongPtrW(hwnd_, GWL_STYLE) & WS_CHILD)) focus();
@@ -632,7 +642,7 @@ public:
     if (closed_ || !hwnd_ || startup_.cancelled()) return;
     if (startup_.pending()) { startup_.show(true); startup_foreground_ = GetForegroundWindow(); tick(); }
     if (closed_ || startup_.cancelled()) return;
-    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    ShowWindow(hwnd_, SW_SHOWNA);
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     SetForegroundWindow(GetAncestor(hwnd_, GA_ROOT));
     SetFocus(hwnd_);
@@ -658,7 +668,7 @@ public:
       controller_->put_IsVisible(visible); visible_ = visible;
     }
     if (startup_.pending()) return;
-    ShowWindow(hwnd_, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+    ShowWindow(hwnd_, visible ? SW_SHOWNA : SW_HIDE);
   }
   void show() override {
     if (closed_ || startup_.cancelled()) return;
@@ -742,7 +752,7 @@ public:
     reply({{"result", result == DRAGDROP_S_DROP && (effect & DROPEFFECT_COPY) != 0}});
   }
   Json diagnostics() const override {
-    return {{"backend", "WebView2"}, {"browserVersion", browser_version_}, {"controllerReady", controller_ != nullptr},
+    return {{"backend", "WebView2"}, {"browserVersion", browser_version_}, {"environmentStartup", environment_timing_}, {"controllerReady", controller_ != nullptr},
       {"controllerVisible", visible_}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
   }
   bool frameless_active() const override { return options_.frameless && !closed_ && floating(); }
@@ -841,14 +851,21 @@ public:
     icon_.refresh(hwnd_);
     restore_placement({{"x", floating_rect_.left}, {"y", floating_rect_.top},
       {"width", floating_rect_.right - floating_rect_.left}, {"height", floating_rect_.bottom - floating_rect_.top}, {"maximized", maximized_}});
-    if (startup_.pending() && startup_.wanted()) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    if (startup_.pending() && startup_.wanted()) ShowWindow(hwnd_, SW_SHOWNA);
     if (controller_) controller_->NotifyParentWindowPositionChanged();
     if (options_.frameless) evaluate("window.__reawebDragRegionsActive?.(true);");
-    if (!startup_.pending()) focus();
+    if (!startup_.pending()) {
+      if (maximized_) ShowWindow(hwnd_, SW_SHOWMAXIMIZED);
+      focus();
+    }
   }
 };
 
 struct EnvironmentState {
+  StartupTiming::Clock::time_point started = StartupTiming::Clock::now(), completed;
+  enum class Status { NotStarted, Initializing, Ready, Failed };
+  Status status = Status::NotStarted;
+  uint64_t attempt = 0;
   ComPtr<ICoreWebView2Environment> environment;
   std::vector<std::weak_ptr<WinWindow>> waiting;
   std::string error;
@@ -858,8 +875,10 @@ class WinPlatform final : public Platform {
   HINSTANCE instance_ = nullptr;
   bool com_ = false;
   HWND clipboard_owner_ = nullptr;
-public:
-  explicit WinPlatform(const fs::path& data) {
+  fs::path data_;
+  void prepare_environment(bool retry = false) {
+    if (state_->status == EnvironmentState::Status::Ready || state_->status == EnvironmentState::Status::Initializing ||
+        (state_->status == EnvironmentState::Status::Failed && !retry)) return;
     auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
     auto scheme = Microsoft::WRL::Make<CoreWebView2CustomSchemeRegistration>(L"reaweb");
     check(scheme->put_HasAuthorityComponent(TRUE), "App scheme authority");
@@ -871,6 +890,38 @@ public:
     if (startup_color_profile == ColorProfile::SRGB) {
       check(options->put_AdditionalBrowserArguments(L"--force-color-profile=srgb"), "WebView2 color profile");
     }
+    const auto attempt = ++state_->attempt;
+    state_->status = EnvironmentState::Status::Initializing;
+    state_->error.clear();
+    state_->started = StartupTiming::Clock::now();
+    std::weak_ptr<EnvironmentState> weak = state_;
+    auto hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, data_.c_str(), options.Get(),
+      Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        [weak, attempt](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+          auto state = weak.lock();
+          if (!state || state->attempt != attempt || state->status != EnvironmentState::Status::Initializing) return S_OK;
+          state->completed = StartupTiming::Clock::now();
+          if (FAILED(result) || !environment) state->error = "WebView2 initialization failed. Install Microsoft Edge WebView2 Evergreen Runtime. HRESULT " + std::to_string(static_cast<unsigned long>(result));
+          else state->environment = environment;
+          state->status = state->error.empty() ? EnvironmentState::Status::Ready : EnvironmentState::Status::Failed;
+          auto waiting = std::move(state->waiting);
+          for (auto& item : waiting) if (auto window = item.lock(); window && !window->environment_wait_cancelled()) {
+            try {
+              if (!state->error.empty()) window->fail(state->error);
+              else window->initialize(environment, {{"mode", "waiting"}, {"initializationMs",
+                std::chrono::duration<double, std::milli>(state->completed - state->started).count()}});
+            } catch (const std::exception& e) { window->fail(e.what()); }
+          }
+          return S_OK;
+        }).Get());
+    if (FAILED(hr)) {
+      state_->status = EnvironmentState::Status::Failed;
+      state_->completed = StartupTiming::Clock::now();
+      state_->error = "WebView2 Runtime is unavailable. Install Microsoft Edge WebView2 Evergreen Runtime. HRESULT " + std::to_string(static_cast<unsigned long>(hr));
+    }
+  }
+public:
+  explicit WinPlatform(const fs::path& data) : data_(data) {
     check(OleInitialize(nullptr), "OleInitialize (WebView2 and native drag require STA)");
     com_ = true;
     // COM completion handlers can outlive extension teardown. Keep their code mapped until process exit.
@@ -881,27 +932,8 @@ public:
     if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
       OleUninitialize(); com_ = false; throw std::runtime_error("RegisterClass failed");
     }
-    std::weak_ptr<EnvironmentState> weak = state_;
-    auto hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, data.c_str(), options.Get(),
-      Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [weak](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
-          auto state = weak.lock();
-          if (!state) return S_OK;
-          if (FAILED(result) || !environment) state->error = "WebView2 initialization failed. Install Microsoft Edge WebView2 Evergreen Runtime. HRESULT " + std::to_string(static_cast<unsigned long>(result));
-          else state->environment = environment;
-          auto waiting = std::move(state->waiting);
-          for (auto& item : waiting) if (auto window = item.lock()) {
-            try {
-              if (!state->error.empty()) window->fail(state->error);
-              else window->initialize(environment);
-            } catch (const std::exception& e) { window->fail(e.what()); }
-          }
-          return S_OK;
-        }).Get());
-    if (FAILED(hr)) {
-      UnregisterClassW(window_class, instance_); OleUninitialize(); com_ = false;
-      throw std::runtime_error("WebView2 Runtime is unavailable. Install Microsoft Edge WebView2 Evergreen Runtime.");
-    }
+    try { prepare_environment(); }
+    catch (...) { UnregisterClassW(window_class, instance_); OleUninitialize(); com_ = false; throw; }
   }
   ~WinPlatform() override {
     if (clipboard_owner_) DestroyWindow(clipboard_owner_);
@@ -986,9 +1018,13 @@ public:
     reply({{"result", true}});
   }
   std::shared_ptr<Window> open(WindowOptions options) override {
+    prepare_environment(true);
+    const bool ready = state_->status == EnvironmentState::Status::Ready;
     if (!state_->error.empty()) throw std::runtime_error(state_->error);
+    if (options.startup_timing) options.startup_timing->mark(StartupTiming::EnvironmentWait);
     auto window = std::make_shared<WinWindow>(std::move(options), instance_);
-    if (state_->environment) window->initialize(state_->environment.Get());
+    if (state_->environment) window->initialize(state_->environment.Get(), {{"mode", ready ? "reused" : "waiting"}, {"initializationMs",
+      std::chrono::duration<double, std::milli>(state_->completed - state_->started).count()}});
     else state_->waiting.push_back(window);
     return window;
   }

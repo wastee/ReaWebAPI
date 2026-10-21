@@ -102,10 +102,15 @@ Json Runtime::jsfx_state(Session& session) {
   state["revision"] = std::to_string(++ui.instance->revision);
   state["activation"] = ui.activation;
   state["active"] = bool(ui.editor.host);
+  session.startup_timing->mark(StartupTiming::Parameters);
   return state;
 }
 void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
   auto& ui = *session.jsfx;
+  if (session.ready) {
+    session.startup_timing->reset("cachedReopen", ui.discovered);
+    session.startup_timing->mark(StartupTiming::Discovered, ui.discovered);
+  }
   session.window->reparent_host(editor.host->parent());
   ui.editor = editor; ++ui.activation;
   ui.presented = false; ui.last_used = Clock::now();
@@ -142,6 +147,7 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   if (it == sessions_.end() || !it->second->jsfx || it->second->closing || it->second->window->closed())
     throw Error("FX_UNBOUND", "The JSFX service requires a bound Hosted WebView");
   auto& session = *it->second; auto& ui = *session.jsfx;
+  if (method == "getCapabilities") session.startup_timing->mark(StartupTiming::Connected);
   if (!payload.is_object()) throw Error("INVALID_ARGUMENT", "Expected a JSFX request object");
   ui.instance->binding->resolve();
   if(method=="getCapabilities" && ui.instance->native) {
@@ -155,8 +161,13 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
     {"features", {{"params", true}, {"paramGroups", true}, {"nativeChannel", false}, {"editorSize", true}}},
     {"limits", {{"maxParametersPerGesture", 259}}}};
   if (payload.value("sessionId", Json()) != ui.instance->session_id) throw Error("STALE_SESSION", "The JSFX instance session changed");
-  if (method == "getEditorSize") return jsfx_size_state(session);
+  if (method == "getEditorSize") {
+    auto size = jsfx_size_state(session);
+    session.startup_timing->mark(StartupTiming::EditorSize);
+    return size;
+  }
   if (method == "setEditorSize") {
+    session.startup_timing->mark(StartupTiming::SizeRequested);
     if (!ui.editor.host || !ui.instance->binding->editor_matches(ui.editor) || payload.value("activation", Json()) != ui.activation)
       throw Error("FX_STALE", "The JSFX editor activation changed");
     for (const auto* name : {"width", "height"})
@@ -231,10 +242,11 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
     throw Error("FX_STALE", "The JSFX editor activation changed");
   if (!ui.initialized) throw Error("FX_NOT_READY", "Read the host state before editing parameters");
   if (method == "present") {
+    session.startup_timing->mark(StartupTiming::Present);
     ui.editor.host->set_background(session.window->background_color());
     ui.presentation_ms = std::chrono::duration<double, std::milli>(Clock::now() - ui.last_used).count();
     ui.presented = true; session.window->set_visible(true);
-    if (session.window->visible()) ui.editor.host->reveal();
+    if (session.window->visible()) { ui.editor.host->reveal(); session.startup_timing->mark(StartupTiming::Revealed); }
     return {{"presented", true}};
   }
   for (auto p = payload.begin(); p != payload.end(); ++p) {
@@ -364,7 +376,7 @@ void Runtime::tick_jsfx() {
       }
       if (s.ready) ui.editor.host->set_background(s.window->background_color());
       ui.editor.host->present(s.window->native_handle());
-      if (ui.presented && s.window->visible()) ui.editor.host->reveal();
+      if (ui.presented && s.window->visible()) { ui.editor.host->reveal(); s.startup_timing->mark(StartupTiming::Revealed); }
       if (!ui.presented && now - ui.last_used > std::chrono::seconds(15))
         throw Error("FX_NOT_READY", "JSFX page did not acknowledge its host state within 15 seconds");
       if (!ui.editing.empty() && now - ui.last_edit > std::chrono::seconds(30)) end_jsfx_edit(s);
@@ -410,6 +422,7 @@ void Runtime::tick_jsfx() {
       } catch (...) {}
       return {};
     })) {
+    const auto discovered = Clock::now();
     if (sessions_.size() >= 32) break;
     try {
       auto binding = std::make_unique<JsfxBinding>(host_, editor.target(), editor.fx);
@@ -427,8 +440,9 @@ void Runtime::tick_jsfx() {
         if (previous.project() == binding->project() && previous.target() == binding->target() && previous.guid() == binding->guid() &&
             candidate.entry == association->entry) { cached = &candidate; break; }
       }
-      if (cached) { attach_jsfx(*cached, editor); continue; }
+      if (cached) { cached->jsfx->discovered = discovered; attach_jsfx(*cached, editor); continue; }
       auto ui = std::make_shared<Session::Jsfx>();
+      ui->discovered = discovered;
       for (auto identity = jsfx_instances_.begin(); identity != jsfx_instances_.end();) {
         try { (*identity)->binding->resolve(); }
         catch (const Error&) { identity = jsfx_instances_.erase(identity); continue; }

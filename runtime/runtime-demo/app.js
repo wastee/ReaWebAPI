@@ -65,10 +65,14 @@ for (const [id, start] of [['drag-file', () => reaper.dragDrop.startFiles([selec
 }
 try {
   const capabilities = await reaper.lifecycle.ready;
-  appName = await reaper.app.getName();
-  el('app-info').textContent = JSON.stringify({id:await reaper.app.getId(),name:appName,version:await reaper.app.getVersion(),
-    rootPath:await reaper.app.getRootPath(),dataPath:await reaper.app.getDataPath(),
-    platform:await reaper.system.getPlatform(),architecture:await reaper.system.getArchitecture()},null,2);
+  const infoStarted = performance.now();
+  const [name, id, version, rootPath, dataPath, platform, architecture] = await Promise.all([
+    reaper.app.getName(), reaper.app.getId(), reaper.app.getVersion(), reaper.app.getRootPath(),
+    reaper.app.getDataPath(), reaper.system.getPlatform(), reaper.system.getArchitecture()
+  ]);
+  appName = name;
+  el('app-info').textContent = JSON.stringify({id,name,version,rootPath,dataPath,platform,architecture},null,2);
+  try { performance.measure('reaweb.demo.appInfo', { start: infoStarted, end: performance.now() }); } catch {}
   await reaper.events.on('native-drop', payload => { el('drop').textContent = JSON.stringify(payload,null,2); });
   await reaper.theme.apply();
   await reaper.events.on('theme-changed', draw);
