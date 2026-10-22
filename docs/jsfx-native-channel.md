@@ -17,6 +17,8 @@ JSFX @block / @sample
 
 The bridge validates `JesusonicAPI` version `0xf0f01091` and the required host EEL exports. Its private helper has no project track, FX slot or window. Host EEL accesses staging only after the helper returns. It never accesses the producer's live payload directly. Unsupported engines retain parameter mode and reject native capabilities with `UNSUPPORTED`.
 
+On Windows, macOS and Linux, each channel engine compiles read and write staging programs for 256 values. C++ reuses them with an updated offset and length for each chunk. The final chunk accesses only its actual values. This bounds source generation and compilation cost while preserving packet limits, shared-memory layout and synchronization. Staging uses registered host EEL variables without accessing private VM memory layouts.
+
 `JesusonicAPI` is an exported REAPER-facing interface, not a stable third-party Extension SDK contract. Host upgrades require compatibility validation. The bridge does not replace the JSFX engine, patch callbacks or access private instance layouts.
 
 ## Instance binding

@@ -94,6 +94,8 @@ Direct Service clients use `getEditorSize`, `setEditorSize({width,height,activat
 
 Pages are created on demand. Closing an editor or switching FX retains up to four hidden pages, released after 60 seconds idle. FX deletion or project invalidation releases them immediately. Reactivation refreshes host state and waits for rendering and `present` before showing the page. The helper manages activation tokens and presentation acknowledgements.
 
+Preloaded WebView containers contain only a blank page. A new JSFX instance still requires page loading, session binding, initial state reads and first-frame preparation. Removing and re-adding the effect creates a new instance and cannot reuse the deleted instance's page. The native channel uses [bounded staging programs](jsfx-native-channel.md#transport) to reduce initialization cost independently of the container pool.
+
 Use `jsfx.active` and `onVisibilityChange` to pause timers, stream subscriptions and animations. Deactivation ends parameter gestures and discards pending drag values. Direct Service clients must render `visibilityChanged.paramState`, then acknowledge its `activation`. Initialization failure or a 15-second presentation timeout restores native content.
 
 Track, master, take, input and monitoring FX are supported, including nested containers, chain editors and floating editors. Floating/chain transitions reuse the same page and restore its shared size preference, falling back to the association size. REAPER controls docking. Bindings validate the project, owner and FX GUIDs, not window titles or last-touched FX.

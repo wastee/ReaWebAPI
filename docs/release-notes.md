@@ -2,10 +2,8 @@
 
 ## English
 
-- Batch native content-control hiding within each JSFX editor on Windows to reduce repeated redraw work, with fallback to individual hides.
-- Add JSFX host-observer timing and cached-reactivation milestones on Windows, macOS and Linux, with platform-specific counters for Windows hooks and cloaking.
+- Reduce JSFX native-channel initialization overhead on Windows, macOS and Linux with bounded EEL staging programs reused by C++ for chunked transfers.
 
 ## 简体中文
 
-- Windows 在各 JSFX 编辑器内批量隐藏原生内容控件，减少重复重绘，失败时回退为逐个隐藏。
-- Windows、macOS 和 Linux 新增 JSFX 宿主观察计时及缓存复激活计时点，Windows 另记录钩子与窗口遮蔽计时。
+- 优化 Windows、macOS 和 Linux 的 JSFX 原生通道初始化，通过固定大小的 EEL 暂存读写程序与 C++ 分块传输，降低程序生成与编译开销。

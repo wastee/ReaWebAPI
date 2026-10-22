@@ -36,7 +36,10 @@ sdk_block_start=time_precise();
 slider2=reaweb_jsfx_handshake(slider2);
 command=reaweb_jsfx_service();
 command == 1 ? (
-  reaweb_jsfx_id==3 ? (
+  reaweb_jsfx_id==5 ? (
+    i=0;loop(reaweb_jsfx_length,32768[i]=reaweb_jsfx_value(i);i+=1;);
+    reaweb_jsfx_reply(0,32768,reaweb_jsfx_length);
+  ) : reaweb_jsfx_id==3 ? (
     32768[0]=reaweb_jsfx_value(2)>0 ? reaweb_jsfx_note_on(reaweb_jsfx_value(0),reaweb_jsfx_value(1),reaweb_jsfx_value(2)) : reaweb_jsfx_note_off(reaweb_jsfx_value(0),reaweb_jsfx_value(1));
     reaweb_jsfx_reply(0,32768,1);
   ) : reaweb_jsfx_id==4 ? (

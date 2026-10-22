@@ -64,6 +64,7 @@ struct JsfxChannelEngine::Impl {
   void* read_one = nullptr;
   void* write_one = nullptr;
   double *offset = nullptr, *value = nullptr, *length = nullptr;
+  static constexpr size_t transfer_block = 256;
   std::vector<double*> local;
   void** (*attach)(const char*, bool) = nullptr;
   void (*gram)(void*, void**) = nullptr;
@@ -99,14 +100,21 @@ struct JsfxChannelEngine::Impl {
     return static_cast<int>(get(3));
   }
   void upload(const std::vector<double>& values) {
-    for (size_t i=0;i<values.size();++i) *local[i]=values[i];
-    *length=double(values.size()); execute(write);
+    if (values.size()>8192) throw Error("PROTOCOL_MISMATCH", "JSFX packet exceeds its reserved region");
+    for (size_t at=0;at<values.size();at+=transfer_block) {
+      const auto count=std::min(transfer_block,values.size()-at);
+      for (size_t i=0;i<count;++i) *local[i]=values[at+i];
+      *offset=double(stage+64+at); *length=double(count); execute(write);
+    }
   }
   std::vector<double> download(size_t size) {
     if (size>8192) throw Error("PROTOCOL_MISMATCH", "JSFX packet exceeds its reserved region");
-    *length=double(size); execute(read);
     std::vector<double> result(size);
-    for (size_t i=0;i<size;++i) result[i]=*local[i];
+    for (size_t at=0;at<size;at+=transfer_block) {
+      const auto count=std::min(transfer_block,size-at);
+      *offset=double(stage+64+at); *length=double(count); execute(read);
+      for (size_t i=0;i<count;++i) result[at+i]=*local[i];
+    }
     return result;
   }
 };
@@ -157,14 +165,13 @@ JsfxChannelEngine::JsfxChannelEngine(Host& host, const std::string& name, unsign
   p.read_one=compile(p.vm,"value=gmem[offset];",0,0);
   p.write_one=compile(p.vm,"gmem[offset]=value;",0,0);
   std::string read,write;
-  // Registered variables are a supported host EEL interface, with no RAM-layout access.
-  for (int i=0;i<8192;++i) {
-    const auto v="v"+std::to_string(i), address=std::to_string(p.stage+64+i);
+  // Reuse a bounded EEL block through registered variables, without VM RAM access.
+  for (size_t i=0;i<Impl::transfer_block;++i) {
+    const auto index=std::to_string(i), v="v"+index, address="offset+"+index;
     p.local.push_back(reg(p.vm,v.c_str()));
-    if (i%64==0) { const auto gate="length>"+std::to_string(i)+"?("; read+=gate; write+=gate; }
-    read+=v+"=gmem["+address+"];";
-    write+="gmem["+address+"]="+v+";";
-    if (i%64==63) { read+=");"; write+=");"; }
+    const auto gate="length>"+index+"?(";
+    read+=gate+v+"=gmem["+address+"];);";
+    write+=gate+"gmem["+address+"]="+v+";);";
   }
   p.read=compile(p.vm,read.c_str(),0,0); p.write=compile(p.vm,write.c_str(),0,0);
   if (!p.read || !p.write || !p.read_one || !p.write_one || !p.offset || !p.value || !p.length ||
