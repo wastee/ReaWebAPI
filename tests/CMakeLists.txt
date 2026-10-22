@@ -211,6 +211,19 @@ endif()
 
 # Native UI integration tests are opt-in and excluded from ctest.
 if(NOT WIN32 AND REAWEB_BUILD_EXTENSION)
+  add_library(swell_jsfx_controls MODULE EXCLUDE_FROM_ALL swell_jsfx_controls.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/shared/swell_window.cpp")
+  target_link_libraries(swell_jsfx_controls PRIVATE reaweb_runtime)
+  target_include_directories(swell_jsfx_controls SYSTEM PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk" "${wdl_SOURCE_DIR}/WDL")
+  target_compile_definitions(swell_jsfx_controls PRIVATE SWELL_PROVIDED_BY_APP NOMINMAX)
+  set_target_properties(swell_jsfx_controls PROPERTIES PREFIX "" OUTPUT_NAME "reaper_swell_jsfx_controls_test")
+  if(APPLE)
+    target_sources(swell_jsfx_controls PRIVATE "${wdl_SOURCE_DIR}/WDL/swell/swell-modstub.mm")
+    target_link_libraries(swell_jsfx_controls PRIVATE "-framework Cocoa")
+    set_target_properties(swell_jsfx_controls PROPERTIES SUFFIX .dylib)
+  else()
+    target_sources(swell_jsfx_controls PRIVATE "${wdl_SOURCE_DIR}/WDL/swell/swell-modstub-generic.cpp")
+  endif()
   add_library(swell_preferences MODULE EXCLUDE_FROM_ALL swell_preferences.cpp
     "${PROJECT_SOURCE_DIR}/src/plugin/preferences.cpp")
   target_link_libraries(swell_preferences PRIVATE reaweb_core)

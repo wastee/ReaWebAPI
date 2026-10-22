@@ -198,6 +198,8 @@ Keep ordinary `hidden_start_smoke`, frameless native input and Linux Docker divi
 
 ## Startup diagnostics and subscription concurrency
 
+On macOS and Linux, build the opt-in `swell_jsfx_controls` target. Load its test module in a disposable REAPER profile containing `jsfx-controls-test.enabled`. The module checks hidden-control queries, meter lookup bounds, re-hidden controls, toolbar/meter/overlay preservation, native restoration and pre-paint observer timing. It writes `jsfx-controls-test.log` and exits that REAPER instance.
+
 For the shared idle pool, run `windows_startup 1 --pool` and repeat the existing startup modes with `--pooled` as the final argument. On macOS use `STARTUP_POOLED=1` with `macos_startup.py`. On Linux use `REAWEB_TEST_IDLE_WEBVIEWS=5` with `linux_webkit_smoke.py`. Check consumption, replenishment, depletion fallback, App isolation, hidden loading and focus. In Preferences, verify default 2, Cancel, Apply, Restore defaults, persistence and live changes to 0 and 32 without closing active Apps. `--idle-webviews 0` on the startup probes disables the pool for comparison.
 
 The macOS hidden-start test dismisses the evaluation dialog through its enabled button and waits for stable main-window focus before opening the WebView. Keep the test desktop idle. `startup-focus.jsonl` records key-window transitions, including transient focus changes during hidden loading and first Show. Repeat with `STARTUP_POOLED=0 STARTUP_IDLE_WEBVIEWS=0` to check cold creation.

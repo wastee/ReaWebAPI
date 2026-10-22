@@ -51,9 +51,11 @@ int editor_pixels(HWND owner, int value) {
   return value * LinuxIcon::scale(SWELL_GetOSWindow(owner, "GdkWindow"));
 #endif
 }
+#ifdef _WIN32
 bool host_meter_control(HWND editor, HWND child) {
   return child == GetDlgItem(editor, 1089) || child == GetDlgItem(editor, 1091);
 }
+#endif
 RECT editor_content(HWND editor) {
   RECT content{}, label{}; GetClientRect(editor, &content);
   if (auto title = GetDlgItem(editor, 1023)) {
@@ -622,12 +624,13 @@ struct Attachment {
   void conceal() {
     if (!alive || !prepared) return;
     const auto content_top = editor_content(editor).top;
+    const auto left_meter = GetDlgItem(editor, 1089), right_meter = GetDlgItem(editor, 1091);
 #ifdef _WIN32
     std::vector<HWND> pending;
 #endif
     for (auto c = GetWindow(editor, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
-      if (c != child && !host_meter_control(editor, c) && !host_toolbar_control(editor, c, content_top) &&
-          (child || GetWindowLong(c, GWL_ID) != 0) && (GetWindowLong(c, GWL_STYLE) & WS_VISIBLE)) {
+      if (c != child && (GetWindowLong(c, GWL_STYLE) & WS_VISIBLE) && c != left_meter && c != right_meter &&
+          (child || GetWindowLong(c, GWL_ID) != 0) && !host_toolbar_control(editor, c, content_top)) {
         if (std::find(hidden.begin(), hidden.end(), c) == hidden.end()) hidden.push_back(c);
 #ifdef _WIN32
         pending.push_back(c);
@@ -1245,6 +1248,7 @@ class Discovery final : public JsfxEditorDiscovery, public IReaperControlSurface
       try {
         const bool chain = chain_list(window) != nullptr;
         Search search{*self->host_, self->match_, {}, chain ? 512 : 2, true};
+        search.timing = &self->timing_;
         if (chain) EnumChildWindows(window, inspect, reinterpret_cast<LPARAM>(&search));
         else inspect(window, reinterpret_cast<LPARAM>(&search));
         for (auto& editor : search.found) self->pending_.push_back(std::move(editor));

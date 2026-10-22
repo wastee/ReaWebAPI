@@ -50,6 +50,8 @@ Production resources retain `reaweb://<appId>/...` URLs in Console, Sources and 
 
 ## Startup timing
 
+On macOS and Linux, pre-paint editor probes contribute to the shared observer's inspection and preparation counters. The Windows-only hook and cloaking counters remain zero on these platforms.
+
 `controllerPrewarmed` identifies a window created from a prepared blank container. `idleWebViews` reports the shared pool's `target`, `ready`, `pending`, `created`, `taken` and `failed` counts. Counts cover the current platform lifetime, not App sessions. Consuming a container is independent of page loading and presentation. Linux receives these counters asynchronously from its helper.
 
 `(await reaper.debug.getDiagnostics()).startup` retains one bounded native timing record per window. `kind` is `create`, `navigation` or `cachedReopen`. `windowId` and `documentGeneration` identify the document, with `sessionId` and `activation` for JSFX. Milestones are milliseconds from the App open request, observed JSFX discovery, subsequent navigation or cached reactivation. Discovery timing starts after the existing scan detects an editor, excluding the preceding polling interval.

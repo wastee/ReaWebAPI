@@ -50,6 +50,8 @@ WebView2 没有公开的嵌入式检查器控制器。ReaWebAPI 通过 [`OpenDev
 
 ## 启动计时
 
+macOS 和 Linux 的绘制前编辑器探针计入共享观察器的检查与准备阶段统计。Windows 专用的钩子和窗口遮蔽计数在这两个平台仍为零。
+
 `controllerPrewarmed` 表示该窗口是否使用预备的空白容器。`idleWebViews` 提供共享池的目标数量 `target`、就绪数量 `ready`、未就绪数量 `pending`，以及当前平台实例累计的创建 `created`、取用 `taken` 和失败 `failed` 次数。取用容器不表示页面已加载或显示。Linux 从辅助进程异步接收这些计数。
 
 `(await reaper.debug.getDiagnostics()).startup` 为每个窗口保留一条有界的原生计时记录。`kind` 为 `create`、`navigation` 或 `cachedReopen`。`windowId` 和 `documentGeneration` 标识文档，JSFX 另带 `sessionId` 和 `activation`。各阶段以 App 打开请求、观察到的 JSFX 发现、后续导航或缓存复激活为起点，单位为毫秒。FX 发现计时从现有扫描检测到编辑器后开始，不包含此前的轮询间隔。

@@ -94,6 +94,8 @@ Direct Service clients use `getEditorSize`, `setEditorSize({width,height,activat
 
 ## Page and editor lifetime
 
+Native-control concealment on Windows, macOS and Linux checks visibility before querying control bounds and resolves meter handles once per scan. Toolbar, meter and hosted-page visibility rules are unchanged.
+
 Pages are created on demand. Closing an editor or switching FX retains up to four hidden pages, released after 60 seconds idle. FX deletion or project invalidation releases them immediately. Reactivation refreshes host state and waits for rendering and `present` before showing the page. The helper manages activation tokens and presentation acknowledgements.
 
 Preloaded WebView containers contain only a blank page. A new JSFX instance still requires page loading, session binding, initial state reads and first-frame preparation. Removing and re-adding the effect creates a new instance and cannot reuse the deleted instance's page. The native channel uses [bounded staging programs](jsfx-native-channel.md#transport) to reduce initialization cost independently of the container pool.
