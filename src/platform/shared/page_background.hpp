@@ -20,23 +20,48 @@ inline std::string page_background_script(const std::string& post) {
   return R"JS(
 ;(() => {
   const post = message => { )JS" + post + R"JS( };
+  const measured = new Set();
+  const timed = (phase, fn) => {
+    if (measured.has(phase)) return fn();
+    const start = performance.now();
+    try { return fn(); }
+    finally {
+      // Keep the first observation only: navigation startup, not a growing trace.
+      const name = 'reaweb.background.' + phase;
+      measured.add(phase);
+      try { performance.measure(name, {start, end: performance.now()}); } catch {}
+    }
+  };
   let previous, pending = false, body;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const context = canvas.getContext('2d', {willReadFrequently: true});
+  let context;
   const rgba = color => {
-    context.clearRect(0, 0, 1, 1);
+    // Computed sRGB colors with integer channels and endpoint alpha are exact.
+    // Other serializations still use Canvas, including fractional alpha: its
+    // 8-bit rounding determines whether the old opaque/transparent test passes.
+    const direct = timed('parse', () => /^(rgb|rgba)\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([01])\s*)?\)$/.exec(color));
+    if (direct && (direct[1] === 'rgba') === (direct[5] !== undefined)) {
+      const channels = direct.slice(2, 5).map(Number);
+      if (channels.every(value => value <= 255))
+        return [...channels, direct[5] === '0' ? 0 : 255];
+    }
+    if (!context) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      context = timed('context', () => canvas.getContext('2d', {willReadFrequently: true}));
+      if (!context) return [0, 0, 0, 0];
+    }
+    timed('clear', () => context.clearRect(0, 0, 1, 1));
     context.fillStyle = color;
-    context.fillRect(0, 0, 1, 1);
-    return context.getImageData(0, 0, 1, 1).data;
+    timed('fill', () => context.fillRect(0, 0, 1, 1));
+    return timed('read', () => context.getImageData(0, 0, 1, 1).data);
   };
   const update = () => {
     pending = false;
-    if (!context || !document.documentElement) return;
-    const root = getComputedStyle(document.documentElement);
+    if (!document.documentElement) return;
+    const root = timed('rootStyle', () => getComputedStyle(document.documentElement));
     let color = rgba(root.backgroundColor);
     if (color[3] === 0 && root.backgroundImage === 'none' && document.body)
-      color = rgba(getComputedStyle(document.body).backgroundColor);
+      color = rgba(timed('bodyStyle', () => getComputedStyle(document.body)).backgroundColor);
     // Changing the backing color under translucent CSS would composite it twice.
     const value = color[3] === 255 ? (color[0] << 16) | (color[1] << 8) | color[2] : 0xffffff;
     if (value !== previous) { previous = value; post('__reawebBackground:' + value); }

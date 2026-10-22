@@ -2,12 +2,12 @@
 
 ## English
 
-- Preload a shared pool of blank WebViews for Apps and JSFX on Windows, macOS and Linux, with idle replenishment, diagnostics and a configurable target of 0–32 containers, default 2.
-- Read initial JSFX editor size and parameters concurrently while preserving instance validation, size restoration and parameter consistency.
-- Prevent the first non-activating Show on macOS from briefly taking keyboard focus.
+- Avoid Canvas initialization for computed integer sRGB backgrounds with alpha 0 or 1 on Windows, macOS and Linux, retaining Canvas conversion for other colors.
+- Recover initial JSFX size and parameter reads from STALE_SESSION with at most two retries after refreshing capabilities, without retrying writes.
+- Add detailed native and browser timing for JSFX initialization and page background synchronization.
 
 ## 简体中文
 
-- Windows、macOS 和 Linux 为普通 App 与 JSFX 预加载共享空白 WebView 容器池，空闲时补充，提供诊断及 0–32 个容器的数量设置，默认 2。
-- 并发读取 JSFX 初始编辑器尺寸与参数，保留实例校验、尺寸恢复和参数一致性。
-- 修复 macOS 首次不激活显示窗口时短暂取得键盘焦点的问题。
+- Windows、macOS 和 Linux 对计算样式中的整数 sRGB 背景色直接解析，透明度为 0 或 1 时跳过 Canvas 初始化，其他颜色保留 Canvas 转换。
+- JSFX 初始尺寸与参数读取遇到 STALE_SESSION 时刷新能力并最多重试两次，不重试写入。
+- 增加 JSFX 初始化与页面背景同步的原生及浏览器细分计时。

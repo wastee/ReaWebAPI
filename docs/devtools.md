@@ -54,8 +54,30 @@ Production resources retain `reaweb://<appId>/...` URLs in Console, Sources and 
 
 `(await reaper.debug.getDiagnostics()).startup` retains one bounded native timing record per window. `kind` is `create`, `navigation` or `cachedReopen`. `windowId` and `documentGeneration` identify the document, with `sessionId` and `activation` for JSFX. Milestones are milliseconds from the App open request, observed JSFX discovery, subsequent navigation or cached reactivation. Discovery timing starts after the existing scan detects an editor, excluding the preceding polling interval.
 
+Windows, macOS and Linux share these JSFX native timing pairs. Each mark records its first observation within the current startup record. Do not pair marks across navigation or cached activation.
+
+| Operation | Start | End |
+| --- | --- | --- |
+| Capability handling | `connectMs` | `capabilitiesReadyMs` |
+| Parameter snapshot | `parametersStartMs` | `parametersReadyMs` |
+| Editor-size lookup | `editorSizeStartMs` | `editorSizeReadyMs` |
+
 Available milestones cover environment waiting, controller creation, navigation completion, Runtime handshake, first-frame preparation and native reveal. Windows `environmentStartup.initializationMs` is the complete environment attempt duration. The difference between `environmentReadyMs` and `environmentWaitStartMs` is this window's remaining wait, including native host construction. `mode` distinguishes a ready environment from an in-progress initialization. Navigation and cached reopen omit stages they do not repeat. On Linux, controller readiness and load completion are observations received from the WebKit helper. Linux has no separate opaque-page snapshot confirmation.
 
 `revealCompleteMs` observes completion of the existing native reveal path, not physical display scanout or business-data readiness. JSFX `presentationMs` retains its existing meaning. Overlapping milestones must not be summed, and browser and native clocks must not be subtracted.
 
 Use browser Navigation/Resource Timing for HTML, script and style loading. JSFX exposes bounded `performance.getEntriesByType('measure')` entries prefixed `reaweb.jsfx.` for capability readiness, subscriptions, editor size, parameters, connection, pending size requests and present acknowledgement. Each phase keeps only its latest entry, with session and activation in `detail`. `present` includes the existing pending-size wait, not physical display latency. Runtime Studio records its independent metadata queries as `reaweb.demo.appInfo`. App-specific first-screen data and layout can use separate User Timing measures. None of these measurements adds a display prerequisite.
+
+The shared JSFX SDK also measures `lifecycle`, `subscribe.<event>`, `initialInvoke.<method>` and `initialSessionRefresh` under the `reaweb.jsfx.` prefix. Subscription durations overlap and must not be added. Initial invoke measures include reply waiting rather than just native processing. `initialSessionRefresh` records a successful capability refresh after an initial `STALE_SESSION`.
+
+On all three platforms, non-transparent windows record the first `reaweb.background.<phase>` measure for `rootStyle`, `bodyStyle`, `parse` and any Canvas fallback (`context`, `clear`, `fill`, `read`). A missing phase was not executed, rather than measured at zero duration. See [background conversion](frontend.md#plain-web-apps).
+
+Inspect native timing and browser measures in the hosted page's console:
+
+```js
+const { startup } = await reaper.debug.getDiagnostics();
+console.log(startup);
+console.table(performance.getEntriesByType('measure')
+  .filter(({ name }) => /^(reaweb\.jsfx\.|reaweb\.background\.)/.test(name))
+  .map(({ name, startTime, duration }) => ({ name, startTime, duration })));
+```

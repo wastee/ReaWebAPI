@@ -33,6 +33,8 @@ The helper requires `runtime.jsfx.protocolVersion === 1`. Use `connectJSFX()` an
 
 After the capability handshake, independent event subscriptions register concurrently. Initial editor size and parameters are then read concurrently. Connection waits for both, applies size before parameters and retains newer events over older snapshots. Failed connections invalidate callbacks and release completed and late subscriptions. Native presentation still follows size initialization and the caller's initial render. See [startup timing](devtools.md#startup-timing).
 
+On Windows, macOS and Linux, `STALE_SESSION` during these initial reads triggers a capability refresh and at most two retries of the read-only snapshots. Results from different sessions are not applied together, and parameter writes are not retried. Repeated session changes or other errors fail the connection and release subscriptions. This behavior requires the updated `jsfx-webui.mjs` bundled with the UI. Updating the native extension does not replace App-local SDK copies.
+
 All JSFX replies use `{ok:true,sessionId,data}` or `{ok:false,sessionId?,error:{code,message,details?}}`. The helper unwraps replies and rejects business errors with `code` and `details`. `getCapabilities` bootstraps the instance session. Subsequent requests include `sessionId`, and active editor operations also include `activation`. Revisions are decimal strings, compared as `BigInt`.
 
 | SDK / service | Input → result data |

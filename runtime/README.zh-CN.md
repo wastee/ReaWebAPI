@@ -38,4 +38,4 @@
 
 [透明窗口示例](../web/transparent/README.md)演示桌面 Alpha、半透明面板、圆角和阴影，SDK 将其放在 `transparent/`。
 
-JSFX helper 在能力握手后并发注册独立的启动订阅，返回时仍保证参数与编辑器尺寸已初始化。参见[启动计时](../docs/devtools.zh-CN.md#启动计时)。
+JSFX helper 在 Windows、macOS 和 Linux 共用初始化路径。能力握手后并发注册订阅，再并发读取初始尺寸与参数。初始读取遇到 `STALE_SESSION` 时刷新能力并最多重试两次快照，不重试写入。请随 UI 分发更新后的 `jsfx-webui.mjs`。参见[连接语义](../docs/jsfx-webui.zh-CN.md#参数服务)与[启动计时](../docs/devtools.zh-CN.md#启动计时)。

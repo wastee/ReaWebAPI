@@ -33,6 +33,8 @@ helper 要求 `runtime.jsfx.protocolVersion === 1`。入口为 `connectJSFX()`�
 
 能力握手完成后，独立事件订阅并发注册。全部注册成功后并发读取初始尺寸与参数，等待两者完成，先应用尺寸再应用参数，新事件不会被旧快照覆盖。连接失败时立即使回调失效，并清理已完成及迟到的订阅。原生显示仍遵循尺寸初始化与调用方首屏渲染顺序。参见[启动计时](devtools.zh-CN.md#启动计时)。
 
+Windows、macOS 和 Linux 上，这些初始读取遇到 `STALE_SESSION` 时会刷新能力并最多重试两次只读快照。不同时应用不同会话的结果，不重试参数写入。连续会话变化或其他错误会使连接失败并清理订阅。此行为依赖 UI 随附的新版 `jsfx-webui.mjs`，更新原生扩展不会替换 App 内的 SDK 副本。
+
 JSFX 回复统一为 `{ok:true,sessionId,data}` 或 `{ok:false,sessionId?,error:{code,message,details?}}`。helper 解包结果，将业务错误转为带 `code`、`details` 的异常。`getCapabilities` 获取实例会话，后续请求携带 `sessionId`，活动编辑器操作还携带 `activation`。修订号使用十进制字符串，按 `BigInt` 比较。
 
 | SDK / 服务 | 输入 → data |

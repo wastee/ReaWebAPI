@@ -30,6 +30,8 @@ On Windows and macOS, initial display waits for page loading and a native page s
 
 Docked and floating WebViews synchronize their native resize background with an opaque CSS canvas background on `html`, or on `body` when propagated to the canvas. Root/body attribute changes, stylesheet loads and style-node changes, viewport resizing and system color-scheme changes refresh this color. Transparent or translucent canvas backgrounds retain the browser's white fallback. Background images and gradients remain browser-rendered. No App-side resize handler is required.
 
+Windows, macOS and Linux share this background synchronization path for non-transparent windows. Computed `rgb()`/`rgba()` colors with integer sRGB channels and alpha 0 or 1 are parsed directly. Other colors use Canvas, preserving color conversion and 8-bit alpha rounding. Explicit `{transparent:true}` windows bypass this path.
+
 Use ordinary HTML, CSS and JavaScript directories. No bundler or npm is required:
 
 ```text

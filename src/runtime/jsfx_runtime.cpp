@@ -90,6 +90,7 @@ void Runtime::park_jsfx(Session& session) {
   if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged", {{"sessionId", ui.instance->session_id}, {"active", false}, {"activation", ui.activation}});
 }
 Json Runtime::jsfx_state(Session& session) {
+  session.startup_timing->mark(StartupTiming::ParametersStart);
   auto& ui = *session.jsfx;
   auto state = ui.instance->binding->state();
   if(ui.instance->native)for(auto& parameter:state["parameters"])
@@ -153,15 +154,21 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   if(method=="getCapabilities" && ui.instance->native) {
     auto capabilities = ui.instance->native->capabilities(ui.instance->session_id);
     capabilities["features"]["editorSize"] = true;
+    session.startup_timing->mark(StartupTiming::CapabilitiesReady);
     return capabilities;
   }
-  if (method == "getCapabilities") return {
+  if (method == "getCapabilities") {
+    Json capabilities = {
     {"protocolVersion", 1}, {"sessionId", ui.instance->session_id}, {"capabilityRevision", "1"}, {"status", "parameterOnly"},
     {"streams", Json::array()}, {"dataStates", Json::array()}, {"commands", Json::array()}, {"resources", Json::array()},
     {"features", {{"params", true}, {"paramGroups", true}, {"nativeChannel", false}, {"editorSize", true}}},
     {"limits", {{"maxParametersPerGesture", 259}}}};
+    session.startup_timing->mark(StartupTiming::CapabilitiesReady);
+    return capabilities;
+  }
   if (payload.value("sessionId", Json()) != ui.instance->session_id) throw Error("STALE_SESSION", "The JSFX instance session changed");
   if (method == "getEditorSize") {
+    session.startup_timing->mark(StartupTiming::EditorSizeStart);
     auto size = jsfx_size_state(session);
     session.startup_timing->mark(StartupTiming::EditorSize);
     return size;

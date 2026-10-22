@@ -488,3 +488,91 @@ test('failed parallel snapshot never presents or applies a late response', async
   assert.equal(f.calls.some(c => c.method === 'present'), false);
   assert.deepEqual(Object.keys(f.events), []);
 });
+
+test('initial snapshots recover a replaced DSP session without applying mixed replies', async () => {
+  const f=fixture(),base=f.reaper.host.service('jsfx');
+  let session=f.sessionId,changes=0;const presents=[];
+  f.reaper.host.service=()=>({...base,invoke:async(method,data)=>{
+    if(method==='getCapabilities') return {ok:true,sessionId:session,data:{
+      protocolVersion:1,sessionId:session,capabilityRevision:'1',features:{editorSize:true}}};
+    if(method==='getEditorSize' && !changes++) {
+      session='replacement';
+      return {ok:false,sessionId:session,error:{code:'STALE_SESSION',message:'replaced'}};
+    }
+    if(data.sessionId!==session)return {ok:false,sessionId:session,error:{code:'STALE_SESSION'}};
+    if(method==='getEditorSize')return {ok:true,sessionId:session,data:{width:900,height:400,revision:'1'}};
+    if(method==='getParamState')return {ok:true,sessionId:session,data:{...f.state([.8,.7]),sessionId:session}};
+    if(method==='present'){presents.push(data);return {ok:true,sessionId:session,data:{presented:true}};}
+    throw Error(method);
+  }});
+  await connect(f);await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.fx.params.snapshot.sessionId,'replacement');
+  assert.equal(f.fx.params.snapshot.parameters[0].normalized,.8);
+  assert.equal(f.fx.editor.size.width,900);
+  assert.equal(presents.length,1);assert.equal(presents[0].sessionId,'replacement');
+  await f.fx.dispose();assert.deepEqual(Object.keys(f.events),[]);
+});
+
+test('unstable initial sessions have a bounded retry and clean up without presenting', async () => {
+  const f=fixture(),base=f.reaper.host.service('jsfx');let reads=0;
+  f.reaper.host.service=()=>({...base,invoke:async(method,data)=>{
+    if(method==='getParamState'){++reads;return {ok:false,sessionId:f.sessionId,error:{code:'STALE_SESSION'}};}
+    return base.invoke(method,data);
+  }});
+  await assert.rejects(connect(f),{code:'STALE_SESSION'});
+  assert.equal(reads,3);assert.deepEqual(Object.keys(f.events),[]);
+  assert.equal(f.calls.some(c=>c.method==='present'),false);
+});
+
+test('a late snapshot from a failed attempt cannot overwrite the recovered session', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx');
+  let session = f.sessionId, releaseOld;
+  const presents = [];
+  f.reaper.host.service = () => ({ ...base, invoke: async (method, data) => {
+    if (method === 'getCapabilities') return { ok: true, sessionId: session, data: {
+      protocolVersion: 1, sessionId: session, capabilityRevision: '1', features: { editorSize: true }
+    } };
+    if (method === 'getEditorSize' && data.sessionId === f.sessionId) {
+      session = 'replacement';
+      return { ok: false, sessionId: session, error: { code: 'STALE_SESSION' } };
+    }
+    if (method === 'getParamState' && data.sessionId === f.sessionId)
+      return new Promise(resolve => { releaseOld = () => resolve(f.ok(f.state([.1, .2], 999n))); });
+    assert.equal(data.sessionId, session);
+    if (method === 'getEditorSize') return { ok: true, sessionId: session, data: { width: 900, height: 400, revision: '1' } };
+    if (method === 'getParamState') return { ok: true, sessionId: session, data: { ...f.state([.8, .7], 1n), sessionId: session } };
+    if (method === 'present') { presents.push(data); return { ok: true, sessionId: session, data: { presented: true } }; }
+    throw Error(method);
+  } });
+  await connect(f);
+  const recovered = f.fx.params.snapshot;
+  releaseOld(); await turn();
+  assert.equal(f.fx.params.snapshot, recovered);
+  assert.equal(recovered.sessionId, 'replacement');
+  assert.equal(recovered.revision, '1');
+  assert.equal(recovered.parameters[0].normalized, .8);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(presents.length, 1);
+  assert.equal(presents[0].sessionId, 'replacement');
+  assert.deepEqual(f.errors, []);
+  await f.fx.dispose();
+  assert.deepEqual(Object.keys(f.events), []);
+});
+
+test('initial snapshot errors other than stale session fail without retrying', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx');
+  let capabilities = 0, reads = 0;
+  f.reaper.host.service = () => ({ ...base, invoke: async (method, data) => {
+    if (method === 'getCapabilities') ++capabilities;
+    if (method === 'getParamState') {
+      ++reads;
+      return { ok: false, sessionId: f.sessionId, error: { code: 'FX_UNBOUND', message: 'removed' } };
+    }
+    return base.invoke(method, data);
+  } });
+  await assert.rejects(connect(f), { code: 'FX_UNBOUND' });
+  assert.equal(capabilities, 1);
+  assert.equal(reads, 1);
+  assert.deepEqual(Object.keys(f.events), []);
+  assert.equal(f.calls.some(c => c.method === 'present'), false);
+});

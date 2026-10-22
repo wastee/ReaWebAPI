@@ -123,13 +123,16 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
       performance.measure(name, { start, end: performance.now(), detail: { sessionId, activation } });
     } catch {}
   };
+  timing('lifecycle', started);
   const listen = async (name, callback) => {
+    const start = globalThis.performance?.now();
     try {
       const off = await service.on(name, callback);
       // A registration can complete after another registration has failed.
       if (disposed) await off();
       else stops.push(off);
     } catch (error) { disposed = true; throw error; }
+    finally { timing('subscribe.' + name, start); }
   };
   const freeze = value => {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -150,7 +153,10 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
   };
   const invoke = async (method, data = {}) => {
     const expectedSession = method === 'getCapabilities' ? undefined : sessionId;
-    const reply = await service.invoke(method, { ...data, ...(expectedSession ? { sessionId: expectedSession } : {}) });
+    const start = connecting ? globalThis.performance?.now() : undefined;
+    let reply;
+    try { reply = await service.invoke(method, { ...data, ...(expectedSession ? { sessionId: expectedSession } : {}) }); }
+    finally { timing('initialInvoke.' + method, start); }
     if (!reply || typeof reply.ok !== 'boolean') throw failure('PROTOCOL_MISMATCH', 'Invalid JSFX result envelope');
     if (!reply.ok) throw failure(reply.error?.code || 'PROTOCOL_MISMATCH', reply.error?.message || 'Invalid JSFX error', reply.error?.details);
     if (typeof reply.sessionId !== 'string' || !reply.sessionId || (expectedSession && (reply.sessionId !== expectedSession || sessionId !== expectedSession)))
@@ -290,15 +296,28 @@ export async function connectJSFX(reaper = globalThis.reaper, onError = console.
     }));
     await Promise.all(subscriptions);
     timing('subscriptions', subscribing);
-    const snapshotStarted = globalThis.performance?.now();
-    const [size, parameters] = await Promise.all([
-      capabilities.features?.editorSize ? invoke('getEditorSize').then(value => {
-        timing('editorSize', snapshotStarted); return value;
-      }) : undefined,
-      invoke('getParamState').then(value => { timing('parameters', snapshotStarted); return value; })
-    ]);
-    if (size) applySize(size);
-    apply(parameters);
+    // DSP startup can replace the native session between capabilities and the
+    // initial reads. Retry only these read-only snapshots, never parameter writes.
+    for (let attempt = 0; ; ++attempt) {
+      const snapshotStarted = globalThis.performance?.now(), expectedSession = sessionId;
+      try {
+        const [size, parameters] = await Promise.all([
+          capabilities.features?.editorSize ? invoke('getEditorSize').then(value => {
+            timing('editorSize', snapshotStarted); return value;
+          }) : undefined,
+          invoke('getParamState').then(value => { timing('parameters', snapshotStarted); return value; })
+        ]);
+        if (sessionId !== expectedSession) throw failure('STALE_SESSION', 'The JSFX instance session changed');
+        if (size) applySize(size);
+        apply(parameters);
+        break;
+      } catch (error) {
+        if (disposed || error.code !== 'STALE_SESSION' || attempt >= 2) throw error;
+        const renewing = globalThis.performance?.now();
+        await getCapabilities();
+        timing('initialSessionRefresh', renewing);
+      }
+    }
     connecting = false;
     timing('connect', started);
   } catch (error) {

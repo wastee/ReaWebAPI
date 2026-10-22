@@ -112,6 +112,32 @@ int main() {
     evaluate("document.body.style.background='rgba(0,0,0,.5)'"); background(RGB(255, 255, 255));
     evaluate("document.body.style.background='transparent'"); background(RGB(255, 255, 255));
     evaluate("document.documentElement.style.background='rgb(12,34,56)'"); background(RGB(12, 34, 56));
+    // Keep Canvas fallback for wide-gamut colors and alpha that rounds to opaque.
+    evaluate("document.documentElement.style.background='color(display-p3 1 0 0)'"); background(RGB(255, 0, 0));
+    evaluate("document.documentElement.style.background='rgba(12,34,56,.999)'"); background(RGB(12, 34, 56));
+    // Compare the host backing against the previous Canvas algorithm in the
+    // actual browser, including repeated fast-path/fallback transitions.
+    for (const auto* css : {"rgb(0,0,0)", "rgb(255,255,255)", "rgba(12,34,56,1)",
+         "rgba(12,34,56,0)", "rgba(12,34,56,.001)", "rgba(12,34,56,.5)",
+         "rgba(12,34,56,.998)", "rgba(12,34,56,.999)", "rgb(1.5,2,3)",
+         "color(display-p3 .3 .6 .9)", "rgb(24,40,56)", "transparent"}) {
+      evaluate(std::string("document.documentElement.style.background=") + Json(css).dump());
+      reply.clear();
+      window->evaluate(R"JS((() => {
+        const ctx = document.createElement('canvas').getContext('2d', {willReadFrequently:true});
+        const rgba = css => {
+          ctx.clearRect(0,0,1,1); ctx.fillStyle=css; ctx.fillRect(0,0,1,1);
+          return ctx.getImageData(0,0,1,1).data;
+        };
+        const root=getComputedStyle(document.documentElement);
+        let color=rgba(root.backgroundColor);
+        if(color[3]===0 && root.backgroundImage==='none') color=rgba(getComputedStyle(document.body).backgroundColor);
+        chrome.webview.postMessage(JSON.stringify(color[3]===255 ? Array.from(color).slice(0,3) : [255,255,255]));
+      })())JS");
+      pump([&] { return !reply.empty(); });
+      const auto expected = Json::parse(reply);
+      background(RGB(expected[0].get<int>(), expected[1].get<int>(), expected[2].get<int>()));
+    }
     evaluate("document.documentElement.style.background='';document.body.style.background='';document.body.className=''");
     background(RGB(24, 40, 56));
 
