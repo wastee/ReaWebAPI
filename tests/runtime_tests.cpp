@@ -232,13 +232,24 @@ int main() {
       const auto call = [&](const char* method, Json payload = Json::object()) {
         return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
       };
-      const auto capability = call("getCapabilities")["result"];
+      const auto initial_read = [&](const char* method, Json payload = Json::object()) {
+        const auto request = window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload});
+        const auto matches = [request](const Json& response) { return response.value("id", 0) == request; };
+        CHECK(std::none_of(window->responses.begin(), window->responses.end(), matches));
+        runtime.tick();
+        const auto response = std::find_if(window->responses.begin(), window->responses.end(), matches);
+        CHECK(response != window->responses.end());
+        CHECK(!window->visible());
+        return *response;
+      };
+      const auto capability = initial_read("getCapabilities")["result"];
       CHECK(capability["ok"] == true && capability["data"]["status"] == "parameterOnly");
       const auto session_id = capability["sessionId"];
       CHECK(call("getState", {{"sessionId", session_id}})["result"]["error"]["code"] == "UNKNOWN_METHOD");
-      CHECK(call("getParamState", {{"sessionId", "stale"}})["result"]["error"]["code"] == "STALE_SESSION");
+      CHECK(initial_read("getParamState", {{"sessionId", "stale"}})["result"]["error"]["code"] == "STALE_SESSION");
       CHECK(call("openStream", {{"sessionId", session_id}, {"id", "spectrum"}})["result"]["error"]["code"] == "UNSUPPORTED");
-      const auto first = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
+      CHECK(initial_read("getEditorSize", {{"sessionId", session_id}})["result"]["data"]["customized"] == false);
+      const auto first = initial_read("getParamState", {{"sessionId", session_id}})["result"]["data"];
       CHECK(call("present", {{"sessionId", session_id}, {"activation", first["activation"]}})["result"]["data"]["presented"] == true);
       CHECK(window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == true);
       const Json context{{"sessionId", session_id}, {"activation", first["activation"]}};

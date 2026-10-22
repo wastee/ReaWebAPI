@@ -40,7 +40,10 @@ bool Runtime::service_call(Session& session, const Work& request) {
       }
     }
     complete({{"result", {{"handle", std::to_string(handle)}}}});
-  } else if (method == "ReaWeb_ServiceInvoke" && jsfx_service_ && session.jsfx && service == "jsfx" && name == "present") {
+  } else if (method == "ReaWeb_ServiceInvoke" && jsfx_service_ && session.jsfx && service == "jsfx" &&
+      (name == "present" || (!session.jsfx->initialized &&
+        (name == "getCapabilities" || name == "getEditorSize" || name == "getParamState")))) {
+    // Initial snapshots are synchronous and already run inside the host tick.
     complete({{"result", jsfx_result(session.id, name, args[2])}});
   } else if (method == "ReaWeb_ServiceInvoke") services_.call(service, name, args[2], session.id, std::move(complete));
   else {

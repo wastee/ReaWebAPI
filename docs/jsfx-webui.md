@@ -33,6 +33,8 @@ The helper requires `runtime.jsfx.protocolVersion === 1`. Use `connectJSFX()` an
 
 After the capability handshake, independent event subscriptions register concurrently. Initial editor size and parameters are then read concurrently. Connection waits for both, applies size before parameters and retains newer events over older snapshots. Failed connections invalidate callbacks and release completed and late subscriptions. Native presentation still follows size initialization and the caller's initial render. See [startup timing](devtools.md#startup-timing).
 
+During initialization, the native Runtime handles `getCapabilities`, `getEditorSize` and `getParamState` in the main-thread tick that dispatches each request, without an additional Service completion tick. This applies on Windows, macOS and Linux. JavaScript calls remain asynchronous, with the same session validation and response format.
+
 On Windows, macOS and Linux, `STALE_SESSION` during these initial reads triggers a capability refresh and at most two retries of the read-only snapshots. Results from different sessions are not applied together, and parameter writes are not retried. Repeated session changes or other errors fail the connection and release subscriptions. This behavior requires the updated `jsfx-webui.mjs` bundled with the UI. Updating the native extension does not replace App-local SDK copies.
 
 All JSFX replies use `{ok:true,sessionId,data}` or `{ok:false,sessionId?,error:{code,message,details?}}`. The helper unwraps replies and rejects business errors with `code` and `details`. `getCapabilities` bootstraps the instance session. Subsequent requests include `sessionId`, and active editor operations also include `activation`. Revisions are decimal strings, compared as `BigInt`.
@@ -95,6 +97,8 @@ Direct Service clients use `getEditorSize`, `setEditorSize({width,height,activat
 Pages are created on demand. Closing an editor or switching FX retains up to four hidden pages, released after 60 seconds idle. FX deletion or project invalidation releases them immediately. Reactivation refreshes host state and waits for rendering and `present` before showing the page. The helper manages activation tokens and presentation acknowledgements.
 
 Preloaded WebView containers contain only a blank page. A new JSFX instance still requires page loading, session binding, initial state reads and first-frame preparation. Removing and re-adding the effect creates a new instance and cannot reuse the deleted instance's page. The native channel uses [bounded staging programs](jsfx-native-channel.md#transport) to reduce initialization cost independently of the container pool.
+
+On Windows, JSFX first-frame readiness uses an internal JPEG capture. The encoded image is discarded and never displayed, so UI rendering quality is unchanged. Presentation still waits for successful capture and the page's `present` acknowledgement. Ordinary Apps retain PNG captures. macOS and Linux retain their existing presentation paths.
 
 Use `jsfx.active` and `onVisibilityChange` to pause timers, stream subscriptions and animations. Deactivation ends parameter gestures and discards pending drag values. Direct Service clients must render `visibilityChanged.paramState`, then acknowledge its `activation`. Initialization failure or a 15-second presentation timeout restores native content.
 

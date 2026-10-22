@@ -210,7 +210,9 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
     snapshot_pending_ = true;
     mark_startup(StartupTiming::FrameRequested);
     const auto generation = startup_.generation();
-    const auto hr = webview_->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream.Get(),
+    // Hosted captures confirm readiness only. Their encoded pixels are never displayed.
+    const auto format = options_.hosted ? COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG : COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+    const auto hr = webview_->CapturePreview(format, stream.Get(),
       Callback<ICoreWebView2CapturePreviewCompletedHandler>([weak = weak_from_this(), stream, generation](HRESULT result) -> HRESULT {
         if (auto self = weak.lock(); self && !self->closed_) {
           self->snapshot_pending_ = false;

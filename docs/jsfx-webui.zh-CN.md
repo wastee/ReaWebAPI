@@ -33,6 +33,8 @@ helper 要求 `runtime.jsfx.protocolVersion === 1`。入口为 `connectJSFX()`�
 
 能力握手完成后，独立事件订阅并发注册。全部注册成功后并发读取初始尺寸与参数，等待两者完成，先应用尺寸再应用参数，新事件不会被旧快照覆盖。连接失败时立即使回调失效，并清理已完成及迟到的订阅。原生显示仍遵循尺寸初始化与调用方首屏渲染顺序。参见[启动计时](devtools.zh-CN.md#启动计时)。
 
+初始化期间，原生 Runtime 在分发请求的主线程调度周期内处理 `getCapabilities`、`getEditorSize` 和 `getParamState`，无需额外等待 Service 完成回调的调度周期。此行为适用于 Windows、macOS 和 Linux。JavaScript 调用仍为异步，会话校验及响应格式不变。
+
 Windows、macOS 和 Linux 上，这些初始读取遇到 `STALE_SESSION` 时会刷新能力并最多重试两次只读快照。不同时应用不同会话的结果，不重试参数写入。连续会话变化或其他错误会使连接失败并清理订阅。此行为依赖 UI 随附的新版 `jsfx-webui.mjs`，更新原生扩展不会替换 App 内的 SDK 副本。
 
 JSFX 回复统一为 `{ok:true,sessionId,data}` 或 `{ok:false,sessionId?,error:{code,message,details?}}`。helper 解包结果，将业务错误转为带 `code`、`details` 的异常。`getCapabilities` 获取实例会话，后续请求携带 `sessionId`，活动编辑器操作还携带 `activation`。修订号使用十进制字符串，按 `BigInt` 比较。
@@ -95,6 +97,8 @@ await jsfx.editor.setSize(1035, 239);
 页面按需创建，关闭编辑器或切换 FX 后最多缓存四个隐藏页面，60 秒空闲后释放。FX 删除或工程失效时立即释放。重新激活会刷新宿主快照，页面完成渲染并确认 `present` 后显示。helper 管理激活标记及呈现确认。
 
 预加载的 WebView 容器仅包含空白页。新 JSFX 实例仍需加载页面、绑定会话、读取初始状态并准备首帧。移除后重新添加插件会创建新实例，不能复用已删除实例的页面。原生通道通过[固定大小的暂存程序](jsfx-native-channel.zh-CN.md#传输路径)降低初始化成本，与容器池独立生效。
+
+Windows JSFX 通过内部 JPEG 截图确认首帧就绪。编码图像随即丢弃，不用于界面显示，因此不改变 UI 渲染质量。显示仍需等待截图成功和页面确认 `present`。普通 App 保留 PNG 截图，macOS 和 Linux 保留原有显示路径。
 
 使用 `jsfx.active` 和 `onVisibilityChange` 暂停页面定时器、流订阅和动画。失活会结束参数手势并丢弃待提交拖动值。直接使用 Service 的页面需渲染 `visibilityChanged.paramState`，再确认对应的 `activation`。初始化失败或超过 15 秒未确认时恢复原生内容。
 

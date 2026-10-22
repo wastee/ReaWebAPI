@@ -2,8 +2,10 @@
 
 ## English
 
-- Reduce JSFX native-channel initialization overhead on Windows, macOS and Linux with bounded EEL staging programs reused by C++ for chunked transfers.
+- Reduce JSFX initialization latency on Windows, macOS and Linux by completing initial capability, editor-size and parameter reads in the dispatching host tick.
+- Reduce Windows JSFX first-frame preparation overhead by using JPEG for the internal readiness capture, preserving the existing presentation gates.
 
 ## 简体中文
 
-- 优化 Windows、macOS 和 Linux 的 JSFX 原生通道初始化，通过固定大小的 EEL 暂存读写程序与 C++ 分块传输，降低程序生成与编译开销。
+- Windows、macOS 和 Linux 的 JSFX 初始能力、编辑器尺寸与参数读取在分发请求的宿主调度周期内完成，减少初始化等待。
+- Windows JSFX 首帧就绪检查改用内部 JPEG 截图，降低准备开销，保留现有显示条件。
