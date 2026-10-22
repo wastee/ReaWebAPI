@@ -56,6 +56,7 @@ public:
   virtual ~JsfxEditorDiscovery() = default;
   virtual std::vector<JsfxEditor> scan(Host&, Match) = 0;
   virtual bool pending() const { return false; }
+  virtual Json diagnostics() const { return Json::object(); }
 };
 using JsfxDiscovery = std::shared_ptr<JsfxEditorDiscovery>;
 JsfxDiscovery make_jsfx_editor_discovery();

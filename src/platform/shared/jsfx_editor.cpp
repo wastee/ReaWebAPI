@@ -23,6 +23,23 @@
 namespace reaweb {
 namespace {
 using Clock = std::chrono::steady_clock;
+struct ObserverTiming {
+  enum Phase { Hook, Notification, Scan, PrepareFloating, Inspect, Match, IdentifyControls, ResolveOwnership, HitTest, PrepareEditor, CreateHost, Conceal, RestoreSize, Cloak, HideControls, Count };
+  struct Value { double ms = 0; uint64_t calls = 0; };
+  Value values[Count];
+  struct Scope {
+    Value* value;
+    Clock::time_point start = Clock::now();
+    Scope(ObserverTiming* timing, Phase phase) : value(timing ? &timing->values[phase] : nullptr) {}
+    ~Scope() { if (value) { value->ms += std::chrono::duration<double, std::milli>(Clock::now()-start).count(); ++value->calls; } }
+  };
+  Json snapshot() const {
+    static const char* names[] = {"hook", "notification", "scan", "prepareFloating", "inspect", "match", "identifyControls", "resolveOwnership", "hitTest", "prepareEditor", "createHost", "conceal", "restoreSize", "cloak", "hideControls"};
+    Json result = {{"scope", "discoveryLifetime"}, {"clock", "native-steady"}};
+    for (int i = 0; i < Count; ++i) result[names[i]] = {{"ms", values[i].ms}, {"calls", values[i].calls}};
+    return result;
+  }
+};
 int editor_pixels(HWND owner, int value) {
 #ifdef _WIN32
   const auto dpi = GetDpiForWindow(owner);
@@ -605,12 +622,35 @@ struct Attachment {
   void conceal() {
     if (!alive || !prepared) return;
     const auto content_top = editor_content(editor).top;
+#ifdef _WIN32
+    std::vector<HWND> pending;
+#endif
     for (auto c = GetWindow(editor, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
       if (c != child && !host_meter_control(editor, c) && !host_toolbar_control(editor, c, content_top) &&
           (child || GetWindowLong(c, GWL_ID) != 0) && (GetWindowLong(c, GWL_STYLE) & WS_VISIBLE)) {
         if (std::find(hidden.begin(), hidden.end(), c) == hidden.end()) hidden.push_back(c);
+#ifdef _WIN32
+        pending.push_back(c);
+#else
         ShowWindow(c, SW_HIDE);
+#endif
       }
+#ifdef _WIN32
+    if (pending.empty()) return;
+    // Batch sibling visibility changes without intermediate redraws. Existing
+    // host and backdrop guards still control first-frame presentation.
+    auto batch = BeginDeferWindowPos(static_cast<int>(pending.size()));
+    for (auto control : pending) {
+      if (!batch) break;
+      batch = DeferWindowPos(batch, control, nullptr, 0, 0, 0, 0,
+        SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+    if (!batch || !EndDeferWindowPos(batch)) {
+      for (auto control : pending)
+        if (IsWindow(control) && GetParent(control) == editor) ShowWindow(control, SW_HIDE);
+    }
+    RedrawWindow(editor, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+#endif
   }
 };
 std::map<HWND, std::shared_ptr<Attachment>> attachments;
@@ -822,15 +862,19 @@ public:
     return native_valid() && IsWindowVisible(state_->editor);
   }
   void resize(void* child) override { state_->child = static_cast<HWND>(child); state_->resize(); }
-  void prepare() override {
+  void prepare() override { prepare(nullptr); }
+  void prepare(ObserverTiming* timing) {
 #ifdef _WIN32
     if (!state_->prepared && !state_->layout && !chain_list(state_->owner) &&
         !(GetWindowLong(state_->owner, GWL_STYLE) & WS_CHILD)) {
+      ObserverTiming::Scope cloak_timing(timing, ObserverTiming::Cloak);
       const BOOL cloak = TRUE;
       state_->initial_cloak = SUCCEEDED(DwmSetWindowAttribute(state_->owner, DWMWA_CLOAK, &cloak, sizeof(cloak)));
     }
 #endif
-    state_->prepared = true; state_->conceal();
+    state_->prepared = true;
+    ObserverTiming::Scope hide_timing(timing, ObserverTiming::HideControls);
+    state_->conceal();
   }
   void reveal() override {
     if (!revealed_) request_size(requested_width_, requested_height_, requested_exact_);
@@ -936,9 +980,11 @@ struct Search {
   std::vector<JsfxEditor> found;
   int remaining = 8192;
   bool showing = false;
+  ObserverTiming* timing = nullptr;
 };
 BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
   auto& search = *reinterpret_cast<Search*>(parameter);
+  ObserverTiming::Scope timing(search.timing, ObserverTiming::Inspect);
   if (--search.remaining < 0) return FALSE;
   if (!search.showing && !IsWindowVisible(editor)) return TRUE;
   if (auto previous = attachments.find(editor); previous != attachments.end()) {
@@ -966,7 +1012,11 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
     attachments.erase(editor);
     layout->stop(); chain_layouts.erase(layout->owner);
   }
-  const auto label = GetDlgItem(editor, 1023), edit = GetDlgItem(editor, 1062);
+  const auto controls = [&] {
+    ObserverTiming::Scope timing(search.timing, ObserverTiming::IdentifyControls);
+    return std::make_pair(GetDlgItem(editor, 1023), GetDlgItem(editor, 1062));
+  }();
+  const auto label = controls.first, edit = controls.second;
   if (!label || !edit || GetParent(label) != editor || GetParent(edit) != editor) return TRUE;
 #ifdef _WIN32
   DWORD process = 0;
@@ -976,6 +1026,7 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
   GetClassNameA(edit, type, sizeof(type));
   if (_stricmp(type, "Button")) return TRUE;
 #endif
+  ObserverTiming::Scope ownership(search.timing, ObserverTiming::ResolveOwnership);
   HWND owner = editor;
   while (GetParent(owner) && !GetDlgItem(owner, 1076)) {
     // A floating FX is identified by the official handle, before walking into the main window.
@@ -994,6 +1045,7 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
   } else if (auto known = chain_layouts.find(owner); known != chain_layouts.end() && known->second->alive && !known->second->frame_only) {
     target = known->second->target; fx = known->second->selected();
   } else {
+    ObserverTiming::Scope hit_timing(search.timing, ObserverTiming::HitTest);
     using Hit = void* (*)(int, int, char*, int);
     auto hit = reinterpret_cast<Hit>(search.host.native_function("GetThingFromPoint"));
     if (!hit) return TRUE;
@@ -1030,15 +1082,19 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
   try {
     const auto size = search.match(target, fx);
     if (!size) return TRUE;
+    ObserverTiming::Scope prepare_timing(search.timing, ObserverTiming::PrepareEditor);
     auto layout = !is_floating && editor != owner ? chain_layout(owner, search.host, target, fx, search.match) : nullptr;
-    auto host = std::make_shared<EditorHost>(editor, owner, layout);
-    host->prepare();
+    auto host = [&] {
+      ObserverTiming::Scope timing(search.timing, ObserverTiming::CreateHost);
+      return std::make_shared<EditorHost>(editor, owner, layout);
+    }();
+    { ObserverTiming::Scope conceal_timing(search.timing, ObserverTiming::Conceal); host->prepare(search.timing); }
     if (layout) {
       layout->cover(editor, size);
       host->park();
       select_chain(layout, search.match, search.found);
     } else {
-      host->request_size(size->width, size->height, size->exact);
+      { ObserverTiming::Scope size_timing(search.timing, ObserverTiming::RestoreSize); host->request_size(size->width, size->height, size->exact); }
       search.found.push_back({target.track, fx, is_floating, owner, std::move(host), target.take, target.input});
     }
   }
@@ -1053,6 +1109,7 @@ BOOL CALLBACK inspect_top(HWND window, LPARAM parameter) {
   return TRUE;
 }
 class Discovery final : public JsfxEditorDiscovery, public IReaperControlSurface {
+  ObserverTiming timing_;
   Host* host_ = nullptr;
   Match match_;
   std::vector<JsfxEditor> pending_;
@@ -1093,6 +1150,7 @@ class Discovery final : public JsfxEditorDiscovery, public IReaperControlSurface
     return {};
   }
   void prepare_floating(HWND window, bool showing) {
+    ObserverTiming::Scope timing(&timing_, ObserverTiming::PrepareFloating);
     if (opening_.count(window) || (GetWindowLong(window, GWL_STYLE) & WS_CHILD)) return;
     char type[32]{}; GetClassNameA(window, type, sizeof(type));
     if (std::strcmp(type, "#32770")) return;
@@ -1139,6 +1197,7 @@ class Discovery final : public JsfxEditorDiscovery, public IReaperControlSurface
           (reinterpret_cast<WINDOWPOS*>(message.lParam)->flags & SWP_SHOWWINDOW));
       if (message.message == WM_PAINT || message.message == WM_ERASEBKGND || message.message == WM_NCPAINT ||
           message.message == WM_WINDOWPOSCHANGED || showing) {
+        ObserverTiming::Scope timing(&self->timing_, ObserverTiming::Hook);
         self->inspecting_ = true;
         try {
           self->prepare_floating(message.hwnd, showing);
@@ -1146,6 +1205,7 @@ class Discovery final : public JsfxEditorDiscovery, public IReaperControlSurface
           if (parent != attachments.end()) parent->second->conceal();
           const bool chain = GetDlgItem(message.hwnd, 1076) != nullptr;
           Search search{*self->host_, self->match_, {}, chain ? 512 : 2, showing || (chain && message.message == WM_WINDOWPOSCHANGED)};
+          search.timing = &self->timing_;
           if (chain) {
             EnumChildWindows(message.hwnd, inspect, reinterpret_cast<LPARAM>(&search));
           }
@@ -1223,6 +1283,7 @@ public:
   int Extended(int call, void* track, void* index, void* opened) override {
     if ((call != CSURF_EXT_SETFXOPEN && call != CSURF_EXT_SETFOCUSEDFX) || !opened || !track ||
         !host_ || inspecting_ || std::this_thread::get_id() != main_thread_) return 0;
+    ObserverTiming::Scope timing(&timing_, ObserverTiming::Notification);
 #ifdef _WIN32
     if (call == CSURF_EXT_SETFXOPEN && index) {
       const int fx = *static_cast<int*>(index);
@@ -1234,6 +1295,7 @@ public:
     // Resolve ownership at the host notification, before the editor's first paint.
     inspecting_ = true;
     Search search{*host_, match_, {}, 512, true};
+    search.timing = &timing_;
     try {
 #ifdef _WIN32
       EnumThreadWindows(thread_, inspect_top, reinterpret_cast<LPARAM>(&search));
@@ -1254,6 +1316,7 @@ public:
         entry.second->selected() != entry.second->active_fx) return true;
     return false;
   }
+  Json diagnostics() const override { return timing_.snapshot(); }
   ~Discovery() override {
     if (register_) register_("-csurf_inst", static_cast<IReaperControlSurface*>(this));
 #ifdef _WIN32
@@ -1290,13 +1353,18 @@ public:
     chain_layouts.clear();
   }
   std::vector<JsfxEditor> scan(Host& host, Match match) override {
+  ObserverTiming::Scope timing(&timing_, ObserverTiming::Scan);
   if (!host.native_function) return {};
   auto version = reinterpret_cast<const char* (*)()>(host.native_function("GetAppVersion"));
   if (!version) return {};
   // Private editor controls are accepted only within the supported REAPER 7 layout family.
   const auto number = std::strtod(version(), nullptr);
   if (number < 7.82 || number >= 8) return {};
-  host_ = &host; match_ = std::move(match);
+  host_ = &host;
+  match_ = [this, match = std::move(match)](JsfxTarget target, int fx) {
+    ObserverTiming::Scope timing(&timing_, ObserverTiming::Match);
+    return match(target, fx);
+  };
   active_ = this;
 #ifdef _WIN32
   settle_opening();
@@ -1311,6 +1379,7 @@ public:
   };
 #endif
   Search search{host, match_, std::move(pending_), 8192};
+  search.timing = &timing_;
   pending_.clear();
   inspecting_ = true;
   for (const auto& entry : chain_layouts) if (entry.second->alive && IsWindowVisible(entry.first))

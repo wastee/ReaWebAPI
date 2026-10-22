@@ -38,6 +38,7 @@ Json Runtime::diagnostics(int id) const {
   result["startup"]["windowId"] = s.id;
   result["startup"]["documentGeneration"] = s.generation;
   if (s.jsfx) {
+    if (jsfx_discovery_) result["jsfxObserver"] = jsfx_discovery_->diagnostics();
     result["startup"]["sessionId"] = s.jsfx->instance->session_id;
     result["startup"]["activation"] = s.jsfx->activation;
   }

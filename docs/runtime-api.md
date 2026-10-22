@@ -118,7 +118,7 @@ Host callbacks only update thread-safe counters. REAPER queries and JS dispatch 
 
 `reaper.debug.log/warn/error` write bounded previews to REAPER's console and a 200-entry per-window log. `inspect` handles circular values. `getLogs` and `getDiagnostics` expose JS/native errors, request IDs, document generations, cleanup state and audio job counts. Uncaught JS errors and unhandled rejections are recorded without replacing console. Nothing is uploaded.
 
-`reaper.debug.openDevTools()` requests showing the inspector on Windows, macOS and Linux. On macOS, unavailable native Inspector controls reject with `DEVTOOLS_UNAVAILABLE`. See [DevTools](devtools.md) for shortcuts, layouts and the `getDiagnostics()` field `devtools`.
+`reaper.debug.openDevTools()` requests showing the inspector on Windows, macOS and Linux. On macOS, unavailable native Inspector controls reject with `DEVTOOLS_UNAVAILABLE`. See [DevTools](devtools.md) for shortcuts, layouts and the `getDiagnostics()` field `devtools`. [Startup timing](devtools.md#startup-timing) documents `startup` milestones and the JSFX-only `jsfxObserver` cumulative counters.
 
 ## Audio
 

@@ -100,6 +100,8 @@ await jsfx.editor.setSize(1035, 239);
 
 网页仅替代关联 JSFX 的内容区。预设、Param、路由、UI 切换、干湿及 bypass 控件保留原生行为，不另建标准栏。两侧原生电平表保留，`options:no_meter` 可移除其占位。两种模式均保留原生底部间隔。
 
+Windows 在当前 JSFX 编辑器内批量隐藏原生内容控件并合并重绘请求，批量操作失败时回退为逐个隐藏。WebView 子窗口、原生工具栏和电平表不参与隐藏，其他编辑器窗口不受影响。解除挂接时的控件恢复及首帧显示保护保持原有行为。macOS 和 Linux 仍逐个隐藏控件。
+
 Windows 使用 WebView2，macOS 使用 WKWebView，Linux 使用 SWELL/X11 WebKit 嵌入路径。适配目标为 REAPER 7.82 及 REAPER 7 窗口布局。窗口结构识别涉及宿主内部控件，未识别结构保留原生编辑器。失败后可重新打开重试。模块不自动转换 `@gfx` 代码。
 
 Windows 请使用 v0.3.8.28 或更高版本，使 FX 链中的 WebView 正确参与原生对话框焦点导航。关联的 JSFX 和页面代码无需修改。

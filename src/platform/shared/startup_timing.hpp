@@ -11,7 +11,8 @@ public:
   enum Stage { Open, EnvironmentWait, EnvironmentReady, ControllerStart, ControllerReady,
     Navigation, Loaded, Handshake, FrameRequested, FrameReady, Revealed,
     Discovered, Connected, Parameters, EditorSize, SizeRequested, Present,
-    CapabilitiesReady, ParametersStart, EditorSizeStart, Count };
+    CapabilitiesReady, ParametersStart, EditorSizeStart,
+    BindingReady, AssociationReady, HostPrepared, SizeRestored, CacheMatched, ReparentReady, HostAttached, StateNotified, Count };
 private:
   Clock::time_point origin_;
   std::array<double, Count> marks_;
@@ -28,7 +29,8 @@ public:
     static const char* names[] = {"openMs", "environmentWaitStartMs", "environmentReadyMs", "controllerStartMs",
       "controllerReadyMs", "navigationMs", "loadCompleteMs", "runtimeHandshakeMs", "frameRequestMs", "frameReadyMs",
       "revealCompleteMs", "fxDiscoveredMs", "connectMs", "parametersReadyMs", "editorSizeReadyMs", "sizeRequestMs", "presentMs",
-      "capabilitiesReadyMs", "parametersStartMs", "editorSizeStartMs"};
+      "capabilitiesReadyMs", "parametersStartMs", "editorSizeStartMs",
+      "bindingReadyMs", "associationReadyMs", "hostPreparedMs", "sizeRestoredMs", "cacheMatchedMs", "reparentReadyMs", "hostAttachedMs", "stateNotifiedMs"};
     Json marks = Json::object();
     for (size_t i = 0; i < Count; ++i) if (marks_[i] >= 0) marks[names[i]] = marks_[i];
     return {{"kind", kind_}, {"clock", "native-steady"}, {"milestones", std::move(marks)}};

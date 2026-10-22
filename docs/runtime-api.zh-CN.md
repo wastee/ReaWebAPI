@@ -159,7 +159,7 @@ button { border-color:var(--reaper-highlight); }
 
 日志不上传到任何服务，也不默认记录全部 API 参数或音频数据。
 
-`reaper.debug.openDevTools()` 在 Windows、macOS 和 Linux 上请求显示检查器。macOS 原生检查器控制不可用时以 `DEVTOOLS_UNAVAILABLE` 错误拒绝 Promise。快捷键、布局及 `getDiagnostics()` 的 `devtools` 字段见 [DevTools](devtools.zh-CN.md)。
+`reaper.debug.openDevTools()` 在 Windows、macOS 和 Linux 上请求显示检查器。macOS 原生检查器控制不可用时以 `DEVTOOLS_UNAVAILABLE` 错误拒绝 Promise。快捷键、布局及 `getDiagnostics()` 的 `devtools` 字段见 [DevTools](devtools.zh-CN.md)。`startup` 计时点与仅供 JSFX 的 `jsfxObserver` 累计计数见[启动计时](devtools.zh-CN.md#启动计时)。
 
 ## Audio
 

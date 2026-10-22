@@ -113,10 +113,12 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
     session.startup_timing->mark(StartupTiming::Discovered, ui.discovered);
   }
   session.window->reparent_host(editor.host->parent());
+  session.startup_timing->mark(StartupTiming::ReparentReady);
   ui.editor = editor; ++ui.activation;
   ui.presented = false; ui.last_used = Clock::now();
   if (session.ready) editor.host->set_background(session.window->background_color());
   editor.host->present(session.window->native_handle());
+  session.startup_timing->mark(StartupTiming::HostAttached);
   std::weak_ptr<Session> weak = sessions_.at(session.id);
   std::weak_ptr<JsfxEditorHost> expected = editor.host;
   editor.host->on_destroy([this, weak, expected] {
@@ -128,6 +130,7 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
   if (session.ready) service_event(jsfx_service_, "jsfx", session.id, "visibilityChanged",
     {{"sessionId", ui.instance->session_id}, {"active", true}, {"activation", ui.activation}, {"paramState", jsfx_state(session)},
       {"editorSize", jsfx_size_state(session)}});
+  if (session.ready) session.startup_timing->mark(StartupTiming::StateNotified);
 }
 Json Runtime::jsfx_result(int window, const std::string& method, const Json& payload) {
   Json result;
@@ -434,11 +437,15 @@ void Runtime::tick_jsfx() {
     try {
       auto binding = std::make_unique<JsfxBinding>(host_, editor.target(), editor.fx);
       if (!binding->editor_matches(editor)) continue;
+      const auto binding_ready = Clock::now();
       const auto association = jsfx_association(resource_ / "Effects", binding->ident());
       if (!association) continue;
+      const auto association_ready = Clock::now();
       editor.host->prepare();
+      const auto host_prepared = Clock::now();
       const auto size = jsfx_size(*association).size;
       editor.host->request_size(size.width, size.height, size.exact);
+      const auto size_restored = Clock::now();
       Session* cached = nullptr;
       for (auto& entry : sessions_) {
         auto& candidate = *entry.second;
@@ -447,7 +454,17 @@ void Runtime::tick_jsfx() {
         if (previous.project() == binding->project() && previous.target() == binding->target() && previous.guid() == binding->guid() &&
             candidate.entry == association->entry) { cached = &candidate; break; }
       }
-      if (cached) { cached->jsfx->discovered = discovered; attach_jsfx(*cached, editor); continue; }
+      if (cached) {
+        const auto matched = Clock::now();
+        cached->jsfx->discovered = discovered; attach_jsfx(*cached, editor);
+        auto& timing = *cached->startup_timing;
+        timing.mark(StartupTiming::BindingReady, binding_ready);
+        timing.mark(StartupTiming::AssociationReady, association_ready);
+        timing.mark(StartupTiming::HostPrepared, host_prepared);
+        timing.mark(StartupTiming::SizeRestored, size_restored);
+        timing.mark(StartupTiming::CacheMatched, matched);
+        continue;
+      }
       auto ui = std::make_shared<Session::Jsfx>();
       ui->discovered = discovered;
       for (auto identity = jsfx_instances_.begin(); identity != jsfx_instances_.end();) {

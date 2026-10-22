@@ -62,6 +62,10 @@ Windows、macOS 和 Linux 共用以下 JSFX 原生计时点。每个点记录当
 | 参数快照 | `parametersStartMs` | `parametersReadyMs` |
 | 编辑器尺寸查找 | `editorSizeStartMs` | `editorSizeReadyMs` |
 
+Windows、macOS 和 Linux 的 JSFX 缓存复激活另记录 `bindingReadyMs`、`associationReadyMs`、`hostPreparedMs`、`sizeRestoredMs`、`cacheMatchedMs`、`reparentReadyMs`、`hostAttachedMs` 和 `stateNotifiedMs`，分别标识绑定校验、关联查找、原生准备、尺寸恢复、缓存匹配、父窗口切换、挂接和可见状态分发完成。`stateNotifiedMs` 表示通知分发，不代表浏览器已接收。
+
+`jsfxObserver` 提供发现器生命周期内固定数量的累计 `{ms, calls}` 计数，所有 JSFX 窗口共用。`notification`、`hook`、`scan` 分别记录宿主通知、Windows 绘制前钩子与周期发现。嵌套阶段包含 `inspect`、`identifyControls`、`resolveOwnership`、`hitTest`、`match`、`prepareEditor`、`createHost`、`conceal`、`restoreSize`、`cloak`、`hideControls`。`hook`、`prepareFloating` 和 `cloak` 仅在 Windows 记录，分别对应绘制前处理、浮动窗口准备和 DWM 窗口遮蔽，在 macOS 和 Linux 上保持为零。隐藏子阶段仅描述初次编辑器准备，不统计之后的每次隐藏。应比较同一区间的计数差值，不能把嵌套阶段与父阶段相加，也不能将累计计数当成单窗口启动时间。
+
 可用阶段包括环境等待、Controller 创建、导航完成、Runtime 握手、首帧准备和原生揭示。Windows 的 `environmentStartup.initializationMs` 是完整的环境初始化尝试耗时。`environmentReadyMs` 减去 `environmentWaitStartMs` 是本窗口的剩余等待，包含原生宿主窗口创建。`mode` 区分环境已就绪与初始化中。导航与缓存复开不记录未重复执行的阶段。Linux 的 Controller 就绪与加载完成是从 WebKit 辅助进程收到的观察值，不提供独立的不透明页面快照确认。
 
 `revealCompleteMs` 表示现有原生揭示路径完成，不代表显示器物理上屏或业务数据就绪。JSFX 的 `presentationMs` 含义保持不变。重叠阶段不能累加，前端与原生时钟不能直接相减。

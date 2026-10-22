@@ -290,6 +290,12 @@ if(UNIX AND NOT APPLE AND REAWEB_BUILD_EXTENSION)
   target_link_libraries(linux_navigation PRIVATE reaweb_core PkgConfig::WEBKIT X11::X11)
 endif()
 if(WIN32 AND REAWEB_BUILD_EXTENSION)
+  add_executable(windows_jsfx_controls windows_jsfx_controls.cpp)
+  target_link_libraries(windows_jsfx_controls PRIVATE reaweb_runtime user32 gdi32 comctl32 dwmapi)
+  target_include_directories(windows_jsfx_controls PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk")
+  target_compile_definitions(windows_jsfx_controls PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_options(windows_jsfx_controls PRIVATE /utf-8)
+  add_test(NAME windows_jsfx_controls COMMAND windows_jsfx_controls)
   add_executable(windows_environment windows_environment.cpp)
   target_link_libraries(windows_environment PRIVATE reaweb_core
     "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"

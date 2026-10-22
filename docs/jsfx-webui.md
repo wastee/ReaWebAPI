@@ -100,6 +100,8 @@ Track, master, take, input and monitoring FX are supported, including nested con
 
 The page replaces only the associated JSFX content area. Presets, Param, routing, UI switching, wet/dry and bypass retain native behavior. No duplicate toolbar is created. Native side meters remain visible. `options:no_meter` removes their reserved width. Both modes retain the native bottom inset.
 
+Windows batches native content-control hiding within the current JSFX editor and coalesces redraw requests, falling back to individual hides if the batch fails. The WebView child, native toolbar and meters are excluded. Other editor windows are unaffected. Control restoration on detach and first-frame presentation guards retain their existing behavior. macOS and Linux continue to hide controls individually.
+
 Windows uses WebView2, macOS uses WKWebView, and Linux uses the SWELL/X11 WebKit embedding path. The adapter targets REAPER 7.82 and the REAPER 7 layout family. Window recognition involves host-private controls. Unrecognized structures retain the native editor. Reopen after initialization failure to retry. The module does not convert `@gfx` code.
 
 On Windows, use v0.3.8.28 or later for FX-chain WebViews to participate correctly in native dialog focus navigation. Associated JSFX and page code need no changes.
