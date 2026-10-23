@@ -955,9 +955,10 @@ class WinPlatform final : public Platform {
     check(scheme->SetAllowedOrigins(1, origins), "App scheme origins");
     ICoreWebView2CustomSchemeRegistration* schemes[] = {scheme.Get()};
     check(options->SetCustomSchemeRegistrations(1, schemes), "Register App scheme");
-    if (startup_color_profile == ColorProfile::SRGB) {
-      check(options->put_AdditionalBrowserArguments(L"--force-color-profile=srgb"), "WebView2 color profile");
-    }
+    // Keep GPU compositing and WebGL, but avoid cold GPU raster pipeline stalls.
+    std::wstring arguments = L"--disable-gpu-rasterization";
+    if (startup_color_profile == ColorProfile::SRGB) arguments += L" --force-color-profile=srgb";
+    check(options->put_AdditionalBrowserArguments(arguments.c_str()), "WebView2 rendering options");
     const auto attempt = ++state_->attempt;
     state_->status = EnvironmentState::Status::Initializing;
     state_->error.clear();
