@@ -8,7 +8,7 @@
 #include <limits>
 #include <set>
 #include <thread>
-#define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
+#define CHECK(value) do { if (!(value)) throw std::runtime_error(std::to_string(__LINE__) + ": " + #value); } while (0)
 using namespace reaweb;
 namespace {
 struct Track;
@@ -248,9 +248,15 @@ int main() {
         CHECK(resumed["streams"].size() == 3);
         for (const auto& stream : resumed["streams"]) CHECK(stream["published"].get<int>() > 1);
         invalid_pcm = true;
-        for (int i = 0; i < 9; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(40)); producers.tick(); }
+        // Force aggregate blocks to span ticks, including the final invalid block.
+        sample_delay = aggregate ? 10 : 0;
+        const auto close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!hub.info()["streams"].empty() && std::chrono::steady_clock::now() < close_deadline) {
+          producers.tick();
+          std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
         CHECK(hub.info()["streams"].empty());
-        invalid_pcm = false;
+        invalid_pcm = false; sample_delay = 0;
         hub.detach_window(1); producers.tick(); CHECK(hub.info()["streams"].empty());
         CHECK(accessors.empty() && creates == destroys);
       }
