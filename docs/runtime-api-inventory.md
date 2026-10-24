@@ -1,8 +1,8 @@
 # Runtime API 完整清单 / Complete API inventory
 
-JavaScript Runtime 公开以下 **15 个命名空间、77 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
+JavaScript Runtime 公开以下 **15 个命名空间、80 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
 
-The JavaScript Runtime exposes fifteen namespaces: 77 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
+The JavaScript Runtime exposes fifteen namespaces: 80 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
 
 Lua bootstrap is separate: `reaper.ReaWeb_Open(path)` runs before the browser exists. Lua-only native entry points remain documented in [Host API](host-api.md#lua-entry-points). They are not JavaScript aliases. Native transport command names in `capabilities.methods` are diagnostic wire identifiers, not callable JavaScript property paths; use `capabilities.runtime.namespaces` and this inventory for the public SDK surface.
 
@@ -39,6 +39,8 @@ Lua 后端与 WebView UI 之间的消息。Text messages between a Lua backend a
 | `reaper.window.setTitle(title)` | `Promise<boolean>` | 显式覆盖 HTML 标题，重载后仍保留 |
 | `reaper.window.setIcon(path)` | `Promise<boolean>` | 显式设置当前窗口会话图标，覆盖 favicon 自动同步，重载后保留。支持 PNG、ICO、SVG，相对路径基于 App 根目录 |
 | `reaper.window.setIconVisible(visible)` | `Promise<boolean>` | 控制标题栏图标及占位，保留图标数据，默认显示。停靠切换、原生窗口重建和重载后保留，Linux 效果取决于窗口管理器 |
+| `reaper.window.setFrameless(value)` | `Promise<ReaWebWindowState>` | 动态切换原生标题栏，保留窗口和文档 |
+| `reaper.window.setCornerRadius(radius)` | `Promise<ReaWebWindowState>` | 设置 `0..64` 原生圆角，停靠和最大化时暂停 |
 | `reaper.window.focus()` | `Promise<boolean>` | 聚焦当前窗口 |
 | `reaper.window.setDocked(docked)` | `Promise<boolean>` | true 停靠、false 取消停靠；返回实际停靠状态，取消停靠成功返回 false |
 | `reaper.window.isDocked()` | `Promise<boolean>` | 读取停靠状态 |
@@ -113,6 +115,7 @@ REAPER 工程、对象、播放及窗口状态通知。Host state notifications;
 | `reaper.fs.writeBinary(path, bytes, options?)` | `Promise<{ path, bytes }>` | 写入二进制字节 |
 | `reaper.fs.readFile(path, options?)` | `Promise<string or Uint8Array>` | 按 encoding 读取；默认 utf8 |
 | `reaper.fs.writeFile(path, data, options?)` | `Promise<{ path, bytes }>` | 按 encoding 写入；Uint8Array 必须指定 binary |
+| `reaper.fs.moveFile(source, destination, options?)` | `Promise<{source,path,bytes}>` | 工作线程移动文件，默认不覆盖，支持跨卷 |
 | `reaper.fs.stat(path)` | `Promise<ReaWebFileInfo>` | 查询文件或目录属性 |
 | `reaper.fs.readDirectory(path)` | `Promise<ReaWebDirectoryEntry[]>` | 列举目录 |
 | `reaper.fs.makeDirectory(path, options?)` | `Promise<boolean>` | 创建目录，可设置 recursive |
@@ -225,6 +228,8 @@ See [Native Streams](native-streams.md) for buffer layouts, limits and lifecycle
 
 `window.open` accepts `{hidden?: boolean}` since v0.3.8.15, defaults to visible startup, and still returns `Promise<number>`. Check `capabilities.runtime.window?.hiddenStart`. Lua adds `ReaWeb_OpenEx(path, optionsJson)` and `ReaWeb_Show(windowId)`. See [Hidden startup](host-api.md#hidden-startup) / [隐藏启动](host-api.zh-CN.md#隐藏启动).
 
-v0.3.8.16 adds creation-only `{frameless?:boolean, resizable?:boolean}` to `window.open`. `getState()` / `windowstatechange` add `frameless`, `resizable`, `framelessActive`. Native drag regions use `data-reaweb-drag` / `data-reaweb-no-drag`. Public method counts are unchanged. See [Frameless windows](host-api.md#frameless-windows) / [无边框窗口](host-api.zh-CN.md#无边框窗口).
+v0.3.8.16 adds initial `{frameless?:boolean, resizable?:boolean}` to `window.open`. `getState()` / `windowstatechange` add `frameless`, `resizable`, `framelessActive`. Native drag regions use `data-reaweb-drag` / `data-reaweb-no-drag`. Public method counts are unchanged. See [Frameless windows](host-api.md#frameless-windows) / [无边框窗口](host-api.zh-CN.md#无边框窗口).
 
 v0.3.8.18 adds creation-only `transparent?:boolean`, window state fields `transparent` / `transparentActive`, and `capabilities.runtime.window.transparency`. Transparent windows reject docking. Public method counts and the legacy native ABI are unchanged. See [Transparent windows](host-api.md#transparent-windows) / [透明窗口](host-api.zh-CN.md#透明窗口)。
+
+Since v0.3.9.2, `window.setFrameless`, `window.setCornerRadius` and `fs.moveFile` are available. See the [appearance contract](host-api.md#runtime-appearance) and [file-move contract](runtime-api.md#file-moves).

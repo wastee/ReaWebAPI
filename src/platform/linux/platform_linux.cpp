@@ -4,6 +4,7 @@
 #include "platform/shared/window_menu.hpp"
 #include "platform/linux/linux_icon.hpp"
 #include "platform/linux/linux_alpha.hpp"
+#include "platform/linux/linux_corners.hpp"
 #include "platform/shared/transparency.hpp"
 #include "platform/shared/idle_pool.hpp"
 #include <chrono>
@@ -128,6 +129,12 @@ public:
         else if (op == "navigating" && it->second.on_navigation) it->second.on_navigation();
         else if (op == "reload-request") {
           if (!it->second.on_reload || !it->second.on_reload()) send({{"id", message.at("id")}, {"op", "reload"}});
+        } else if (op == "window-menu") {
+          const int command = message.at("command");
+          if (command == 2) {
+            if (!it->second.on_reload || !it->second.on_reload()) send({{"id", message.at("id")}, {"op", "reload"}});
+          } else if (command == 5) ShellExecute(nullptr, "open", "explorer.exe", it->second.entry.parent_path().c_str(), nullptr, SW_SHOWNORMAL);
+          else if (command == 6 && it->second.on_close) it->second.on_close();
         }
       });
       for (auto it = desktop_.begin(); it != desktop_.end();) {
@@ -188,6 +195,28 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   bool frameless_ = false, resizable_ = true;
   bool transparent_ = false;
   LinuxAlpha alpha_;
+  LinuxCorners corners_;
+  double corner_radius_ = 0;
+  void* frame_window_ = nullptr;
+  bool frame_override_ = false;
+  void update_frame() {
+    if (!frame_override_ || docked()) return;
+    const auto handle = static_cast<HWND>(window_->handle());
+    auto native = SWELL_GetOSWindow(handle, "GdkWindow");
+    if (!native || native == frame_window_) return;
+    using SetDecorations = void (*)(void*, unsigned);
+    auto set = reinterpret_cast<SetDecorations>(dlsym(RTLD_DEFAULT, "gdk_window_set_decorations"));
+    if (set) {
+      set(native, frameless_ ? 0u : resizable_ ? 1u : 2u | 8u | 16u | 32u); frame_window_ = native;
+      icon_.refresh(nullptr); icon_.refresh(native);
+    }
+  }
+  void update_corners() {
+    auto handle = static_cast<HWND>(window_->handle());
+    if (GetWindowLong(handle, GWL_STYLE) & WS_CHILD) return;
+    RECT rect{}; GetClientRect(handle, &rect);
+    corners_.apply(SWELL_GetOSWindow(handle, "GdkWindow"), rect.right, rect.bottom, corner_radius_active() ? corner_radius_ : 0);
+  }
 public:
   bool dock_reparents_window() const override { return true; }
   unsigned native_state() const {
@@ -249,6 +278,7 @@ public:
     // next platform timer tick, so sync it here and let the timer cover the rest.
     window_->resize = [this] {
       try {
+        update_corners();
         // GDK writes the _NET_WM_SYNC_REQUEST acknowledgement counter back to the
         // window manager only while it actually paints a frame
         // (gdk_x11_window_end_frame in gdkwindow-x11.c). When the window shrinks,
@@ -322,6 +352,8 @@ public:
       }
     }
     const bool is_docked = docked();
+    update_frame();
+    update_corners();
     if (!process_->listeners.at(id_).hosted) icon_.refresh(icon_target(is_docked), is_docked);
     if (!wants_visible_) { immediate_resize_enabled_ = false; return; }
     using GetXid = unsigned long (*)(void*);
@@ -431,6 +463,8 @@ public:
   }
   void prepare_dock() override {
     if (transparent_) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
+    corners_.reset(SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow"));
+    frame_window_ = nullptr;
     immediate_resize_enabled_ = false;
     last_resize_sync_ = {};
     normal_ = placement(); maximized_ = (native_state() & 4) != 0;
@@ -442,6 +476,7 @@ public:
     const auto handle = static_cast<HWND>(window_->handle());
     if (!style_saved_) {
       saved_style_ = GetWindowLong(handle, GWL_STYLE);
+      saved_style_ = frameless_ ? saved_style_ & ~(WS_CAPTION | WS_BORDER) : saved_style_ | WS_CAPTION | WS_BORDER;
       style_saved_ = true;
     }
     ShowWindow(handle, SW_HIDE);
@@ -516,10 +551,19 @@ public:
   void clear_icon() override { icon_.clear(icon_target(), docked()); }
   void set_icon_visible(bool visible) override { icon_.set_visible(icon_target(), visible, docked()); }
   void set_visible(bool visible) override {
+    if (frame_override_ && !docked()) {
+      const auto handle = static_cast<HWND>(window_->handle());
+      if (!SWELL_GetOSWindow(handle, "GdkWindow")) {
+        auto style = GetWindowLong(handle, GWL_STYLE);
+        SetWindowLong(handle, GWL_STYLE, frameless_ ? style & ~(WS_CAPTION | WS_BORDER) : style | WS_CAPTION | WS_BORDER);
+      }
+    }
     const bool previous = wants_visible_;
     if (visible && !wants_visible_) started_ = std::chrono::steady_clock::now();
     wants_visible_ = visible;
     if (!visible) {
+      frame_window_ = nullptr;
+      corners_.reset(SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow"));
       immediate_resize_enabled_ = false;
       // SWELL may destroy a hidden floating X11 host. Park its foreign child first.
       if (!geometry_.is_null()) {
@@ -555,11 +599,41 @@ public:
   bool focused() const override { return window_->focused(); }
   bool frameless_active() const override {
     const auto handle = static_cast<HWND>(window_->handle());
-    return frameless_ && !closed() && !docked() && !(GetWindowLong(handle, GWL_STYLE) & (WS_CHILD | WS_CAPTION));
+    return frameless_ && !closed() && !docked() && !(GetWindowLong(handle, GWL_STYLE) & WS_CHILD);
+  }
+  void set_frameless(bool value) override {
+    if (value == frameless_) return;
+    if (value) process_->require_frameless();
+    if (!dlsym(RTLD_DEFAULT, "gdk_window_set_decorations")) throw Error("HOST_UNAVAILABLE", "Native decoration control unavailable");
+    const auto change = [value](LONG_PTR style) { return value ? style & ~(WS_CAPTION | WS_BORDER) : style | WS_CAPTION | WS_BORDER; };
+    process_->send({{"id", id_}, {"op", "frameless"}, {"value", value}});
+    frameless_ = value;
+    process_->listeners.at(id_).frameless = value;
+    icon_.decorations = !value;
+    frame_override_ = true; frame_window_ = nullptr;
+    if (style_saved_) saved_style_ = change(saved_style_);
+    if (!docked()) {
+      const auto handle = static_cast<HWND>(window_->handle());
+      // SWELL remaps visible hosts when WS_CAPTION changes. Set GDK decorations
+      // directly to retain the mapped host, focus and embedded WebKit surface.
+      if (!SWELL_GetOSWindow(handle, "GdkWindow")) SetWindowLong(handle, GWL_STYLE, change(GetWindowLong(handle, GWL_STYLE)));
+      update_frame();
+      update_corners(); sync_resize();
+    }
+  }
+  void set_corner_radius(double value) override {
+    if (value && !corners_.supported()) throw Error("HOST_UNAVAILABLE", "Native rounding requires GDK3/X11 window shaping");
+    corner_radius_ = value; update_corners();
+  }
+  bool corner_radius_active() const override {
+    return corner_radius_ > 0 && corners_.supported() && frameless_active() && !(native_state() & (4 | 16)) &&
+      SWELL_GetOSWindow(static_cast<HWND>(window_->handle()), "GdkWindow");
   }
   Json window_capabilities() const override {
     const auto reason = LinuxAlpha::unavailable();
-    return {{"hiddenStart", true}, {"frameless", process_->frameless_supported}, {"resizable", true}, {"dragRegions", process_->frameless_supported}, {"windowSystem", "x11"},
+    return {{"hiddenStart", true}, {"frameless", process_->frameless_supported}, {"setFrameless", process_->frameless_supported},
+      {"cornerRadius", {{"supported", corners_.supported()}, {"framed", false}, {"frameless", corners_.supported()}, {"max", 64}}},
+      {"resizable", true}, {"dragRegions", process_->frameless_supported}, {"windowSystem", "x11"},
       {"transparent", true}, {"transparency", transparency_capabilities(reason.empty(), "x11-rgba-webkitgtk", reason, process_->frameless_supported)}};
   }
   Json placement() const override {

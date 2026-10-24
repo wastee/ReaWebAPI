@@ -118,6 +118,8 @@ interface ReaWebRuntimeCapabilities {
   jsfx?: { protocolVersion: 1 };
   fs?: { mediaURLs: boolean; maxOpenMedia: number; maxMediaBytes: number };
   window?: { hiddenStart: boolean; frameless: boolean; resizable: boolean; dragRegions?: boolean; windowSystem?: 'win32' | 'appkit' | 'x11';
+    setFrameless?: boolean;
+    cornerRadius?: { supported: boolean; framed: boolean; frameless: boolean; max: number };
     /** The creation option is accepted. Check transparency.supported for desktop Alpha. */
     transparent: boolean;
     transparency: { supported: boolean; framed: boolean; frameless: boolean; floatingOnly: boolean; backend: string; reason: string } };
@@ -213,6 +215,10 @@ interface ReaWebAPI {
     stat(path: string): Promise<ReaWebFileInfo>;
     readDirectory(path: string): Promise<ReaWebDirectoryEntry[]>;
     makeDirectory(path: string, options?: { recursive?: boolean }): Promise<boolean>;
+    /** Worker operation. Both paths are entry-relative or absolute filenames. Parent must exist.
+     * No overwrite by default. Regular files only, no final symlinks. Cross-volume moves copy then delete.
+     * FILE_MOVE_PARTIAL means the complete destination exists but removing the source failed. */
+    moveFile(source: string, destination: string, options?: { overwrite?: boolean }): Promise<{ source: string; path: string; bytes: number }>;
   };
   readonly clipboard: {
     /** Custom ReaWebAPI MIME format. Limit 16 MiB. */
@@ -275,6 +281,11 @@ interface ReaWebAPI {
     setPosition(x: number, y: number): Promise<ReaWebBounds>;
     show(): Promise<ReaWebWindowState>; hide(): Promise<ReaWebWindowState>;
     getState(): Promise<ReaWebWindowState>;
+    /** Changes the current window without navigation. Docker retains the preference until undocking. */
+    setFrameless(frameless: boolean): Promise<ReaWebWindowState>;
+    /** Finite radius 0..64 in logical desktop units. Zero removes custom clipping.
+     * Suspended while docked/maximized. macOS/Linux use system corners when framed. */
+    setCornerRadius(radius: number): Promise<ReaWebWindowState>;
     /** Override the HTML title for this window, including reloads. Requires 1–256 UTF-8 bytes without NUL. */
     setTitle(title: string): Promise<boolean>;
     /** Overrides automatic HTML favicon synchronization for this window session, including reloads. PNG, ICO or SVG from an App-root-relative or absolute local path. */

@@ -123,6 +123,45 @@ int main() { try {
   rejects("INVALID_PATH", [&] { io("ReaWeb_ReadFile", {"https://example.com/data"}); });
   CHECK(io("ReaWeb_ReadDirectory", {"sub"}).size() == 2);
   rejects("FILE_NOT_FOUND", [&] { io("ReaWeb_ReadFile", {"missing"}); });
+  CHECK(io("ReaWeb_MoveFile", {u8"sub/文本.txt", u8"sub/移动 文本.txt"})["bytes"] == std::string(u8"中文\n").size());
+  CHECK(!fs::exists(root / fs::u8path(u8"sub/文本.txt")));
+  CHECK(io("ReaWeb_ReadFile", {u8"sub/移动 文本.txt"}) == u8"中文\n");
+  auto moved = root / "moved.bin";
+  CHECK(io("ReaWeb_MoveFile", {"binary", moved.u8string()})["path"] == moved.u8string());
+  CHECK(io("ReaWeb_MoveFile", {moved.u8string(), "moved.bin"})["bytes"] == 3);
+  io("ReaWeb_WriteFile", {"other", "keep"});
+  rejects("FILE_EXISTS", [&] { io("ReaWeb_MoveFile", {"moved.bin", "other"}); });
+  CHECK(io("ReaWeb_ReadFile", {"other"}) == "keep");
+  CHECK(io("ReaWeb_MoveFile", {"moved.bin", "other", {{"overwrite", true}}})["bytes"] == 3);
+  CHECK(decode_binary(io("ReaWeb_ReadFile", {"other", {{"encoding", "binary"}}})) == binary);
+  for (const auto& args : {Json::array({}), Json::array({"other"}), Json::array({"other", "target", {{"overwrite", "true"}}}),
+      Json::array({"other", "target", {{"unknown", true}}})})
+    rejects("INVALID_ARGUMENT", [&] { io("ReaWeb_MoveFile", args); });
+  for (const auto& path : {"", "https://example.com/a", "sub/", ".", ".."})
+    rejects("INVALID_PATH", [&] { io("ReaWeb_MoveFile", {"other", path}); });
+  rejects("INVALID_PATH", [&] { io("ReaWeb_MoveFile", {"other", "sub"}); });
+  rejects("FILE_NOT_FOUND", [&] { io("ReaWeb_MoveFile", {"absent", "target"}); });
+  rejects("FILE_NOT_FOUND", [&] { io("ReaWeb_MoveFile", {"sub", "target"}); });
+  rejects("FILE_IO", [&] { io("ReaWeb_MoveFile", {"other", "absent/target"}); });
+  CHECK(fs::exists(root / "other"));
+  std::error_code symlink_error;
+  fs::create_symlink(root / "other", root / "link", symlink_error);
+  if (!symlink_error) {
+    rejects("INVALID_PATH", [&] { io("ReaWeb_MoveFile", {"link", "target"}); });
+    rejects("INVALID_PATH", [&] { io("ReaWeb_MoveFile", {"other", "link", {{"overwrite", true}}}); });
+  }
+  // Move large files without the bridge's read/write payload limit.
+  { std::ofstream large(root / "large", std::ios::binary); large.seekp(20 * 1024 * 1024); large.put('x'); }
+  CHECK(io("ReaWeb_MoveFile", {"large", "large-moved"})["bytes"] == 20 * 1024 * 1024 + 1);
+#ifndef _WIN32
+  if (const auto volume = std::getenv("REAWEB_TEST_MOVE_VOLUME")) {
+    const auto target = fs::path(volume) / root.filename(); fs::create_directory(target);
+    CHECK(io("ReaWeb_MoveFile", {"large-moved", (target / "large").u8string()})["bytes"] == 20 * 1024 * 1024 + 1);
+    CHECK(!fs::exists(root / "large-moved"));
+    std::ifstream content(target / "large", std::ios::binary); content.seekg(20 * 1024 * 1024); CHECK(content.get() == 'x'); content.close();
+    fs::remove(target / "large"); fs::remove(target);
+  }
+#endif
   fs::remove_all(root);
 
   std::cout << "Host features: project scope, dependent batch cleanup, files, URLs, large messages passed\n";

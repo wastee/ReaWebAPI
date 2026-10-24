@@ -133,6 +133,7 @@ void open_external(const std::string& url) {
   std::function<bool()> isDocked;
   std::function<std::string()> appName;
   std::function<NSInteger(NSMenu*, NSInteger)> devtoolsMenu;
+  std::function<void(int)> windowMenuAction;
 }
 @end
 
@@ -155,8 +156,15 @@ void open_external(const std::string& url) {
     item.state = isDocked && isDocked() ? NSControlStateValueOn : NSControlStateValueOff;
     [menu insertItem:item atIndex:index++];
   }
+  const auto append = [&](const std::string& label, int command) {
+    auto item = [[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:label.c_str()] action:@selector(windowActionFromMenu:) keyEquivalent:@""];
+    item.tag = command; item.target = self; [menu insertItem:item atIndex:index++];
+  };
+  if (windowMenuAction) append("Reload", 2);
   if (devtoolsMenu) index = devtoolsMenu(menu, index);
+  if (windowMenuAction) { append("Open " + appName() + " Folder", 5); append("Close " + appName(), 6); }
 }
+- (void)windowActionFromMenu:(NSMenuItem*)sender { if (!sourceClosed && windowMenuAction) windowMenuAction(int(sender.tag)); }
 - (void)toggleDockFromMenu:(id)sender {
   (void)sender;
   if (!sourceClosed && toggleDock) toggleDock();
@@ -244,6 +252,26 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   id mouse_monitor_;
   DragRegions drag_regions_;
   bool alpha_ready_ = false;
+  double corner_radius_ = 0;
+  bool rounding_applied_ = false;
+  void update_corners(bool suspended = false) {
+    auto content = (__bridge NSView*)GetDlgItem(static_cast<HWND>(window_->handle()), 0);
+    auto native = floating_window();
+    const bool active = !suspended && corner_radius_active();
+    if (!active && !rounding_applied_) return;
+    content.wantsLayer = YES;
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    content.layer.cornerRadius = active ? corner_radius_ : 0;
+    content.layer.masksToBounds = active;
+    [CATransaction commit];
+    if (native) {
+      native.opaque = !(active || delegate_->options.transparent);
+      native.backgroundColor = active || delegate_->options.transparent ? NSColor.clearColor : NSColor.windowBackgroundColor;
+      SetOpaque(static_cast<HWND>(window_->handle()), !active && !delegate_->options.transparent);
+      [native invalidateShadow];
+    }
+    rounding_applied_ = active;
+  }
   static bool alpha_supported() {
     return [WKWebView instancesRespondToSelector:NSSelectorFromString(@"_setDrawsBackground:")];
   }
@@ -263,12 +291,12 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   void configure_floating() {
     const auto& options = delegate_->options;
     if (options.hosted) return;
-    if (!options.frameless && options.resizable && !options.transparent) return;
     auto native = floating_window();
     if (!native) throw Error("WINDOW_STYLE_FAILED", "The standalone AppKit host is unavailable");
     const auto frame = native.frame;
     auto style = native.styleMask;
     if (options.frameless) style &= ~(NSWindowStyleMaskTitled | NSWindowStyleMaskFullSizeContentView);
+    else style |= NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
     if (options.resizable) style |= NSWindowStyleMaskResizable;
     else style &= ~NSWindowStyleMaskResizable;
     native.styleMask = style;
@@ -403,7 +431,7 @@ public:
     auto script = [[WKUserScript alloc] initWithSource:ns(delegate_->options.script +
       (delegate_->options.transparent ? transparent_page_script("webkit.messageHandlers.reaweb.postMessage('__reawebPresent');") :
         page_background_script("webkit.messageHandlers.reaweb.postMessage(message);")) +
-      (delegate_->options.frameless ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : ""))
+      drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);"))
       injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:script];
     if (!prepared) webview_ = [[ReaWebNativeView alloc] initWithFrame:NSMakeRect(0, 0, 860, 640) configuration:config];
@@ -447,7 +475,7 @@ public:
     delegate_->navigationStarted = [this] { startup_.navigate(delegate_->options.hosted); drag_regions_.clear(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
       if (message == "__reawebPresent") { prepare_startup(); return; }
-      if (delegate_->options.frameless && drag_regions_.message(message)) return;
+      if (drag_regions_.message(message)) return;
       if (!page_background_message(message, [this](unsigned color) {
         if (delegate_->options.transparent) return;
         window_->set_background(color);
@@ -464,6 +492,7 @@ public:
     webview_.frame = content.bounds;
     [content addSubview:webview_];
     window_->configure_floating = [this] { configure_floating(); };
+    window_->resize = [this] { update_corners(); };
     try { configure_floating(); }
     catch (...) {
       [NSEvent removeMonitor:mouse_monitor_]; mouse_monitor_ = nil;
@@ -473,6 +502,12 @@ public:
     }
     devtools_ = std::make_unique<MacDevTools>(webview_, [this] { if (!closed()) focus(); });
     webview_->devtoolsMenu = [this](NSMenu* menu, NSInteger index) { return devtools_->insert_menu(menu, index); };
+    webview_->windowMenuAction = [this](int command) {
+      const auto& options = delegate_->options;
+      if (command == 2) { if (!options.on_reload || !options.on_reload()) reload(); }
+      else if (command == 5) [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:ns(options.entry.parent_path().u8string())]];
+      else if (command == 6 && options.on_close) options.on_close();
+    };
     window_->context_menu = [this](LPARAM position) {
       auto keep_alive = shared_from_this();
       try {
@@ -490,6 +525,7 @@ public:
     release_dock_icon();
     if (mouse_monitor_) [NSEvent removeMonitor:mouse_monitor_];
     webview_->devtoolsMenu = {};
+    webview_->windowMenuAction = {};
     devtools_.reset();
     webview_->sourceClosed = true; webview_->dropEnabled = false; webview_->receiveDrop = {};
     webview_->toggleDock = {}; webview_->isDocked = {};
@@ -561,6 +597,7 @@ public:
   void prepare_undock() override { release_dock_icon(); }
   void prepare_dock() override {
     if (delegate_->options.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
+    update_corners(true);
     icon_window_ = nil;
     maximized_ = webview_.window.zoomed;
     if (maximized_) [webview_.window zoom:nil];
@@ -592,6 +629,7 @@ public:
         if (!(delegate_->options.is_docked && delegate_->options.is_docked())) focus();
       }
     }
+    update_corners();
     devtools_->tick(); if (!delegate_->options.hosted) apply_icon();
   }
   void set_title(const std::string& title) override { window_->set_title(title); icon_window_ = nil; apply_icon(); }
@@ -665,8 +703,26 @@ public:
     auto native = floating_window();
     return delegate_->options.frameless && native && !(native.styleMask & NSWindowStyleMaskTitled);
   }
+  void set_frameless(bool value) override {
+    if (delegate_->options.frameless == value) return;
+    update_corners(true);
+    delegate_->options.frameless = value;
+    if (auto native = floating_window()) {
+      auto responder = native.firstResponder;
+      configure_floating();
+      [native makeFirstResponder:responder];
+      update_corners();
+      icon_window_ = nil; apply_icon();
+    }
+    evaluate(frameless_active() ? "window.__reawebDragRegionsActive?.(true);" : "window.__reawebDragRegionsActive?.(false);");
+  }
+  void set_corner_radius(double value) override { corner_radius_ = value; update_corners(); }
+  bool corner_radius_active() const override {
+    auto native = floating_window();
+    return corner_radius_ > 0 && frameless_active() && (!delegate_->options.resizable || !native.zoomed) && !(native.styleMask & NSWindowStyleMaskFullScreen);
+  }
   Json window_capabilities() const override {
-    return {{"hiddenStart", true}, {"frameless", true}, {"resizable", true}, {"dragRegions", true}, {"windowSystem", "appkit"},
+    return {{"hiddenStart", true}, {"frameless", true}, {"setFrameless", true}, {"cornerRadius", {{"supported", true}, {"framed", false}, {"frameless", true}, {"max", 64}}}, {"resizable", true}, {"dragRegions", true}, {"windowSystem", "appkit"},
       {"transparent", true}, {"transparency", transparency_capabilities(alpha_supported(), "appkit-wkwebview",
         alpha_supported() ? "" : "WKWebView background control is unavailable")}};
   }

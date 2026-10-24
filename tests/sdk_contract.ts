@@ -31,14 +31,14 @@ type RuntimeAssert<T extends true> = T;
 type RuntimeEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type NoFlatRuntime = RuntimeAssert<RuntimeEqual<Extract<keyof ReaWebAPI, `ReaWeb${string}` | 'ready'>, never>>;
 
-type windowSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['window'], 'open' | 'openDev' | 'getSize' | 'setSize' | 'getPosition' | 'setPosition' | 'show' | 'hide' | 'getState' | 'setTitle' | 'setIcon' | 'setIconVisible' | 'focus' | 'setDocked' | 'isDocked' | 'setKeyboardCapture' | 'close' | 'reload'>>;
+type windowSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['window'], 'open' | 'openDev' | 'getSize' | 'setSize' | 'getPosition' | 'setPosition' | 'show' | 'hide' | 'getState' | 'setTitle' | 'setIcon' | 'setIconVisible' | 'setFrameless' | 'setCornerRadius' | 'focus' | 'setDocked' | 'isDocked' | 'setKeyboardCapture' | 'close' | 'reload'>>;
 type themeSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['theme'], 'getColors' | 'apply'>>;
 type dialogSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['dialog'], 'openFile' | 'saveFile' | 'selectFolder'>>;
 type eventsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['events'], 'on' | 'off'>>;
 type lifecycleSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['lifecycle'], 'ready' | 'on'>>;
 type lifecycleEvents = RuntimeAssert<RuntimeEqual<Parameters<ReaWebAPI['lifecycle']['on']>[0], 'before-close' | 'before-reload' | 'cleanup'>>;
 type debugSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['debug'], 'log' | 'warn' | 'error' | 'inspect' | 'getLogs' | 'getDiagnostics' | 'openDevTools' | 'setBufferSize'>>;
-type fsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['fs'], 'openMedia' | 'readText' | 'writeText' | 'readBinary' | 'writeBinary' | 'readFile' | 'writeFile' | 'stat' | 'readDirectory' | 'makeDirectory' | 'watch'>>;
+type fsSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['fs'], 'openMedia' | 'readText' | 'writeText' | 'readBinary' | 'writeBinary' | 'readFile' | 'writeFile' | 'moveFile' | 'stat' | 'readDirectory' | 'makeDirectory' | 'watch'>>;
 type audioSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['audio'], 'getFileInfo' | 'getWaveform' | 'getTrackMeter' | 'setTrackValueLatest' | 'openStream' | 'resetMeter' | 'decodeMeter'>>;
 type clipboardSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['clipboard'], 'readText' | 'writeText' | 'readBinary' | 'writeBinary'>>;
 type dragDropSurface = RuntimeAssert<RuntimeEqual<keyof ReaWebAPI['dragDrop'], 'startFiles' | 'startText'>>;
@@ -88,6 +88,18 @@ async function runtimeContract(track: MediaTrackHandle, take: MediaItem_TakeHand
   const hiddenId: number = await reaper.window.open('other/index.html', {hidden:true});
   const framelessId: number = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
   const frameState: boolean = (await reaper.window.getState()).framelessActive;
+  const appearance: ReaWebWindowState = await reaper.window.setFrameless(true);
+  const rounded: ReaWebWindowState = await reaper.window.setCornerRadius(24);
+  const radius: number = rounded.cornerRadius;
+  const clipped: boolean = rounded.cornerRadiusActive;
+  const moved: {source: string; path: string; bytes: number} = await reaper.fs.moveFile('source.wav', 'target.wav', {overwrite: true});
+  // @ts-expect-error Live frame changes require a boolean.
+  await reaper.window.setFrameless(1);
+  // @ts-expect-error Corner radii are numeric.
+  await reaper.window.setCornerRadius('24');
+  // @ts-expect-error File moves require separate source and target paths.
+  await reaper.fs.moveFile({source: 'source.wav', target: 'target.wav'});
+
   const transparentId: number = await reaper.window.open('other/index.html', {frameless:true, transparent:true});
   const alphaState: boolean = (await reaper.window.getState()).transparentActive;
   const alphaSupport: boolean | undefined = (await reaper.system.getCapabilities()).runtime.window?.transparency.supported;

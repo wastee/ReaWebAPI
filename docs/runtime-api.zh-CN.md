@@ -39,7 +39,7 @@ await reaper.window.hide();
 
 返回的 `mode` 区分 `floating` 与 `docked`。Docker 布局由 REAPER 控制，停靠时 `setSize/setPosition` 报 `WINDOW_DOCKED`，不会修改 REAPER 主窗口。隐藏只作用于本页容器，显示时激活对应 Docker 标签。窗口支持标题、聚焦、停靠和位置保存。
 
-Windows、macOS、Linux 的 WebView 右键菜单仅包含 **Dock <App> in Docker**（停靠时勾选）、**Open DevTools** / **Hide DevTools** 和 **Float DevTools** / **Embed DevTools**。DevTools 隐藏时禁用模式切换。包括 Inspect 在内的浏览器默认菜单项被隐藏，底层能力保持启用。页面的 `contextmenu` 处理和 `preventDefault()` 仍然有效。Docker 页签右键菜单另提供 **Reload**、**Open <App> Folder** 和 **Close <App>**，并以勾选状态标示 **Dock <App> in Docker**。应用名称跟随当前窗口标题（`setTitle()` 或 HTML 标题），未设置标题时回退到 `app.json` 名称，再回退到 App 目录名。刷新和关闭沿用现有生命周期。Windows 标题栏系统菜单使用相同的应用名称和停靠状态。所有停靠入口与 `setDocked()` 共用逻辑，切换时保留当前文档。
+Windows、macOS、Linux 的 WebView 右键菜单包含 **Dock <App> in Docker**（停靠时勾选）、**Reload**、**Open DevTools** / **Hide DevTools**、**Float DevTools** / **Embed DevTools**、**Open <App> Folder** 和 **Close <App>**。DevTools 隐藏时禁用模式切换。包括 Inspect 在内的浏览器默认菜单项被隐藏，底层能力保持启用。页面的 `contextmenu` 处理和 `preventDefault()` 仍然有效。标题栏与 Docker 页签菜单使用相同操作和停靠状态。应用名称跟随当前窗口标题（`setTitle()` 或 HTML 标题），未设置标题时回退到 `app.json` 名称，再回退到 App 目录名。刷新和关闭沿用现有生命周期。Windows 标题栏系统菜单使用相同的应用名称和停靠状态。所有停靠入口与 `setDocked()` 共用逻辑，切换时保留当前文档。
 
 ### 窗口标题
 
@@ -240,6 +240,18 @@ Native Streams and platform additions: [English](native-streams.md) · [中文](
 
 `reaper.window.open(path, {hidden:true})` 预加载新的子窗口。`show()` 显示但不强制聚焦，`focus()` 显示并聚焦，返回类型保持不变。能力检测、Dock 恢复和就绪语义参见[隐藏启动](host-api.zh-CN.md#隐藏启动)。
 
-`window.open(path, options?)` 还接受仅在创建时生效的 `frameless` 和 `resizable`。`getState()` 与 `windowstatechange` 返回这两个配置及 `framelessActive`，原生拖动区、能力检测和 Docker 行为见[无边框窗口](host-api.zh-CN.md#无边框窗口)。
+`window.open(path, options?)` 还接受初始 `frameless` 和 `resizable` 配置。`getState()` 与 `windowstatechange` 返回这两个配置及 `framelessActive`，原生拖动区、能力检测和 Docker 行为见[无边框窗口](host-api.zh-CN.md#无边框窗口)。
 
 `window.open(path, {transparent:true})` 请求仅在创建时生效的桌面 Alpha。窗口状态包含 `transparent` 与 `transparentActive`。创建前可检查 `capabilities.runtime.window.transparency`，原生要求、失败处理及 Dock 持久化规则见[透明窗口](host-api.zh-CN.md#透明窗口)。
+
+## 移动文件
+
+v0.3.9.2 起，`fs.moveFile(source, destination, {overwrite?:boolean})` 在文件工作线程执行，返回 `{source, path, bytes}`。源与目标路径均可独立使用相对入口目录的路径或绝对本地文件路径。目标必须包含文件名，父目录必须存在。不接受目录、URL、NUL 或末级符号链接。目标已存在时需显式设置 `overwrite:true`。源与目标为同一文件时不执行移动。
+
+同卷使用原生重命名或链接后删除，不复制文件内容。跨卷先在目标卷暂存完整副本，再发布目标并删除源文件，整个过程不保证原子性。发布后删除源文件失败时返回 `FILE_MOVE_PARTIAL`，此时可能保留两份文件。不受桥接读写的 16 MiB 限制。移动过程中调用方应避免并发写入源文件。
+
+```javascript
+const source = await reaper.dialog.openFile();
+const destination = source && await reaper.dialog.saveFile();
+if (source && destination) await reaper.fs.moveFile(source, destination);
+```

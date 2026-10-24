@@ -8,7 +8,9 @@ namespace reaweb {
 inline HRESULT install_window_menu(ICoreWebView2* view, std::function<void()> toggle, std::function<bool()> is_docked,
                                    std::function<void(DevToolsAction)> devtools = {},
                                    std::function<DevToolsMenuState()> devtools_state = {},
-                                   std::function<std::wstring()> dock_label = {}) {
+                                   std::function<std::wstring()> dock_label = {},
+                                   std::function<void()> reload = {}, std::function<void()> folder = {}, std::function<void()> close = {},
+                                   std::function<std::wstring()> app_name = {}) {
   using Microsoft::WRL::ComPtr;
   using Microsoft::WRL::Callback;
   if (!toggle && !devtools) return S_OK;
@@ -37,7 +39,7 @@ inline HRESULT install_window_menu(ICoreWebView2* view, std::function<void()> to
     hr = create(L"Embed DevTools", DevToolsAction::Embed, embedded); if (FAILED(hr)) return hr;
   }
   return menus->add_ContextMenuRequested(Callback<ICoreWebView2ContextMenuRequestedEventHandler>(
-    [factory, selected, dock_label, open, hide, floating, embedded, toggle, is_docked, devtools_state]
+    [factory, selected, dock_label, open, hide, floating, embedded, toggle, is_docked, devtools_state, reload, folder, close, app_name]
     (ICoreWebView2*, ICoreWebView2ContextMenuRequestedEventArgs* args) -> HRESULT {
       ComPtr<ICoreWebView2ContextMenuItemCollection> items;
       HRESULT hr = args->get_MenuItems(&items);
@@ -50,6 +52,16 @@ inline HRESULT install_window_menu(ICoreWebView2* view, std::function<void()> to
         hr = items->RemoveValueAtIndex(--count); if (FAILED(hr)) return hr;
       }
       UINT32 index = 0;
+      const auto append = [&](const std::wstring& label, const std::function<void()>& action) -> HRESULT {
+        if (!action) return S_OK;
+        ComPtr<ICoreWebView2ContextMenuItem> item;
+        auto result = factory->CreateContextMenuItem(label.c_str(), nullptr, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, &item);
+        if (FAILED(result)) return result;
+        EventRegistrationToken token{};
+        result = item->add_CustomItemSelected(Callback<ICoreWebView2CustomItemSelectedEventHandler>(
+          [action](ICoreWebView2ContextMenuItem*, IUnknown*) -> HRESULT { action(); return S_OK; }).Get(), &token);
+        return FAILED(result) ? result : items->InsertValueAtIndex(index++, item.Get());
+      };
       if (toggle) {
         ComPtr<ICoreWebView2ContextMenuItem> dock;
         const auto label = dock_label ? dock_label() : L"Dock in Docker";
@@ -61,13 +73,19 @@ inline HRESULT install_window_menu(ICoreWebView2* view, std::function<void()> to
         hr = items->InsertValueAtIndex(index++, dock.Get());
         if (FAILED(hr)) return hr;
       }
+      hr = append(L"Reload", reload); if (FAILED(hr)) return hr;
       if (open) {
         const auto state = devtools_state();
+        hr = open->put_IsEnabled(state.available); if (FAILED(hr)) return hr;
+        hr = hide->put_IsEnabled(state.available); if (FAILED(hr)) return hr;
         hr = embedded->put_IsEnabled(state.mode_enabled()); if (FAILED(hr)) return hr;
         hr = floating->put_IsEnabled(state.mode_enabled()); if (FAILED(hr)) return hr;
         hr = items->InsertValueAtIndex(index++, state.shown ? hide.Get() : open.Get()); if (FAILED(hr)) return hr;
         hr = items->InsertValueAtIndex(index++, state.floating ? embedded.Get() : floating.Get()); if (FAILED(hr)) return hr;
       }
+      const auto name = app_name ? app_name() : L"App";
+      hr = append(L"Open " + name + L" Folder", folder); if (FAILED(hr)) return hr;
+      hr = append(L"Close " + name, close); if (FAILED(hr)) return hr;
       return S_OK;
     }).Get(), &token);
 }

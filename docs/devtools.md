@@ -10,7 +10,7 @@ Press **Ctrl+Shift+I** on Windows/Linux or **Option+Command+I** on macOS in the 
 | Windows / WebView2 | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Embed DevTools** in the page context menu |
 | macOS / WKWebView | Right-hand panel by default, with a draggable divider | **Float DevTools** / **Embed DevTools** in the page context menu |
 
-The page menu contains only docking and DevTools actions. Docker tab menus add lifecycle-aware reload, App folder and close actions, with the current docking state checked. Labels are English on all platforms. The same inspector controller supplies visibility and mode state for both menus.
+Page, title-bar and Docker tab menus share docking, lifecycle-aware reload, DevTools, App folder and close actions, with the current docking state checked. Browser defaults remain hidden. Labels are English on all platforms. The same inspector controller supplies visibility and mode state for both menus.
 
 ## Linux
 

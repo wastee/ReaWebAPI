@@ -38,7 +38,7 @@ Lifecycle events are `before-close`, `before-reload` and `cleanup`; all run befo
 
 Native close buttons, bridge close requests and same-document reloads participate. The bridge remains usable during cleanup. Reload invalidates old requests, handles, subscriptions and audio jobs. Forced unload/process exit/crash cannot guarantee asynchronous persistence; pagehide only attempts synchronous cleanup with reason `unload` and timeout 0. Persist important state during normal operation.
 
-On Windows, macOS and Linux, the WebView context menu contains only **Dock <App> in Docker** (checked when docked), **Open DevTools** / **Hide DevTools**, and **Float DevTools** / **Embed DevTools**. Mode switching is disabled while DevTools is hidden. Default browser menu entries, including Inspect, are hidden without disabling the underlying capabilities. Page `contextmenu` handlers and `preventDefault()` remain effective. Docker tab context menus also provide **Reload**, **Open <App> Folder** and **Close <App>**, with a checked **Dock <App> in Docker** entry. App names follow the current window title (`setTitle()` or the HTML title), falling back to `app.json` and then the App directory name when no title is set. Reload and close use the existing lifecycle. The Windows title-bar system menu uses the same App name and docking state. All docking entries use the same integration as `setDocked()` and preserve the current document.
+On Windows, macOS and Linux, the WebView context menu contains **Dock <App> in Docker** (checked when docked), **Reload**, **Open DevTools** / **Hide DevTools**, **Float DevTools** / **Embed DevTools**, **Open <App> Folder** and **Close <App>**. Mode switching is disabled while DevTools is hidden. Default browser menu entries, including Inspect, are hidden without disabling the underlying capabilities. Page `contextmenu` handlers and `preventDefault()` remain effective. Title-bar and Docker tab menus use the same actions and docking state. App names follow the current window title (`setTitle()` or the HTML title), falling back to `app.json` and then the App directory name when no title is set. Reload and close use the existing lifecycle. The Windows title-bar system menu uses the same App name and docking state. All docking entries use the same integration as `setDocked()` and preserve the current document.
 
 ### Window titles
 
@@ -195,6 +195,18 @@ Native Streams and platform additions: [English](native-streams.md) · [中文](
 
 `reaper.window.open(path, {hidden:true})` preloads a new child window. `show()` displays without forcing focus and `focus()` displays and focuses. Both retain their existing return types. See [hidden startup](host-api.md#hidden-startup) for capabilities, Dock restoration and readiness.
 
-`window.open(path, options?)` also accepts creation-only `frameless` and `resizable` flags. `getState()` and `windowstatechange` report these flags and `framelessActive`. See [frameless windows](host-api.md#frameless-windows) for native drag regions, capabilities and Docker behavior.
+`window.open(path, options?)` also accepts initial `frameless` and `resizable` flags. `getState()` and `windowstatechange` report these flags and `framelessActive`. See [frameless windows](host-api.md#frameless-windows) for native drag regions, capabilities and Docker behavior.
 
 `window.open(path, {transparent:true})` requests creation-only desktop Alpha. Window state includes `transparent` and `transparentActive`. Inspect `capabilities.runtime.window.transparency` before creating a window. See [transparent windows](host-api.md#transparent-windows) for native requirements, failures and Dock persistence.
+
+## File moves
+
+Since v0.3.9.2, `fs.moveFile(source, destination, {overwrite?:boolean})` runs on the file worker and resolves to `{source, path, bytes}`. Both paths independently accept entry-directory-relative or absolute local filenames. The destination parent must exist. Directories, URLs, NUL and final-entry symbolic links are rejected. An existing destination requires `overwrite:true`. Moving a file onto itself is a no-op.
+
+Same-volume moves use native rename or link/unlink without copying file contents. Cross-volume moves stage a complete copy on the destination volume, publish it, then remove the source. They are not atomic as a whole. If source removal fails after publication, `FILE_MOVE_PARTIAL` indicates both files may remain. Files may exceed the 16 MiB bridge read/write limit. Callers must avoid concurrent writes to the source while moving.
+
+```javascript
+const source = await reaper.dialog.openFile();
+const destination = source && await reaper.dialog.saveFile();
+if (source && destination) await reaper.fs.moveFile(source, destination);
+```

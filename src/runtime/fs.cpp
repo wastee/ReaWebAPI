@@ -6,6 +6,14 @@
 #include <set>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <stdio.h>
+#include <cerrno>
+#else
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cerrno>
 #endif
 
 namespace reaweb {
@@ -50,13 +58,102 @@ Json stat(const fs::path& path) {
     {"type", fs::is_regular_file(info) ? "file" : fs::is_directory(info) ? "directory" : "other"},
     {"size", fs::is_regular_file(info) ? Json(fs::file_size(path)) : Json(nullptr)}};
 }
+fs::path move_path(const fs::path& base, const Json& arg) {
+  // Resolve parents, but never follow the final entry when moving or replacing it.
+  if (!arg.is_string()) throw Error("INVALID_PATH", "Expected a filesystem path");
+  const auto text = arg.get<std::string>();
+  if (text.empty() || text.size() > 32768 || text.find('\0') != std::string::npos || text.find("://") != std::string::npos)
+    throw Error("INVALID_PATH", "Expected a local path without a URL scheme or NUL");
+  auto path = fs::u8path(text);
+  if (path.filename().empty() || path.filename() == "." || path.filename() == ".." ||
+      (!path.is_absolute() && path.has_root_path()))
+    throw Error("INVALID_PATH", "Expected an absolute or entry-relative file path including its filename");
+  if (!path.is_absolute()) path = base / path;
+  return fs::weakly_canonical(path.parent_path()) / path.filename();
+}
+void commit_move(const fs::path& source, const fs::path& target, bool overwrite, std::error_code& error) {
+#ifdef _WIN32
+  if (!MoveFileExW(source.c_str(), target.c_str(), overwrite ? MOVEFILE_REPLACE_EXISTING : 0))
+    error = std::error_code(GetLastError(), std::system_category());
+#else
+  if (overwrite) fs::rename(source, target, error);
+  else {
+#ifdef __APPLE__
+    if (renamex_np(source.c_str(), target.c_str(), RENAME_EXCL) == 0) return;
+    if (errno != ENOTSUP && errno != EINVAL) { error = std::error_code(errno, std::generic_category()); return; }
+#else
+    if (syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, target.c_str(), 1 /* RENAME_NOREPLACE */) == 0) return;
+    if (errno != ENOSYS && errno != EINVAL && errno != EOPNOTSUPP) { error = std::error_code(errno, std::generic_category()); return; }
+#endif
+    fs::create_hard_link(source, target, error);
+    if (!error) {
+      if (!fs::remove(source, error) || error)
+        throw Error("FILE_MOVE_PARTIAL", "Destination was created but source could not be removed: " + source.u8string());
+    }
+  }
+#endif
+}
+Json move_file(const fs::path& base, const Json& args) {
+  const auto opt = options(args, 2, {"overwrite"});
+  const bool overwrite = opt.value("overwrite", false);
+  const auto source = move_path(base, args[0]), target = move_path(base, args[1]);
+  const auto source_status = fs::symlink_status(source), target_status = fs::symlink_status(target);
+  if (fs::is_symlink(source_status) || fs::is_symlink(target_status))
+    throw Error("INVALID_PATH", "moveFile does not accept symbolic links as source or destination files");
+  if (!fs::is_regular_file(source_status)) throw Error("FILE_NOT_FOUND", "Source is not a regular file");
+  const auto bytes = fs::file_size(source);
+  const auto result = Json{{"source", source.u8string()}, {"path", target.u8string()}, {"bytes", bytes}};
+  if (fs::exists(target_status)) {
+    if (!fs::is_regular_file(target_status)) throw Error("INVALID_PATH", "Destination must name a file, not a directory");
+    if (fs::equivalent(source, target)) return result;
+    if (!overwrite) throw Error("FILE_EXISTS", "Destination exists; pass overwrite: true to replace it");
+  }
+  std::error_code error;
+  commit_move(source, target, overwrite, error);
+  if (!error) return result;
+#ifdef _WIN32
+  const bool cross_device = error.value() == ERROR_NOT_SAME_DEVICE;
+#else
+  const bool cross_device = error == std::errc::cross_device_link;
+#endif
+  if (!cross_device) {
+    if (error == std::errc::file_exists) throw Error("FILE_EXISTS", "Destination already exists");
+    throw Error("FILE_IO", "Cannot move file: " + error.message());
+  }
+  // Stage on the destination volume. Publish only a complete copy, then remove the source.
+  static std::atomic<unsigned> counter{0};
+  fs::path staging;
+  for (int attempt = 0; attempt < 32; ++attempt) {
+    staging = target.parent_path() / (".reaweb-move-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" + std::to_string(++counter));
+    if (fs::create_directory(staging)) break;
+    staging.clear();
+  }
+  if (staging.empty()) throw Error("FILE_IO", "Cannot reserve a move staging directory");
+  const auto temporary = staging / "file";
+  try {
+    fs::copy_file(source, temporary);
+    fs::last_write_time(temporary, fs::last_write_time(source));
+    error.clear(); commit_move(temporary, target, overwrite, error);
+    if (error) throw Error(error == std::errc::file_exists ? "FILE_EXISTS" : "FILE_IO", "Cannot publish moved file: " + error.message());
+    if (!fs::remove(source, error) || error)
+      throw Error("FILE_MOVE_PARTIAL", "Destination was created but source could not be removed: " + source.u8string());
+  } catch (...) {
+    std::error_code ignored; fs::remove(temporary, ignored); fs::remove(staging, ignored); throw;
+  }
+  fs::remove(staging, error);
+  return result;
+}
 }
 bool is_file_method(const std::string& name) {
   return name == "ReaWeb_ReadFile" || name == "ReaWeb_WriteFile" || name == "ReaWeb_Stat" ||
-    name == "ReaWeb_ReadDirectory" || name == "ReaWeb_MakeDirectory";
+    name == "ReaWeb_ReadDirectory" || name == "ReaWeb_MakeDirectory" || name == "ReaWeb_MoveFile";
 }
 Json file_call(const fs::path& base, const std::string& method, const Json& args) {
   try {
+    if (method == "ReaWeb_MoveFile") {
+      if (!args.is_array() || args.size() < 2 || args.size() > 3) throw Error("INVALID_ARGUMENT", "Expected source, destination and optional move options");
+      return move_file(base, args);
+    }
     const bool write = method == "ReaWeb_WriteFile";
     if (!args.is_array() || args.size() < (write ? 2u : 1u) || args.size() > (write ? 3u : 2u))
       throw Error("INVALID_ARGUMENT", "Wrong file argument count");

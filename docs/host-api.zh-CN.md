@@ -41,7 +41,9 @@
 | `reaper.window.setDocked(docked)` | `boolean` | 返回实际停靠状态，保留页面 |
 | `reaper.window.isDocked()` | `boolean` | 获取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | 默认 `true`，设为 `false` 后遵循 REAPER 的全局快捷键规则 |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive`、`transparent`、`transparentActive` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive`、`transparent`、`transparentActive`, `cornerRadius`, `cornerRadiusActive` |
+| `reaper.window.setFrameless(value)` | `ReaWebWindowState` | 动态显示或隐藏原生标题栏，保留同一窗口 |
+| `reaper.window.setCornerRadius(radius)` | `ReaWebWindowState` | 原生圆角半径 `0..64`，停靠和最大化时暂停裁剪 |
 
 窗口位置和停靠状态按入口文件及实例序号保存，最多同时打开 32 个窗口。同一 App 目录的窗口共享浏览器存储，不同目录隔离；句柄、订阅及等待请求始终只属于本页。
 
@@ -131,6 +133,7 @@ const results = await reaper.transaction.batch([
 | `reaper.fs.stat(path)` | `{ path, exists, type, size }`；文件大小为字节，其他为 null |
 | `reaper.fs.readDirectory(path)` | 排序后的属性数组，额外包含 `name`，最多 4096 项 |
 | `reaper.fs.makeDirectory(path, { recursive?: boolean })` | 布尔值，表示是否创建目录 |
+| `reaper.fs.moveFile(source, destination, { overwrite?: boolean })` | `{source,path,bytes}`，在工作线程移动文件，默认不覆盖，支持跨卷 |
 | `reaper.clipboard.readText()` | UTF-8 文本，无文本时为空字符串 |
 | `reaper.clipboard.writeText(text)` | 布尔值 |
 | `reaper.system.openExternal(url)` | 布尔值，将 http/https/mailto 交给系统默认程序 |
@@ -271,7 +274,7 @@ assert(reaper.ReaWeb_Show(id), reaper.ReaWeb_GetLastError())
 
 ### 无边框窗口
 
-v0.3.8.16 起，Lua `ReaWeb_OpenEx` 和 JavaScript `window.open` 接受 `frameless?:boolean`（默认 `false`）及 `resizable?:boolean`（默认 `true`）。两者仅在创建时生效。复用实例保留原配置和文档，Reload 与 Dock/Undock 保留配置，两个字段不写入 WindowState。`resizable:false` 禁止交互式缩放及最大化，合法的 `setSize()` 调用和 Docker 布局仍然可用。原生 ABI、外部尺寸及原生坐标单位不变。
+v0.3.8.16 起，Lua `ReaWeb_OpenEx` 和 JavaScript `window.open` 接受 `frameless?:boolean`（默认 `false`）及 `resizable?:boolean`（默认 `true`）。两者设定初始配置。v0.3.9.2 起可通过 `window.setFrameless(boolean)` 更改当前会话的标题栏配置。复用实例保留原配置和文档，Reload 与 Dock/Undock 保留配置，两个字段不写入 WindowState。`resizable:false` 禁止交互式缩放及最大化，合法的 `setSize()` 调用和 Docker 布局仍然可用。原生 ABI、外部尺寸及原生坐标单位不变。
 
 ```lua
 local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","frameless":true,"resizable":true}')
@@ -282,11 +285,28 @@ assert(id > 0, reaper.ReaWeb_GetLastError())
 const id = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
 ```
 
-`getState()` 和 `windowstatechange` 增加 `frameless`、`resizable` 与 `framelessActive`。前两个字段表示创建配置，最后一个字段仅在独立无边框宿主内为 `true`。所有 Docker、浮动 Docker 和待恢复的保存停靠状态均为 `false`。Dock/Undock 保留 WebView 文档、句柄和订阅，原生标题和图标 API 的含义不变。
+`getState()` 和 `windowstatechange` 增加 `frameless`、`resizable` 与 `framelessActive`。`frameless` 表示当前会话配置，`resizable` 表示创建配置，`framelessActive` 仅在独立无边框宿主内为 `true`。所有 Docker、浮动 Docker 和待恢复的保存停靠状态均为 `false`。Dock/Undock 保留 WebView 文档、句柄和订阅，原生标题和图标 API 的含义不变。
 
-使用 `data-reaweb-drag` 与 `data-reaweb-no-drag` 声明[原生拖动区](frontend.zh-CN.md#原生拖动区)。不新增 `beginDrag`、`beginResize`、`setFrameless` 或 `setResizable`。[可运行示例](../web/frameless/README.md)提供可缩放与固定尺寸启动脚本，以及使用既有生命周期的关闭按钮。
+使用 `data-reaweb-drag` 与 `data-reaweb-no-drag` 声明[原生拖动区](frontend.zh-CN.md#原生拖动区)。`setFrameless(boolean)` 保留宿主、文档、窗口外部尺寸位置、可见状态和停靠关系。客户区随原生标题栏调整，不触发导航。`resizable` 仍仅在创建时设置。[可运行示例](../web/frameless/README.md)提供可缩放与固定尺寸启动脚本，以及使用既有生命周期的关闭按钮。
 
 `capabilities.runtime.window` 和诊断中的 `windowFeatures` 报告 `frameless`、`resizable`、`dragRegions` 及 `windowSystem`（`win32`、`appkit` 或 `x11`）。Windows 要求 WebView2 非客户区支持，Linux 要求 X11/XWayland 和支持 `_NET_WM_MOVERESIZE` 的窗口管理器，不支持原生 Wayland。不支持的创建选项明确失败，异步 WebView 初始化失败沿用既有错误报告和清理流程，不退化为带装饰的可见窗口。
+
+### 动态外观
+
+v0.3.9.2 起，`window.setFrameless(boolean)` 和 `window.setCornerRadius(radius)` 返回 `ReaWebWindowState`。配置在当前会话的重载和停靠切换中保留。在 Docker 内调用只记录浮动配置。JSFX 托管编辑器返回 `WINDOW_HOSTED`。
+
+`radius` 接受 `0..64` 的有限数值，单位为逻辑桌面单位，Windows 使用 96 DPI 单位，macOS 使用点，Linux 使用 GDK 单位。`0` 取消自定义裁剪。`getState()` 和 `windowstatechange` 包含 `cornerRadius` 与 `cornerRadiusActive`。停靠或最大化时暂停裁剪，恢复普通浮动后重新应用。原生圆角无需透明页面 CSS。
+
+Windows 的有标题栏与无标题栏窗口均支持自定义半径。macOS 和 Linux 的有标题栏窗口使用系统圆角，切换为无标题栏后应用保存的半径。通过 `capabilities.runtime.window.setFrameless` 和 `cornerRadius.{supported,framed,frameless,max}` 检测能力。Linux 要求 GDK3/X11 窗口形状支持，装饰切换效果取决于窗口管理器。支持小数半径，必要时按原生像素取整。
+
+```javascript
+await reaper.window.setCornerRadius(20);
+await reaper.window.setFrameless(true);
+// 在同一窗口恢复原生标题栏。
+await reaper.window.setFrameless(false);
+```
+
+网页右键菜单与原生窗口菜单保持一致，提供停靠、重载、DevTools、打开应用文件夹和关闭。浏览器默认项继续隐藏。应用可通过取消 DOM `contextmenu` 事件保留自定义菜单。
 
 ## 透明窗口
 

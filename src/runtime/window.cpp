@@ -420,6 +420,7 @@ Json Runtime::window_state(const Session& s) const {
     {"visible", s.window->visible()}, {"focused", s.window->focused()}, {"keyboardCapture", s.capture_keyboard},
     {"iconVisible", s.icon_visible}, {"frameless", s.frameless}, {"resizable", s.resizable},
     {"framelessActive", !is_docked(s.id) && s.window->frameless_active()},
+    {"cornerRadius", s.corner_radius}, {"cornerRadiusActive", !is_docked(s.id) && s.window->corner_radius_active()},
     {"transparent", s.transparent}, {"transparentActive", !is_docked(s.id) && s.window->transparent_active()}};
 }
 

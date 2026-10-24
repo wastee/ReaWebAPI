@@ -111,6 +111,7 @@ private:
     bool closing = false;
     bool background_start = false, pending_dock = false;
     bool frameless = false, resizable = true;
+    double corner_radius = 0;
     bool transparent = false;
     std::optional<bool> native_dock_request;
     std::shared_ptr<const IconSource> icon_source;

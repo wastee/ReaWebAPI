@@ -171,7 +171,7 @@ Hidden startup loads the same resources and Runtime without showing the native w
 
 ## Native drag regions
 
-For a window created with `{frameless:true}`, add `data-reaweb-drag` to a rectangular title region and `data-reaweb-no-drag` to custom interactive areas. Buttons, links, inputs, selects, textareas, editable/focusable elements and scrollable descendants are excluded automatically. Explicitly exclude custom controls, overlays and Shadow DOM hosts. Keep a visible close control calling `reaper.window.close()`.
+For a window using `{frameless:true}` or `window.setFrameless(true)`, add `data-reaweb-drag` to a rectangular title region and `data-reaweb-no-drag` to custom interactive areas. Buttons, links, inputs, selects, textareas, editable/focusable elements and scrollable descendants are excluded automatically. Explicitly exclude custom controls, overlays and Shadow DOM hosts. Keep a visible close control calling `reaper.window.close()`.
 
 ```html
 <header data-reaweb-drag>

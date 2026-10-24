@@ -9,16 +9,27 @@ class GtkDockMenu {
   GSimpleAction* action_;
   GSimpleAction* visibility_;
   GSimpleAction* mode_;
+  GSimpleAction* reload_;
+  GSimpleAction* folder_;
+  GSimpleAction* close_;
+  std::function<void(int)> window_action_;
   std::function<void()> toggle_;
   std::function<void(DevToolsAction)> devtools_;
   std::function<DevToolsMenuState()> state_;
   std::string app_name_;
 public:
   GtkDockMenu(WebKitWebView* view, std::function<void()> toggle,
-      std::function<void(DevToolsAction)> devtools = {}, std::function<DevToolsMenuState()> state = {}) : view_(view),
+      std::function<void(DevToolsAction)> devtools = {}, std::function<DevToolsMenuState()> state = {},
+      std::function<void(int)> window_action = {}) : view_(view),
       action_(g_simple_action_new_stateful("reaweb-dock", nullptr, g_variant_new_boolean(false))),
       visibility_(g_simple_action_new("reaweb-devtools", nullptr)), mode_(g_simple_action_new("reaweb-devtools-mode", nullptr)),
+      reload_(g_simple_action_new("reaweb-reload", nullptr)), folder_(g_simple_action_new("reaweb-folder", nullptr)),
+      close_(g_simple_action_new("reaweb-close", nullptr)), window_action_(std::move(window_action)),
       toggle_(std::move(toggle)), devtools_(std::move(devtools)), state_(std::move(state)) {
+    for (auto action : {reload_, folder_, close_}) g_signal_connect(action, "activate", G_CALLBACK(+[](GSimpleAction* action, GVariant*, gpointer data) {
+      auto self = static_cast<GtkDockMenu*>(data);
+      if (self->window_action_) self->window_action_(action == self->reload_ ? 2 : action == self->folder_ ? 5 : 6);
+    }), this);
     g_signal_connect(action_, "activate", G_CALLBACK(+[](GSimpleAction*, GVariant*, gpointer data) {
       auto self = static_cast<GtkDockMenu*>(data);
       if (self->toggle_) self->toggle_();
@@ -42,6 +53,7 @@ public:
         const auto label = "Dock " + self->app_name_ + " in Docker";
         webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->action_), label.c_str(), nullptr));
       }
+      if (self->window_action_) webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->reload_), "Reload", nullptr));
       if (self->devtools_ && self->state_) {
         const auto state = self->state_();
         g_simple_action_set_enabled(self->visibility_, state.available);
@@ -51,10 +63,15 @@ public:
         webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->mode_),
           state.floating ? "Embed DevTools" : "Float DevTools", nullptr));
       }
+      if (self->window_action_) {
+        webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->folder_), ("Open " + self->app_name_ + " Folder").c_str(), nullptr));
+        webkit_context_menu_append(menu, webkit_context_menu_item_new_from_gaction(G_ACTION(self->close_), ("Close " + self->app_name_).c_str(), nullptr));
+      }
       return FALSE;
     }), this);
   }
   ~GtkDockMenu() {
+    for (auto action : {reload_, folder_, close_}) { g_signal_handlers_disconnect_by_data(action, this); g_object_unref(action); }
     g_signal_handlers_disconnect_by_data(view_, this);
     g_signal_handlers_disconnect_by_data(action_, this);
     g_object_unref(action_);

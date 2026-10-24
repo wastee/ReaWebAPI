@@ -147,7 +147,7 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
   }()); });
   for (const auto& name : {"ReaWeb_GetWindowState", "ReaWeb_GetDiagnostics", "ReaWeb_Focus"})
     add(name, 0, 0, [this, name](const Json& a) { return controls_.host_call(name, a); });
-  for (const auto& name : {"ReaWeb_SetTitle", "ReaWeb_SetIcon", "ReaWeb_SetIconVisible", "ReaWeb_SetKeyboardCapture", "ReaWeb_Subscribe", "ReaWeb_Unsubscribe"})
+  for (const auto& name : {"ReaWeb_SetTitle", "ReaWeb_SetIcon", "ReaWeb_SetIconVisible", "ReaWeb_SetFrameless", "ReaWeb_SetCornerRadius", "ReaWeb_SetKeyboardCapture", "ReaWeb_Subscribe", "ReaWeb_Unsubscribe"})
     add(name, 1, 1, [this, name](const Json& a) { return controls_.host_call(name, a); });
   for (const auto& name : {"ReaWeb_HostSend", "ReaWeb_OpenDev", "ReaWeb_BeginUndo", "ReaWeb_EndUndo", "ReaWeb_ClipboardWriteText", "ReaWeb_OpenExternal"})
     add(name, 1, 1, [this, name](const Json& a) { return controls_.host_call(name, a); });
@@ -156,6 +156,7 @@ Bridge::Bridge(Host& host, Controls controls, std::string session)
   for (const auto& name : {"ReaWeb_ReadFile", "ReaWeb_ReadDirectory", "ReaWeb_Stat", "ReaWeb_MakeDirectory"})
     add(name, 1, 2, [this, name](const Json& a) { return controls_.host_call(name, a); });
   add("ReaWeb_WriteFile", 2, 3, [this](const Json& a) { return controls_.host_call("ReaWeb_WriteFile", a); });
+  add("ReaWeb_MoveFile", 2, 3, [this](const Json& a) { return controls_.host_call("ReaWeb_MoveFile", a); });
   for (const auto* name : {"ReaWeb_OpenMedia", "ReaWeb_CloseMedia"})
     add(name, 1, 1, [](const Json&) -> Json { throw Error("HOST_UNAVAILABLE", "Media URLs require a local App document"); });
   for (const auto& name : {"ReaWeb_GetBounds", "ReaWeb_GetTheme", "ReaWeb_GetLogs", "ReaWeb_Reload", "ReaWeb_GetAppInfo", "ReaWeb_GetPlatform", "ReaWeb_GetArchitecture"})

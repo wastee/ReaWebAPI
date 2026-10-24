@@ -12,7 +12,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - 支持 Lua 后端 + WebView UI，通过 `ReaWeb_Send`、`ReaWeb_Receive`、`reaper.host.send` 和 `message` 事件通信。
 - 可选 [External Client](docs/external-clients.zh-CN.md)，通过带认证的本机 WebSocket 复用 Native API、Batch、Service、Event 和二进制 Stream。服务默认关闭，可在 ReaWebAPI Preferences 中启用，默认地址为 `ws://127.0.0.1:9123`。
 - 可选[透明浮动窗口](docs/host-api.zh-CN.md#透明窗口)，支持桌面 Alpha、原生后端能力检测及原 Dock 偏好保留。
-- Windows、macOS 和 Linux X11/XWayland 支持可选的[无边框浮动窗口](docs/host-api.zh-CN.md#无边框窗口)、原生拖动区和创建时缩放配置。
+- [无边框浮动窗口](docs/host-api.zh-CN.md#无边框窗口)支持动态切换标题栏、原生圆角和拖动区，覆盖 Windows、macOS 与 Linux X11/XWayland。
 - 15 个 Runtime 命名空间，涵盖窗口、事件、文件、原生对话框、拖放、音频、Undo 和应用服务。
 - 稳定的 `reaweb://<appId>` 来源，原生加载本地资源、模块和 Worker，持久化 App 存储，不创建每 App TCP listener。
 - [浏览器文件与媒体](docs/browser-media.md)，支持可选的 Blob 导出，以及绑定文档生命周期的只读媒体 URL、有界流式读取和跳转。
@@ -22,7 +22,7 @@ ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩�
 - Windows、macOS 和 Linux 在宿主空闲时准备空白 WebView 容器池，普通 App 与 JSFX 共用。[启动诊断](docs/devtools.zh-CN.md#启动计时)分别记录容器池使用情况、JSFX 初始化与缓存复激活、宿主观察计数、背景同步和原生显示。
 - Windows/Linux [DevTools](docs/devtools.zh-CN.md) 支持可调宽度的右侧面板、浮动模式和布局偏好保存，Ctrl+Shift+I 切换显示。Windows 提供无边框嵌入面板、原生浮动窗口及页面右键菜单控制。
 - macOS [Web Inspector](docs/devtools.zh-CN.md#macos) 支持右侧嵌入面板、原生浮动窗口和布局偏好保存，Option+Command+I 与页面右键菜单控制同一个检查器会话。
-- WebView 右键菜单提供停靠和 DevTools 控制。Docker 页签菜单另提供刷新、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
+- WebView、标题栏与 Docker 页签右键菜单统一提供停靠、刷新、DevTools、打开 App 文件夹和关闭操作。HTML favicon 或 `reaper.window.setIcon(path)` 设置的 PNG、ICO、SVG 窗口图标在停靠切换和重载后保留，通过 `reaper.window.setIconVisible(boolean)` 即时控制显示，包括默认启动图标。Windows、macOS 和 Linux 的浮动 Docker 标题栏跟随当前 WebView 的图标设置。
 - JavaScript、TypeScript 模板，Runtime Studio 示例和中英文文档。
 
 Windows WebView 遵循 **Hide pointer while typing** 设置，输入时隐藏光标，在 REAPER 原生窗口上移动鼠标后恢复。参见[光标行为](docs/frontend.zh-CN.md#文本输入时的鼠标光标)。

@@ -68,6 +68,9 @@ interface ReaWebWindowState {
   frameless: boolean;
   resizable: boolean;
   framelessActive: boolean;
+  /** Requested radius in logical desktop units, 0..64. Zero clears custom clipping. */
+  cornerRadius: number;
+  cornerRadiusActive: boolean;
   /** Creation-time request. Transparent windows cannot be docked. */
   transparent: boolean;
   /** Native desktop Alpha has been established, independently of page CSS. */

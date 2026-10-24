@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
       std::vector<WebKitContextMenuItem*> defaults;
       bool docked = false, select = true;
       int toggles = 0, requested = 0;
+      std::vector<int> commands;
       reaweb::GtkDevTools* tools = nullptr;
       std::string error;
       std::string app_name = "ReaGBA";
@@ -64,7 +65,7 @@ int main(int argc, char** argv) {
       state.tools = &tools;
       gtk_widget_show_all(window);
       reaweb::GtkDockMenu docking(view, [&] { state.docked = !state.docked; ++state.toggles; },
-        [&](reaweb::DevToolsAction action) { tools.perform(action); }, [&] { return tools.menu_state(); });
+        [&](reaweb::DevToolsAction action) { tools.perform(action); }, [&] { return tools.menu_state(); }, [&](int command) { state.commands.push_back(command); });
       docking.set_app_name(state.app_name);
       g_signal_connect(view, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu* menu, GdkEvent*, WebKitHitTestResult*, gpointer data) -> gboolean {
         auto& state = *static_cast<State*>(data);
@@ -73,7 +74,7 @@ int main(int argc, char** argv) {
             CHECK(!webkit_context_menu_get_n_items(menu));
             return FALSE;
           }
-          CHECK(webkit_context_menu_get_n_items(menu) == 3);
+          CHECK(webkit_context_menu_get_n_items(menu) == 6);
           auto item = webkit_context_menu_first(menu);
           G_GNUC_BEGIN_IGNORE_DEPRECATIONS
           CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(item)), ("Dock " + state.app_name + " in Docker").c_str()));
@@ -81,13 +82,19 @@ int main(int argc, char** argv) {
           auto checked = g_action_get_state(webkit_context_menu_item_get_gaction(item));
           CHECK(checked && !!g_variant_get_boolean(checked) == state.docked); g_variant_unref(checked);
           const auto current = state.tools->menu_state();
-          auto visibility = webkit_context_menu_get_item_at_position(menu, 1);
-          auto mode = webkit_context_menu_get_item_at_position(menu, 2);
+          auto visibility = webkit_context_menu_get_item_at_position(menu, 2);
+          auto mode = webkit_context_menu_get_item_at_position(menu, 3);
           G_GNUC_BEGIN_IGNORE_DEPRECATIONS
           CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(visibility)), current.shown ? "Hide DevTools" : "Open DevTools"));
           CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(mode)), current.floating ? "Embed DevTools" : "Float DevTools"));
           G_GNUC_END_IGNORE_DEPRECATIONS
           CHECK(!!g_action_get_enabled(webkit_context_menu_item_get_gaction(mode)) == current.mode_enabled());
+          G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(webkit_context_menu_get_item_at_position(menu, 1))), "Reload"));
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(webkit_context_menu_get_item_at_position(menu, 4))), ("Open " + state.app_name + " Folder").c_str()));
+          CHECK(!g_strcmp0(gtk_action_get_label(webkit_context_menu_item_get_action(webkit_context_menu_get_item_at_position(menu, 5))), ("Close " + state.app_name).c_str()));
+          G_GNUC_END_IGNORE_DEPRECATIONS
+          if (state.select) for (int index : {1, 4, 5}) g_action_activate(webkit_context_menu_item_get_gaction(webkit_context_menu_get_item_at_position(menu, index)), nullptr);
           if (state.select) g_action_activate(webkit_context_menu_item_get_gaction(item), nullptr);
         } catch (const std::exception& error) { state.error = error.what(); }
         ++state.requested; return TRUE;
@@ -101,6 +108,7 @@ int main(int argc, char** argv) {
         docking.set_docked(state.docked); right_click(view, 250);
         until([&] { return state.requested == i + 1; }); CHECK(state.error.empty() && state.toggles == i + 1);
       }
+      CHECK(state.commands == std::vector<int>({2,5,6,2,5,6}));
       state.docked = true; state.select = false; docking.set_docked(true);
       for (double y : {25, 90, 165}) {
         script(view, "getSelection().selectAllChildren(document.getElementById('text'))");

@@ -291,7 +291,7 @@ public:
       auto message = jsc_value_to_string(value);
       try {
         if (strlen(message) > message_limit) self->fail("JavaScript message limit exceeded");
-        else if (self->frameless_ && self->drag_regions_.message(message)) {}
+        else if (self->drag_regions_.message(message)) {}
         else if (!page_background_message(message, [self](unsigned color) { self->set_background(color); }))
           self->channel_.send({{"id", self->id_}, {"op", "message"}, {"message", message}});
       } catch (const std::exception& error) { self->fail(error.what()); }
@@ -303,7 +303,7 @@ public:
     }
     const auto source = request.at("script").get<std::string>() +
       (transparent_ ? "" : page_background_script("webkit.messageHandlers.reaweb.postMessage(message);")) +
-      (frameless_ ? drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);") : "");
+      drag_regions_script("webkit.messageHandlers.reaweb.postMessage(message);");
     auto script = webkit_user_script_new(source.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(manager_, script);
@@ -425,7 +425,10 @@ public:
       try { channel_.send({{"id", id_}, {"op", "dock-toggle"}}); }
       catch (const std::exception& error) { fail(error.what()); }
     }) : std::function<void()>{}, [this](DevToolsAction action) { devtools_->perform(action); },
-      [this] { return devtools_->menu_state(); });
+      [this] { return devtools_->menu_state(); }, [this](int command) {
+        try { channel_.send({{"id", id_}, {"op", "window-menu"}, {"command", command}}); }
+        catch (const std::exception& error) { fail(error.what()); }
+      });
     dock_menu_->set_app_name(request.value("appName", std::string()));
     gtk_widget_realize(plug_);
     // A global filter: events of the foreign parent window have no GdkWindow in
@@ -484,7 +487,11 @@ public:
   }
   void command(const Json& request) {
     const auto op = request.at("op").get<std::string>();
-    if (op == "eval") {
+    if (op == "frameless") {
+      frameless_ = request.at("value").get<bool>();
+      const auto script = frameless_ && !docked_ ? "window.__reawebDragRegionsActive?.(true);" : "window.__reawebDragRegionsActive?.(false);";
+      webkit_web_view_evaluate_javascript(view_, script, -1, nullptr, nullptr, nullptr, nullptr, nullptr);
+    } else if (op == "eval") {
       const auto script = request.at("script").get<std::string>();
       webkit_web_view_evaluate_javascript(view_, script.c_str(), static_cast<gssize>(script.size()), nullptr, nullptr, nullptr, nullptr, nullptr);
     } else if (op == "media-clear") {

@@ -47,12 +47,12 @@ inline std::string drag_regions_script(const std::string& send, bool windows = f
   return R"JS(
 ;(() => {
   const interactive = '[data-reaweb-no-drag],button,a,input,select,textarea,summary,iframe,video,audio,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="slider"],[role="textbox"],[tabindex]';
-  let active = true, previous = '', last = 0;
+  let active = false, previous = '', last = 0;
   const nativeCSS = )JS" + std::string(windows ? "true" : "false") + R"JS(;
   const style = document.createElement('style');
   const css = '[data-reaweb-drag]{app-region:drag;-webkit-app-region:drag;user-select:none;-webkit-user-select:none}' +
     interactive + ',[data-reaweb-scroll]{app-region:no-drag;-webkit-app-region:no-drag;user-select:auto;-webkit-user-select:auto}';
-  const update = value => { active = !!value; if (nativeCSS) style.textContent = active ? css : ''; };
+  const update = value => { if (active !== !!value) previous = ''; active = !!value; if (nativeCSS) style.textContent = active ? css : ''; };
   Object.defineProperty(window, '__reawebDragRegionsActive', { value: update });
   const rects = element => {
     const s = getComputedStyle(element);

@@ -17,10 +17,12 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include "platform/windows/win_devtools.hpp"
 #include "platform/windows/win_icon.hpp"
 #include "platform/windows/win_dock_redraw.hpp"
 #include "platform/windows/win_cursor.hpp"
+#include "platform/windows/win_resize_edges.hpp"
 #include "platform/windows/win_context_menu.hpp"
 #include "platform/windows/win_resources.hpp"
 #include "platform/shared/window_menu.hpp"
@@ -167,6 +169,7 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   WinIcon icon_;
   WinDockRedraw dock_redraw_;
   WinCursor cursor_;
+  WinResizeEdges resize_edges_;
   COLORREF background_ = RGB(255, 255, 255);
   StartupPresentation startup_;
   HWND startup_foreground_ = GetForegroundWindow();
@@ -175,6 +178,9 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   bool startup_region_ = false;
   bool drag_regions_supported_ = false;
   bool alpha_ready_ = false, alpha_supported_ = false;
+  double corner_radius_ = 0;
+  bool custom_region_ = false;
+  int region_width_ = -1, region_height_ = -1, region_radius_ = -1;
   static bool desktop_composition() {
     BOOL enabled = FALSE;
     return SUCCEEDED(DwmIsCompositionEnabled(&enabled)) && enabled;
@@ -198,9 +204,24 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
   }
   int resize_border() const { return options_.resizable && !IsZoomed(hwnd_) ? std::max(4, MulDiv(6, GetDpiForWindow(hwnd_), 96)) : 0; }
   void configure_frame() {
-    if (!options_.frameless || !floating()) return;
-    const auto policy = options_.transparent ? DWMNCRP_ENABLED : DWMNCRP_DISABLED;
+    if (!floating()) return;
+    const auto policy = options_.frameless && !options_.transparent ? DWMNCRP_DISABLED : DWMNCRP_ENABLED;
     check(DwmSetWindowAttribute(hwnd_, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy)), "Configure frameless border");
+    const DWORD corners = options_.frameless ? 1 : 0; // DWMWCP_DONOTROUND / DEFAULT, Windows 11.
+    DwmSetWindowAttribute(hwnd_, 33, &corners, sizeof(corners));
+  }
+  void update_region() {
+    if (!hwnd_ || startup_region_) return;
+    if (!custom_region_) return;
+    RECT rect{}; GetWindowRect(hwnd_, &rect);
+    const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    const int radius = corner_radius_active() ? std::min({int(std::lround(corner_radius_ * GetDpiForWindow(hwnd_) / 96.0)), width / 2, height / 2}) : 0;
+    if (width == region_width_ && height == region_height_ && radius == region_radius_) return;
+    HRGN region = radius ? CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2) : nullptr;
+    if (!radius && frameless_active() && !IsZoomed(hwnd_)) region = CreateRectRgn(0, 0, width, height);
+    if (radius && !region) return;
+    if (SetWindowRgn(hwnd_, region, TRUE)) { region_width_ = width; region_height_ = height; region_radius_ = radius; }
+    else if (region) DeleteObject(region);
   }
   void prepare_startup() {
     snapshot_requested_ = startup_.generation();
@@ -264,6 +285,8 @@ class WinWindow final : public Window, public std::enable_shared_from_this<WinWi
     RECT rect{}; GetClientRect(hwnd_, &rect);
     if (devtools_) rect = devtools_->layout(rect);
     if (controller_) controller_->put_Bounds(rect);
+    resize_edges_.sync(hwnd_, controller_ && frameless_active() && resize_border());
+    update_region();
   }
 public:
   static LRESULT CALLBACK proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -285,19 +308,10 @@ public:
             MONITORINFO monitor{sizeof(monitor)};
             if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
               reinterpret_cast<NCCALCSIZE_PARAMS*>(lp)->rgrc[0] = monitor.rcWork;
-          } else InflateRect(reinterpret_cast<RECT*>(lp), -self->resize_border(), -self->resize_border());
-          return 0;
-        }
-        if (msg == WM_NCPAINT) {
-          auto dc = GetWindowDC(hwnd);
-          if (dc) {
-            RECT r{}; GetWindowRect(hwnd, &r); OffsetRect(&r, -r.left, -r.top);
-            const auto edge = self->resize_border();
-            ExcludeClipRect(dc, edge, edge, r.right - edge, r.bottom - edge);
-            auto brush = CreateSolidBrush(self->background_); FillRect(dc, &r, brush); DeleteObject(brush); ReleaseDC(hwnd, dc);
           }
           return 0;
         }
+        if (msg == WM_NCPAINT) return 0;
         if (msg == WM_NCACTIVATE) return TRUE;
         if (msg == WM_NCHITTEST) {
           if (!self->options_.resizable || IsZoomed(hwnd)) return HTCLIENT;
@@ -418,6 +432,7 @@ public:
     const auto cloak_result = DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloaked, sizeof(cloaked));
     if (FAILED(cloak_result)) { DestroyWindow(hwnd_); check(cloak_result, "Cloak initial window"); }
     try { configure_frame(); configure_transparency(); } catch (...) { DestroyWindow(hwnd_); throw; }
+    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     if (!options_.hidden) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   }
   ~WinWindow() override {
@@ -499,8 +514,9 @@ public:
     if (SUCCEEDED(settings.As(&settings3))) settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
     ComPtr<ICoreWebView2Settings9> settings9;
     drag_regions_supported_ = SUCCEEDED(settings.As(&settings9));
-    if (options_.frameless) {
-      if (!drag_regions_supported_) throw Error("HOST_UNAVAILABLE", "Frameless windows require WebView2 non-client region support");
+    if (options_.frameless && !drag_regions_supported_)
+      throw Error("HOST_UNAVAILABLE", "Frameless windows require WebView2 non-client region support");
+    if (drag_regions_supported_) {
       check(settings9->put_IsNonClientRegionSupportEnabled(TRUE), "Enable native drag regions");
     }
     EventRegistrationToken token{};
@@ -554,6 +570,17 @@ public:
     }, [weak] {
       auto self = weak.lock();
       return self ? self->dock_label() : std::wstring();
+    }, [weak] {
+      if (auto self = weak.lock(); self && !self->closed_)
+        if (!self->options_.on_reload || !self->options_.on_reload()) self->reload();
+    }, [weak] {
+      if (auto self = weak.lock(); self && !self->closed_)
+        ShellExecuteW(self->hwnd_, L"open", self->options_.entry.parent_path().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    }, [weak] {
+      if (auto self = weak.lock(); self && !self->closed_ && self->options_.on_close) self->options_.on_close();
+    }, [weak] {
+      auto self = weak.lock();
+      return self ? wide(self->options_.app_name ? self->options_.app_name() : self->options_.title) : std::wstring();
     }), "Install window context menu");
     check(controller_->add_AcceleratorKeyPressed(Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
       [weak](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {
@@ -639,7 +666,7 @@ public:
     check(webview_->AddScriptToExecuteOnDocumentCreated(wide(options_.script +
       (options_.transparent ? transparent_page_script("chrome.webview.postMessage('__reawebPresent');") :
         page_background_script("chrome.webview.postMessage(message);")) + WinCursor::script +
-      (options_.frameless ? drag_regions_script("", true) : "")).c_str(),
+      drag_regions_script("", true)).c_str(),
       Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
         [weak](HRESULT result, LPCWSTR) -> HRESULT {
           if (auto self = weak.lock(); self && !self->closed_) {
@@ -699,6 +726,8 @@ public:
       }
     }
     if (!closed_) cursor_.tick();
+    if (!closed_) update_region();
+    if (!closed_) resize_edges_.sync(hwnd_, controller_ && frameless_active() && resize_border());
     if (!closed_ && !options_.hosted) dock_redraw_.sync(hwnd_);
     if (!closed_ && !options_.hosted) icon_.refresh(hwnd_, icon_host());
     if (!closed_ && devtools_) devtools_->tick(webview_.Get());
@@ -823,9 +852,23 @@ public:
       {"controllerVisible", visible_}, {"devtools", devtools_->diagnostics()}, {"windowFeatures", window_capabilities()}};
   }
   bool frameless_active() const override { return options_.frameless && !closed_ && floating(); }
+  void set_frameless(bool value) override {
+    if (options_.frameless == value) return;
+    if (value && !drag_regions_supported_) throw Error("HOST_UNAVAILABLE", "Frameless windows require WebView2 non-client region support");
+    options_.frameless = value;
+    if (!floating()) return;
+    region_width_ = -1;
+    configure_frame();
+    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    layout(); update_region();
+    evaluate(value ? "window.__reawebDragRegionsActive?.(true);" : "window.__reawebDragRegionsActive?.(false);");
+    RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+  }
+  void set_corner_radius(double value) override { corner_radius_ = value; custom_region_ = true; region_width_ = -1; update_region(); }
+  bool corner_radius_active() const override { return corner_radius_ > 0 && floating() && !IsZoomed(hwnd_) && !IsIconic(hwnd_); }
   bool transparent_active() const override { return options_.transparent && alpha_ready_ && !closed_ && floating() && desktop_composition(); }
   Json window_capabilities() const override {
-    return {{"hiddenStart", true}, {"frameless", drag_regions_supported_}, {"resizable", true},
+    return {{"hiddenStart", true}, {"frameless", drag_regions_supported_}, {"setFrameless", drag_regions_supported_}, {"cornerRadius", {{"supported", true}, {"framed", true}, {"frameless", true}, {"max", 64}}}, {"resizable", true},
       {"transparent", true}, {"transparency", transparency_capabilities(alpha_supported_ && desktop_composition(), "dwm-hwnd",
         !desktop_composition() ? "DWM composition is unavailable" : !alpha_supported_ ? "WebView2 Controller2 is not ready or unavailable" : "", drag_regions_supported_)},
       {"dragRegions", drag_regions_supported_}, {"windowSystem", "win32"}};
@@ -891,6 +934,8 @@ public:
   void prepare_dock() override {
     if (options_.transparent) throw Error("DOCK_UNAVAILABLE", "Transparent windows require a standalone floating host");
     if (options_.frameless) evaluate("window.__reawebDragRegionsActive?.(false);");
+    if (!startup_region_) SetWindowRgn(hwnd_, nullptr, TRUE);
+    region_width_ = -1;
     if (startup_.pending() && !startup_region_) {
       // DWM cannot uncloak an HWND after it becomes a non-layered child.
       auto region = CreateRectRgn(0, 0, 0, 0);
@@ -915,12 +960,14 @@ public:
     // Clearing the startup region while docked leaves DWM non-client rendering disabled.
     // Refresh it as a top-level window, unless the first frame still needs the empty region.
     if (!startup_region_) SetWindowRgn(hwnd_, nullptr, FALSE);
+    region_width_ = -1;
     icon_.refresh(hwnd_);
     restore_placement({{"x", floating_rect_.left}, {"y", floating_rect_.top},
       {"width", floating_rect_.right - floating_rect_.left}, {"height", floating_rect_.bottom - floating_rect_.top}, {"maximized", maximized_}});
     if (startup_.pending() && startup_.wanted()) ShowWindow(hwnd_, SW_SHOWNA);
     if (controller_) controller_->NotifyParentWindowPositionChanged();
     if (options_.frameless) evaluate("window.__reawebDragRegionsActive?.(true);");
+    update_region();
     if (!startup_.pending()) {
       if (maximized_) ShowWindow(hwnd_, SW_SHOWMAXIMIZED);
       focus();

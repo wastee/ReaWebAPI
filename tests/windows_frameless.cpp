@@ -33,12 +33,47 @@ int main() {
       };
       pump(2000); CHECK(!IsWindowVisible(hwnd)); CHECK(window->frameless_active());
       RECT initial_client{}, initial_outer{}; GetClientRect(hwnd, &initial_client); GetWindowRect(hwnd, &initial_outer);
-      CHECK(initial_client.right == initial_outer.right - initial_outer.left - (resizable ? 12 : 0));
-      CHECK(initial_client.bottom == initial_outer.bottom - initial_outer.top - (resizable ? 12 : 0));
+      CHECK(initial_client.right == initial_outer.right - initial_outer.left);
+      CHECK(initial_client.bottom == initial_outer.bottom - initial_outer.top);
       window->restore_placement({{"x", 200}, {"y", 180}, {"width", 600}, {"height", 400}});
       window->show(); window->focus(); pump(600); CHECK(window->visible());
       RECT client{}, outer{}; GetClientRect(hwnd, &client); GetWindowRect(hwnd, &outer);
-      CHECK(client.right == outer.right - outer.left - (resizable ? 12 : 0) && client.bottom == outer.bottom - outer.top - (resizable ? 12 : 0));
+      CHECK(client.right == outer.right - outer.left && client.bottom == outer.bottom - outer.top);
+      const auto check_pixels = [&] {
+        GetWindowRect(hwnd, &outer);
+        auto dc = GetDC(nullptr);
+        const auto color = GetPixel(dc, outer.left + 30, outer.top + 200);
+        bool clear = true;
+        for (const auto& point : std::vector<POINT>{{2,200},{598,200},{300,2},{300,398}})
+          clear = clear && GetPixel(dc, outer.left + point.x, outer.top + point.y) == color;
+        ReleaseDC(nullptr, dc); CHECK(clear);
+      };
+      check_pixels();
+      for (int i = 0; i < 3; ++i) {
+        window->set_frameless(false); pump(150);
+        CHECK(!window->frameless_active());
+        RECT framed{}; GetWindowRect(hwnd, &framed); CHECK(EqualRect(&framed, &outer));
+        window->set_frameless(true); pump(150);
+        RECT restored{}; GetWindowRect(hwnd, &restored); CHECK(EqualRect(&restored, &outer));
+        check_pixels();
+      }
+      window->evaluate("document.documentElement.style.background='#a52e73'"); pump(200); check_pixels();
+      window->set_corner_radius(24);
+      auto region = CreateRectRgn(0,0,0,0);
+      CHECK(GetWindowRgn(hwnd, region) != ERROR && !PtInRegion(region, 0, 0) && PtInRegion(region, 300, 2));
+      CHECK(window->corner_radius_active());
+      window->set_frameless(false); pump(100); CHECK(window->corner_radius_active());
+      window->set_frameless(true); pump(100);
+      if (resizable) {
+        ShowWindow(hwnd, SW_MAXIMIZE); pump(150); CHECK(!window->corner_radius_active());
+        const auto type = GetWindowRgn(hwnd, region);
+        CHECK(type == ERROR || type == SIMPLEREGION);
+        ShowWindow(hwnd, SW_RESTORE); pump(150); CHECK(window->corner_radius_active());
+      }
+      window->set_corner_radius(0); CHECK(GetWindowRgn(hwnd, region) != COMPLEXREGION); DeleteObject(region);
+      window->set_visible(false); window->set_frameless(false); window->set_frameless(true); pump(100); CHECK(!window->visible());
+      window->show(); window->focus(); pump(200); check_pixels();
+      std::cout << "PASS: full-bleed pixels, live title toggles, outer bounds, hidden state and native corner clipping\n";
       const auto gesture = [&](int x, int y, int dx, int dy) {
         std::atomic<bool> done{false};
         std::thread input([&] {
@@ -75,7 +110,10 @@ int main() {
       SetWindowLongPtrW(hwnd, GWL_STYLE, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN); SetParent(hwnd, host);
       SetWindowPos(hwnd, nullptr, 0, 0, 700, 450, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED); pump(300);
       CHECK(!window->frameless_active()); CHECK(GetWindowLongPtrW(host, GWL_STYLE) == host_style);
+      window->set_frameless(false); window->set_corner_radius(32); window->set_frameless(true);
+      CHECK(!window->corner_radius_active());
       docked = false; window->restore_floating(); pump(300); CHECK(window->frameless_active());
+      CHECK(window->corner_radius_active()); window->set_corner_radius(0);
       window->evaluate("chrome.webview.postMessage(documentMarker===731?'button':'lost')"); pump(200); CHECK(clicks == 2);
       DestroyWindow(host);
       window->restore_placement({{"x", 200}, {"y", 180}, {"width", 432}, {"height", 321}}); pump(100);

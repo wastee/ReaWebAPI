@@ -30,6 +30,8 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
     "setDocked",
     "setIcon",
     "setIconVisible",
+    "setFrameless",
+    "setCornerRadius",
     "isDocked",
     "setKeyboardCapture",
     "close",
@@ -73,7 +75,8 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
     "writeFile",
     "stat",
     "readDirectory",
-    "makeDirectory"
+    "makeDirectory",
+    "moveFile"
   ],
   "audio": [
     "openStream",
@@ -162,6 +165,10 @@ test('Migrated host services keep their native argument and result contracts', a
     ['window','setIcon','ReaWeb_SetIcon',['logo.svg'],true],
     ['window','setIconVisible','ReaWeb_SetIconVisible',[true],true],
     ['window','setIconVisible','ReaWeb_SetIconVisible',[false],true],
+    ['window','setFrameless','ReaWeb_SetFrameless',[false],{frameless:false}],
+    ['window','setFrameless','ReaWeb_SetFrameless',[true],{frameless:true}],
+    ['window','setCornerRadius','ReaWeb_SetCornerRadius',[24.5],{cornerRadius:24.5}],
+    ['fs','moveFile','ReaWeb_MoveFile',['input.wav','output.wav',{overwrite:true}],{source:'input.wav',path:'output.wav',bytes:4}],
     ['window','isDocked','ReaWeb_IsDocked',[],false],
     ['window','setKeyboardCapture','ReaWeb_SetKeyboardCapture',[false],false],
     ['system','getCapabilities','ReaWeb_GetCapabilities',[],{runtime:{contract:2}}],

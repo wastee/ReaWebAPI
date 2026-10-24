@@ -171,7 +171,7 @@ WebView2 取决于已安装运行时，WKWebView 跟随系统更新，WebKitGTK 
 
 ## 原生拖动区
 
-以 `{frameless:true}` 创建窗口后，在矩形标题区域添加 `data-reaweb-drag`，在自定义交互区域添加 `data-reaweb-no-drag`。按钮、链接、输入框、选择框、文本框、可编辑或可聚焦元素及可滚动后代自动排除。自定义控件、覆盖层及 Shadow DOM 宿主应显式排除。页面应保留调用 `reaper.window.close()` 的可见关闭控件。
+以 `{frameless:true}` 创建窗口或调用 `window.setFrameless(true)` 后，在矩形标题区域添加 `data-reaweb-drag`，在自定义交互区域添加 `data-reaweb-no-drag`。按钮、链接、输入框、选择框、文本框、可编辑或可聚焦元素及可滚动后代自动排除。自定义控件、覆盖层及 Shadow DOM 宿主应显式排除。页面应保留调用 `reaper.window.close()` 的可见关闭控件。
 
 ```html
 <header data-reaweb-drag>

@@ -196,6 +196,21 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   }
   if (method == "ReaWeb_GetDiagnostics") return diagnostics(id);
   if (method == "ReaWeb_GetWindowState") return window_state(s);
+  if (method == "ReaWeb_SetFrameless") {
+    if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected a frameless boolean");
+    if (s.jsfx) throw Error("WINDOW_HOSTED", "REAPER controls the JSFX editor frame");
+    const auto value = args[0].get<bool>();
+    s.window->set_frameless(value); s.frameless = value;
+    return window_state(s);
+  }
+  if (method == "ReaWeb_SetCornerRadius") {
+    if (!args[0].is_number() || !std::isfinite(args[0].get<double>()) || args[0].get<double>() < 0 || args[0].get<double>() > 64)
+      throw Error("INVALID_ARGUMENT", "Corner radius must be a finite number from 0 to 64");
+    if (s.jsfx) throw Error("WINDOW_HOSTED", "REAPER controls the JSFX editor frame");
+    const auto value = args[0].get<double>();
+    s.window->set_corner_radius(value); s.corner_radius = value;
+    return window_state(s);
+  }
   if (method == "ReaWeb_Focus") return focus(id);
   if (method == "ReaWeb_SetIconVisible") {
     if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected an icon visibility boolean");

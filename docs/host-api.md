@@ -41,7 +41,9 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | `reaper.window.setDocked(docked)` | `boolean` | Returns the actual docked state, preserving the page |
 | `reaper.window.isDocked()` | `boolean` | Reads docked state |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | Default `true`. Setting `false` allows REAPER's normal global shortcut policy |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive`, `transparent`, `transparentActive` |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive`, `transparent`, `transparentActive`, `cornerRadius`, `cornerRadiusActive` |
+| `reaper.window.setFrameless(value)` | `ReaWebWindowState` | Show or hide the native title bar on the same window |
+| `reaper.window.setCornerRadius(radius)` | `ReaWebWindowState` | Native corner radius `0..64`, suspended while docked or maximized |
 
 Window placement and docking are persisted by entry file and instance slot. At most 32 ReaWebAPI windows can be open. Handles, subscriptions and pending requests remain document-local while browser storage is isolated by App ID.
 
@@ -131,6 +133,7 @@ Files run on the worker thread; REAPER APIs remain on the main thread. These API
 | `reaper.fs.stat(path)` | `{ path, exists, type, size }`; size is bytes for files, otherwise null |
 | `reaper.fs.readDirectory(path)` | Sorted stat entries with `name`; maximum 4096 entries |
 | `reaper.fs.makeDirectory(path, { recursive?: boolean })` | Whether a directory was created |
+| `reaper.fs.moveFile(source, destination, { overwrite?: boolean })` | `{source,path,bytes}`, worker-thread move, no overwrite by default, cross-volume supported |
 | `reaper.clipboard.readText()` | UTF-8 text, empty string if no text |
 | `reaper.clipboard.writeText(text)` | Boolean |
 | `reaper.system.openExternal(url)` | Boolean; sends http/https/mailto to the OS default handler |
@@ -271,7 +274,7 @@ Native plugins discover `int (*)(const char*, const char*)` for `ReaWeb_OpenEx` 
 
 ### Frameless windows
 
-Since v0.3.8.16, Lua `ReaWeb_OpenEx` and JavaScript `window.open` accept `frameless?:boolean` (default `false`) and `resizable?:boolean` (default `true`). These are creation options. Reused instances retain their configuration and document. Reload and Dock/Undock retain both flags, which are not saved in WindowState. `resizable:false` disables interactive resizing, including maximize, while valid `setSize()` calls and Docker layout remain available. Existing native ABIs and native-unit outer bounds are unchanged.
+Since v0.3.8.16, Lua `ReaWeb_OpenEx` and JavaScript `window.open` accept `frameless?:boolean` (default `false`) and `resizable?:boolean` (default `true`). These set the initial configuration. Since v0.3.9.2, `window.setFrameless(boolean)` changes the current session configuration. Reused instances retain their configuration and document. Reload and Dock/Undock retain both flags, which are not saved in WindowState. `resizable:false` disables interactive resizing, including maximize, while valid `setSize()` calls and Docker layout remain available. Existing native ABIs and native-unit outer bounds are unchanged.
 
 ```lua
 local id = reaper.ReaWeb_OpenEx(path, '{"instanceKey":"my-app","frameless":true,"resizable":true}')
@@ -282,11 +285,28 @@ assert(id > 0, reaper.ReaWeb_GetLastError())
 const id = await reaper.window.open('other/index.html', {frameless:true, resizable:false});
 ```
 
-`getState()` and `windowstatechange` include `frameless`, `resizable` and `framelessActive`. The first two are creation flags. The last identifies an independently hosted frameless window and is false in all Docker containers, including floating Dockers and pending saved Dock restoration. Dock/Undock retains the WebView document, handles and subscriptions. Native title and icon APIs keep their existing meaning.
+`getState()` and `windowstatechange` include `frameless`, `resizable` and `framelessActive`. `frameless` is the current session preference and `resizable` is the creation flag. The last identifies an independently hosted frameless window and is false in all Docker containers, including floating Dockers and pending saved Dock restoration. Dock/Undock retains the WebView document, handles and subscriptions. Native title and icon APIs keep their existing meaning.
 
-Use `data-reaweb-drag` and `data-reaweb-no-drag` for [native drag regions](frontend.md#native-drag-regions). No `beginDrag`, `beginResize`, `setFrameless` or `setResizable` method is added. The [runnable Demo](../web/frameless/README.md) includes resizable/fixed launchers and a lifecycle-aware close button.
+Use `data-reaweb-drag` and `data-reaweb-no-drag` for [native drag regions](frontend.md#native-drag-regions). `setFrameless(boolean)` retains the host, document, outer bounds, visibility and Docker membership. The client viewport adjusts to the native title bar without navigation. `resizable` remains creation-only. The [runnable Demo](../web/frameless/README.md) includes resizable/fixed launchers and a lifecycle-aware close button.
 
 `capabilities.runtime.window` and diagnostics `windowFeatures` report `frameless`, `resizable`, `dragRegions` and `windowSystem` (`win32`, `appkit` or `x11`). Windows requires WebView2 non-client region support. Linux requires X11/XWayland with `_NET_WM_MOVERESIZE` support. Native Wayland is unsupported. Unsupported creation fails explicitly. Asynchronous WebView initialization failures follow the existing error and cleanup path. No fallback to a decorated visible window is performed.
+
+### Runtime appearance
+
+Since v0.3.9.2, `window.setFrameless(boolean)` and `window.setCornerRadius(radius)` resolve to `ReaWebWindowState`. Both settings survive reload and Dock/Undock within the session. Docker changes are deferred until floating. JSFX-hosted editors reject these methods with `WINDOW_HOSTED`.
+
+`radius` must be finite and in `0..64`, measured in logical desktop units (96-DPI units on Windows, points on macOS, GDK units on Linux). `0` removes custom clipping. `getState()` and `windowstatechange` include `cornerRadius` and `cornerRadiusActive`. Custom clipping is suspended while docked or maximized and reapplied when floating normally. Native rounding does not require transparent page CSS.
+
+Windows supports custom radii with or without a title bar. macOS and Linux retain system-managed corners for titled windows and apply the stored radius when frameless. Check `capabilities.runtime.window.setFrameless` and `cornerRadius.{supported,framed,frameless,max}`. Linux requires GDK3/X11 window shaping and decoration support from the window manager. Fractional radii are accepted, with native pixel rounding where required.
+
+```javascript
+await reaper.window.setCornerRadius(20);
+await reaper.window.setFrameless(true);
+// Restore the native title bar on the same window.
+await reaper.window.setFrameless(false);
+```
+
+Page context menus use the same Dock, Reload, DevTools, application-folder and Close actions as the native window menu. Browser defaults stay hidden. Apps retain custom menus by cancelling the DOM `contextmenu` event.
 
 ## Transparent windows
 

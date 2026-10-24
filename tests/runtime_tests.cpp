@@ -74,6 +74,10 @@ struct FakeWindow : Window {
     if (fail_next_presentation) { fail_next_presentation = false; throw Error("TRANSPARENCY_FAILED", "Injected native host setup failure"); }
   }
   bool frameless_active() const override { return options.frameless && !(options.is_docked && options.is_docked()); }
+  double radius = 0;
+  void set_frameless(bool value) override { options.frameless = value; }
+  void set_corner_radius(double value) override { radius = value; }
+  bool corner_radius_active() const override { return radius > 0 && frameless_active(); }
   bool transparent_active() const override { return options.transparent && !is_closed; }
   void* native_handle() const override { return const_cast<FakeWindow*>(this); }
   Json placement() const override { return bounds; }
@@ -391,8 +395,23 @@ int main() {
       CHECK(state()["frameless"] == true && state()["resizable"] == false && state()["framelessActive"] == true);
       runtime.set_docked(id, true);
       CHECK(state()["framelessActive"] == false);
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetFrameless", {false}))["result"]["docked"] == true);
+      CHECK(state()["frameless"] == false && !window->options.frameless);
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetCornerRadius", {24.5}))["result"]["cornerRadius"] == 24.5);
+      CHECK(state()["cornerRadiusActive"] == false);
+      result(runtime, *window, window->send("ReaWeb_SetFrameless", {true}));
       runtime.show(id); runtime.set_docked(id, false);
       CHECK(state()["framelessActive"] == true && window->reloads == 0);
+      CHECK(state()["cornerRadiusActive"] == true && window->radius == 24.5);
+      const auto original_bounds = window->bounds;
+      for (bool value : {false, true, false, true}) {
+        CHECK(result(runtime, *window, window->send("ReaWeb_SetFrameless", {value}))["result"]["frameless"] == value);
+        CHECK(window->bounds == original_bounds && window->reloads == 0);
+      }
+      for (const auto& invalid : Json::array({-1, 65, "12", nullptr, true}))
+        CHECK(result(runtime, *window, window->send("ReaWeb_SetCornerRadius", Json::array({invalid})))["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetFrameless", {1}))["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetCornerRadius", {0}))["result"]["cornerRadiusActive"] == false);
       CHECK(result(runtime, *window, window->send("ReaWeb_SetBounds", {{{"width", 432}}}))["result"]["width"] == 432);
       const auto child = result(runtime, *window, window->send("ReaWeb_OpenEx", {"index.html", {{"frameless", true}, {"resizable", false}}}))["result"].get<int>();
       CHECK(child != id && windows.back().lock()->options.frameless && !windows.back().lock()->options.resizable);
@@ -810,6 +829,9 @@ int main() {
       result(runtime, *window, window->send("__reawebHello", {1}));
       CHECK(result(runtime, *window, window->send("ReaWeb_WriteFile", {"async.txt", "worker data"}))["result"]["bytes"] == 11);
       CHECK(result(runtime, *window, window->send("ReaWeb_ReadFile", {"async.txt"}))["result"] == "worker data");
+      CHECK(result(runtime, *window, window->send("ReaWeb_MoveFile", {"async.txt", "moved.txt"}))["result"]["bytes"] == 11);
+      CHECK(result(runtime, *window, window->send("ReaWeb_ReadFile", {"moved.txt"}))["result"] == "worker data");
+      CHECK(result(runtime, *window, window->send("ReaWeb_Stat", {"async.txt"}))["result"]["exists"] == false);
       CHECK(result(runtime, *window, window->send("ReaWeb_ClipboardWriteText", {u8"文本"}))["result"] == true);
       CHECK(result(runtime, *window, window->send("ReaWeb_ClipboardReadText"))["result"] == u8"文本");
       CHECK(result(runtime, *window, window->send("ReaWeb_OpenExternal", {"file:///tmp/a"}))["error"]["code"] == "INVALID_URL");

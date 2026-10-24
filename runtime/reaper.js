@@ -627,6 +627,7 @@
     show: () => call('ReaWeb_SetVisible', [true]), hide: () => call('ReaWeb_SetVisible', [false]),
     getState: host('ReaWeb_GetWindowState'), setTitle: host('ReaWeb_SetTitle'), setIcon: host('ReaWeb_SetIcon'),
     setIconVisible: host('ReaWeb_SetIconVisible'), focus: host('ReaWeb_Focus'),
+    setFrameless: host('ReaWeb_SetFrameless'), setCornerRadius: host('ReaWeb_SetCornerRadius'),
     setDocked: host('ReaWeb_SetDocked'), isDocked: host('ReaWeb_IsDocked'),
     setKeyboardCapture: host('ReaWeb_SetKeyboardCapture'),
     close: host('ReaWeb_Close'), reload: host('ReaWeb_Reload')
@@ -643,7 +644,8 @@
     writeText: (path, text, options = {}) => call('ReaWeb_WriteFile', [path, text, { ...options, encoding: 'utf8' }]),
     readBinary: path => call('ReaWeb_ReadFile', [path, { encoding: 'binary' }]),
     writeBinary: (path, bytes, options = {}) => call('ReaWeb_WriteFile', [path, bytes, { ...options, encoding: 'binary' }]),
-    stat: host('ReaWeb_Stat'), readDirectory: host('ReaWeb_ReadDirectory'), makeDirectory: host('ReaWeb_MakeDirectory')
+    stat: host('ReaWeb_Stat'), readDirectory: host('ReaWeb_ReadDirectory'), makeDirectory: host('ReaWeb_MakeDirectory'),
+    moveFile: host('ReaWeb_MoveFile')
   });
   api.clipboard = Object.freeze({
     readText: host('ReaWeb_ClipboardReadText'), writeText: host('ReaWeb_ClipboardWriteText'),

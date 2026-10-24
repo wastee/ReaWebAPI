@@ -82,6 +82,9 @@ public:
   virtual void cancel_pending_show() {}
   virtual bool focused() const { return false; }
   virtual bool frameless_active() const { return false; }
+  virtual void set_frameless(bool) { throw Error("HOST_UNAVAILABLE", "Runtime window style control unavailable"); }
+  virtual void set_corner_radius(double) { throw Error("HOST_UNAVAILABLE", "Native window rounding unavailable"); }
+  virtual bool corner_radius_active() const { return false; }
   virtual bool transparent_active() const { return false; }
   virtual Json window_capabilities() const { return {{"hiddenStart", true}, {"frameless", false}, {"resizable", false},
     {"transparent", true}, {"transparency", {{"supported", false}, {"framed", false}, {"frameless", false},

@@ -16,6 +16,7 @@ fs::path resource;
 int window_id = 0, phase = 0, edge = 0, dock_cycle = 0;
 bool resizable = true, pending = false, checked = false, input_enabled = true;
 bool input_requested = false;
+bool appearance_checked = false;
 WKWebView* view;
 WKWebView* original;
 NSRect before;
@@ -44,6 +45,14 @@ void evaluate(NSString* script) {
   [view evaluateJavaScript:script completionHandler:^(::id value, NSError* error) {
     if (error) failure = error.description.UTF8String;
     else if (![value respondsToSelector:@selector(boolValue)] || ![value boolValue]) failure = "Page state check failed";
+    pending = false; checked = true;
+  }];
+}
+void evaluate_async(NSString* script) {
+  pending = true; checked = false;
+  [view callAsyncJavaScript:script arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(::id value, NSError* error) {
+    if (error) failure = error.description.UTF8String;
+    else if (![value respondsToSelector:@selector(boolValue)] || ![value boolValue]) failure = "Appearance state check failed";
     pending = false; checked = true;
   }];
 }
@@ -155,11 +164,33 @@ void tick() {
       evaluate(@"window.marker===731 && window.clicks===1"); phase = 8;
     } else if (phase == 8) {
       require(checked, "Button check incomplete");
+      if (!appearance_checked) {
+        appearance_checked = true;
+        auto menu = [NSMenu new]; [menu addItemWithTitle:@"Copy" action:nil keyEquivalent:@""];
+        [view willOpenMenu:menu withEvent:nil];
+        require(menu.numberOfItems == 6, "Page window menu does not match the native menu");
+        require([[menu itemAtIndex:1].title isEqualToString:@"Reload"] && [[menu itemAtIndex:2].title isEqualToString:@"Open DevTools"], "Page menu actions differ");
+        require([[menu itemAtIndex:4].title hasSuffix:@" Folder"] && [[menu itemAtIndex:5].title hasPrefix:@"Close "], "Page menu lacks folder/close");
+        evaluate_async(@"const w=reaper.window; const initial=await w.getPosition(), size=await w.getSize();"
+          "for(let i=0;i<3;++i){await w.setFrameless(false);if((await w.getState()).framelessActive)throw Error('framed state');"
+          "await w.setFrameless(true);const p=await w.getPosition(),s=await w.getSize();"
+          "if(p.x!==initial.x||p.y!==initial.y||s.width!==size.width||s.height!==size.height)throw Error('bounds changed');}"
+          "await w.setCornerRadius(24);if(!(await w.getState()).cornerRadiusActive)throw Error('rounding inactive');"
+          "await w.setFrameless(false);if((await w.getState()).cornerRadiusActive)throw Error('framed custom clipping');"
+          "await w.setFrameless(true);await w.hide();await w.setFrameless(false);await w.setFrameless(true);"
+          "if((await w.getState()).visible)throw Error('hidden window shown');await w.show();await w.focus();"
+          "return window.marker===731&&window.clicks===1;");
+        return;
+      }
+      require(view.superview.layer.cornerRadius == 24 || dock_cycle > 0, "Native corner radius was not applied");
       require(reinterpret_cast<bool(*)(int,bool)>(host->GetFunc("ReaWeb_SetDocked"))(window_id, true), "Dock failed");
       phase = 9; due = GetTickCount()+300;
     } else if (phase == 9) {
       require(view.window.styleMask & NSWindowStyleMaskTitled, "Shared Docker decoration was removed");
-      evaluate(@"window.marker===731 && window.clicks===1"); phase = 10;
+      require(view.superview.layer.cornerRadius == 0, "Docker retained custom corner clipping");
+      evaluate_async(@"await reaper.window.setFrameless(false);await reaper.window.setCornerRadius(32);"
+        "await reaper.window.setFrameless(true);const s=await reaper.window.getState();"
+        "return s.docked&&!s.framelessActive&&!s.cornerRadiusActive&&window.marker===731&&window.clicks===1;"); phase = 10;
     } else if (phase == 10) {
       require(checked, "Dock page check incomplete");
       reinterpret_cast<bool(*)(int,bool)>(host->GetFunc("ReaWeb_SetDocked"))(window_id, false);
@@ -167,6 +198,7 @@ void tick() {
     } else if (phase == 11) {
       require(!(view.window.styleMask & NSWindowStyleMaskTitled), "Undock did not restore frameless style");
       require(bool(view.window.styleMask & NSWindowStyleMaskResizable) == resizable, "Undock lost resize configuration");
+      require(view.superview.layer.cornerRadius == 32, "Undock did not restore custom corners");
       evaluate(@"window.marker===731 && window.clicks===1"); phase = ++dock_cycle < 3 ? 8 : 12;
     } else if (phase == 12) {
       [view.window setFrame:NSMakeRect(200, 200, 432, 321) display:YES];
