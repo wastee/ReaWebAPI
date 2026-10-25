@@ -40,6 +40,10 @@ void* native(const char* name) {
   if (!std::strcmp(name, "GetParamName") || !std::strcmp(name, "GetParamIdent") || !std::strcmp(name, "GetFormattedParamValue"))
     return reinterpret_cast<void*>(+[](void*, int, int, char* out, int) { std::strcpy(out, "Gain"); return true; });
   FN("GetParameterStepSizes", [](void*, int, int, double*, double*, double*, bool*) { return false; });
+  FN("GetParamSectionName", [](void* p, int f, int, char* out, int) {
+    CHECK(effect(p, f).type == "JS");
+    std::strcpy(out, "Host section");
+  });
   FN("SetParamNormalized", [](void* p, int f, int, double v) { effect(p, f).raw = -60 + 72*v*v; ++writes; return true; });
   FN("SetParam", [](void* p, int f, int, double v) { effect(p, f).raw = v; ++writes; return true; });
   FN("EndParamEdit", [](void*, int, int) { ++ends; return true; });
@@ -68,6 +72,7 @@ int main() {
       populate(owner, mask);
       JsfxBinding binding(h, target, mask | 0x200000a);
       CHECK(binding.parameter(0, true)["defaultNormalized"] == .5);
+      CHECK(binding.parameter(0, true)["section"] == "Host section");
       binding.set(0, .75, true); CHECK(std::abs(binding.parameter(0)["value"].get<double>() + 19.5) < 1e-9);
       binding.set(0, -24, false); CHECK(binding.parameter(0)["value"] == -24);
       CHECK(owner.fx[mask | 1].raw == -42);

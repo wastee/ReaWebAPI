@@ -1,5 +1,9 @@
 # REAPER host acceptance
 
+## JSFX parameter metadata
+
+Run `python tests/jsfx_metadata_reaper.py --reaper <executable> --extension <binary> --output <new-profile>` on Windows, macOS and Linux. The disposable profile verifies track and take JSFX with enumerated, stepped numeric, unit-named and group-like parameters, then checks SDK gestures, host value changes and snapshot refresh. JSFX enum tables, independent units and absent sections must remain `null`, while the current enum display follows the host. `jsfx_webui` covers absent optional APIs and empty/nonempty section output. `jsfx_chains` covers TrackFX/TakeFX routing for nested, input, monitoring and master FX. Nonempty section output is a mocked host case, not a JSFX capability claim.
+
 ## JSFX DSP stream recovery
 
 Run `python tests/jsfx_stream_recovery_reaper.py --reaper <executable> --extension <binary> --output <new-profile>` on an isolated desktop. The fixture verifies spectrum, waveform, audio and meter data after a factory preset reset, source recompilation through offline/online reload, and `Audio_Quit`/`Audio_Init`. It checks retained page identity, four native streams, editor close/reopen and explicit stream close. macOS uses the current user's CoreAudio settings in the disposable profile. The test track has its master send disabled.

@@ -47,6 +47,36 @@ async function connect(f = fixture()) {
   const { connectJSFX } = await import('../runtime/jsfx-webui.mjs');
   f.fx = await connectJSFX(f.reaper, error => f.errors.push(error)); return f;
 }
+
+test('parameter metadata survives value events and writes, and refreshes from host snapshots', async () => {
+  const f = fixture(), base = f.reaper.host.service('jsfx');
+  let section = 'Filter';
+  f.reaper.host.service = () => ({ ...base, invoke: async (method, data) => {
+    const result = await base.invoke(method, data);
+    if (method === 'getParamState') for (const p of result.data.parameters)
+      Object.assign(p, { name: 'Frequency (Hz)', section, enum: null, unit: null, formatted: '440' });
+    return result;
+  } });
+  await connect(f);
+  const seen = [];
+  await f.fx.params.onChange(state => seen.push(state));
+  assert.equal(f.fx.params.snapshot.parameters[0].section, 'Filter');
+  f.events.paramsChanged({ sessionId: f.sessionId, activation: 1, revision: '10',
+    parameters: [{ index: 0, value: .8, normalized: .4, formatted: '880' }] });
+  const p = seen.at(-1).parameters[0];
+  assert.equal(p.section, 'Filter');
+  assert.equal(p.unit, null);
+  assert.equal(p.enum, null);
+  assert.equal(p.formatted, '880');
+  assert.ok(Object.isFrozen(p));
+  await f.fx.params.set(1, .6);
+  assert.equal(f.fx.params.snapshot.parameters[1].section, 'Filter');
+  section = null;
+  await f.fx.params.getState();
+  assert.equal(f.fx.params.snapshot.parameters[0].section, null);
+  assert.equal(f.fx.params.snapshot.parameters[0].unit, null);
+  await f.fx.dispose();
+});
 test('editor size is initialized before connect and gates native presentation', async () => {
   const f = fixture(), base = f.reaper.host.service('jsfx');
   let size = { width: 1380, height: 319, customized: false, revision: '1' }, complete;

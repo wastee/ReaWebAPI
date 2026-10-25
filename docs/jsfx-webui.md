@@ -62,7 +62,31 @@ All JSFX replies use `{ok:true,sessionId,data}` or `{ok:false,sessionId?,error:{
 
 Without an EEL native declaration, capabilities report `status:'parameterOnly'`, parameter groups enabled and `nativeChannel:false`. Extended methods reject with `UNSUPPORTED`. Participating effects can expose declared streams, schema-checked data states, acknowledged commands and reliable binary resources through the same service. See the [native channel](jsfx-native-channel.md) for transport and synchronization contracts.
 
-Parameter metadata includes `index`, `name`, `ident`, `min`, `max`, `mid`, `defaultNormalized`, `step`, `smallStep`, `largeStep`, `toggle`, `section`, `enum`, `value`, `normalized` and `formatted`. Unsupported metadata is `null`. The native API supplies normalized defaults. `mid` is the host midpoint, not a default. Section and enum labels are not exposed by this service. The normalized setter preserves REAPER's parameter shaping.
+Parameter metadata includes `index`, `name`, `ident`, `min`, `max`, `mid`, `defaultNormalized`, `step`, `smallStep`, `largeStep`, `toggle`, `section`, `enum`, `unit`, `value`, `normalized` and `formatted`. Unsupported metadata is `null`. The native API supplies normalized defaults. `mid` is the host midpoint, not a default. The normalized setter preserves REAPER's parameter shaping.
+
+### Metadata availability
+
+The same contract applies on Windows, macOS and Linux. `params.snapshot` and `params.onChange` retain metadata when value-only events or write replies arrive. `params.getState()` rereads metadata from the host.
+
+| Field | Source and unavailable behavior |
+| --- | --- |
+| `section` | Optional `TrackFX_GetParamSectionName` / `TakeFX_GetParamSectionName`, copied verbatim. Empty output or an unavailable function becomes `null`. The official API documents VST3 units and CLAP modules, not JSFX groups. |
+| `enum` | `null`. Public REAPER APIs do not expose a JSFX enumeration type and complete label/value table. Integer ranges, step sizes and toggles do not establish that a parameter is an enumeration. |
+| `unit` | `null`. JSFX has no independent unit field in these APIs. Text such as `(Hz)` in `name` or a suffix in `formatted` is not interpreted as metadata. |
+| `formatted` | `TrackFX_GetFormattedParamValue` / `TakeFX_GetFormattedParamValue`. This is the current display text, which may be an enum label, not a list of choices or a unit. |
+
+These limits apply to the project's REAPER 7.80 API baseline and the 7.83 API/source review. The official [JSFX source](https://github.com/justinfrankel/jsfx) retains enum labels in `effectload.cpp` and exposes `sx_parmIsEnum` / `sx_getParmDisplay` in its engine API. That API requires an internal `SX_Instance*`, which the public TrackFX/TakeFX APIs do not supply. The service does not access private instance memory or parse JSFX source. See the official [FX API](https://www.reaper.fm/sdk/reascript/reascripthelp.html#TrackFX_GetParamSectionName) and [slider syntax](https://www.reaper.fm/sdk/js/js.php).
+
+For `slider1:0<0,2,1{Off,Low,High}>Mode`, the initial metadata subset is `{name:'Mode', value:0, formatted:'Off', enum:null, unit:null, section:null}`. For `slider2:440<20,20000,1>Frequency (Hz)`, `unit` remains `null`. UI-specific labels and units can be declared explicitly by the UI author.
+
+```js
+const rows = state => state.parameters.map(p => ({
+  index: p.index, name: p.name, section: p.section,
+  display: p.formatted ?? String(p.value), unit: p.unit, choices: p.enum
+}));
+console.table(rows(jsfx.params.snapshot));
+const stop = await jsfx.params.onChange(state => console.table(rows(state)));
+```
 
 ```js
 import { connectJSFX } from './jsfx-webui.mjs';

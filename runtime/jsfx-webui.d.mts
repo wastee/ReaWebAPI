@@ -9,12 +9,16 @@ export interface JSFXParameter {
   max: number;
   mid: number;
   defaultNormalized: number | null;
+  /** Host section name, or null when absent or unsupported by the host/JSFX. */
   section: string | null;
   step: number | null;
   smallStep: number | null;
   largeStep: number | null;
   toggle: boolean | null;
+  /** Public REAPER APIs do not expose a JSFX enumeration table. */
   enum: null;
+  /** No independent JSFX unit metadata is available. Not inferred from name/formatted. */
+  unit: null;
   formatted: string | null;
   reserved?: boolean;
   readOnly?: boolean;

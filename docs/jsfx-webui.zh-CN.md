@@ -62,7 +62,31 @@ JSFX 回复统一为 `{ok:true,sessionId,data}` 或 `{ok:false,sessionId?,error:
 
 未声明 EEL 原生通道时，能力返回 `status:'parameterOnly'`、参数组可用及 `nativeChannel:false`，扩展方法返回 `UNSUPPORTED`。接入 SDK 的插件可通过同一服务暴露已声明的流、经过 schema 校验的复杂状态、带执行确认的命令和可靠二进制资源。传输及同步契约见[原生通道](jsfx-native-channel.zh-CN.md)。
 
-参数元数据包括 `index`、`name`、`ident`、`min`、`max`、`mid`、`defaultNormalized`、`step`、`smallStep`、`largeStep`、`toggle`、`section`、`enum`、`value`、`normalized` 和 `formatted`。不支持的字段为 `null`。`defaultNormalized` 来自宿主归一化默认值，`mid` 是宿主中点，不是默认值。服务不提供分节及枚举标签。归一化写入保留 REAPER 的参数映射。
+参数元数据包括 `index`、`name`、`ident`、`min`、`max`、`mid`、`defaultNormalized`、`step`、`smallStep`、`largeStep`、`toggle`、`section`、`enum`、`unit`、`value`、`normalized` 和 `formatted`。不支持的字段为 `null`。`defaultNormalized` 来自宿主归一化默认值，`mid` 是宿主中点，不是默认值。归一化写入保留 REAPER 的参数映射。
+
+### 元数据可用性
+
+Windows、macOS 和 Linux 使用相同契约。`params.snapshot` 和 `params.onChange` 在收到仅包含参数值的事件或写入回复时保留元数据。`params.getState()` 重新读取宿主元数据。
+
+| 字段 | 来源与不可用时的行为 |
+| --- | --- |
+| `section` | 可选的 `TrackFX_GetParamSectionName` / `TakeFX_GetParamSectionName`，原样保留宿主文本。输出为空或函数不可用时为 `null`。官方 API 说明支持 VST3 unit 和 CLAP module，未声明支持 JSFX 分组。 |
+| `enum` | `null`。REAPER 公开 API 未提供 JSFX 枚举类型及完整的标签和值列表。整数范围、步长和开关标记不能证明参数是枚举。 |
+| `unit` | `null`。这些 API 没有独立的 JSFX 单位字段。不将 `name` 中的 `(Hz)` 或 `formatted` 后缀解释为元数据。 |
+| `formatted` | `TrackFX_GetFormattedParamValue` / `TakeFX_GetFormattedParamValue`。表示当前显示文本，可能是当前枚举标签，不是选项列表或独立单位。 |
+
+上述限制适用于项目的 REAPER 7.80 API 基线及本次核对的 7.83 API 和源码。[官方 JSFX 源码](https://github.com/justinfrankel/jsfx) 在 `effectload.cpp` 中保存枚举标签，通过引擎 API `sx_parmIsEnum` / `sx_getParmDisplay` 提供内部访问。该接口需要 `SX_Instance*`，公开 TrackFX/TakeFX API 不提供这个指针。服务不读取私有实例内存，也不解析 JSFX 源文件。参见官方 [FX API](https://www.reaper.fm/sdk/reascript/reascripthelp.html#TrackFX_GetParamSectionName) 和 [slider 语法](https://www.reaper.fm/sdk/js/js.php)。
+
+例如 `slider1:0<0,2,1{Off,Low,High}>Mode` 的初始元数据子集为 `{name:'Mode', value:0, formatted:'Off', enum:null, unit:null, section:null}`。`slider2:440<20,20000,1>Frequency (Hz)` 的 `unit` 仍为 `null`。UI 作者可在 UI 中显式声明专用标签和单位。
+
+```js
+const rows = state => state.parameters.map(p => ({
+  index: p.index, name: p.name, section: p.section,
+  display: p.formatted ?? String(p.value), unit: p.unit, choices: p.enum
+}));
+console.table(rows(jsfx.params.snapshot));
+const stop = await jsfx.params.onChange(state => console.table(rows(state)));
+```
 
 ```js
 import { connectJSFX } from './jsfx-webui.mjs';

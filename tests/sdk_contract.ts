@@ -288,6 +288,10 @@ async function jsfxContract() {
   // @ts-expect-error Editor preferences are immutable snapshots.
   size.width = width;
   const state = await jsfx.params.getState();
+  const section: string | null = state.parameters[0].section;
+  const unit: null = state.parameters[0].unit;
+  const choices: null = state.parameters[0].enum;
+  void section; void unit; void choices;
   const revision: string = state.revision;
   const result = await jsfx.params.set(0, .5);
   const applied: boolean = result.applied;

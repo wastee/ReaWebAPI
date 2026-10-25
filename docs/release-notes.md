@@ -2,10 +2,10 @@
 
 ## English
 
-- Restore SDK-managed JSFX DSP streams and subscriptions after session replacement or transport closure, including preset reset, recompilation and audio-device recovery.
-- Keep valid silent streams connected, bound failed recovery attempts, and cancel recovery on explicit close, editor deactivation or page cleanup.
+- Read JSFX parameter section names through optional TrackFX/TakeFX host APIs, returning null when unavailable.
+- Add the explicit null unit field to JSFX parameter metadata and TypeScript declarations, and document public API limits for enum labels, units and groups.
 
 ## 简体中文
 
-- SDK 管理的 JSFX DSP Stream 在 Session 更换或传输关闭后自动恢复连接和订阅，覆盖预设重置、重新编译和音频设备恢复。
-- 有效流暂时无数据时保持连接，限制失败重试次数，主动关闭、编辑器失活或页面清理时取消恢复。
+- 通过可选的 TrackFX/TakeFX 宿主 API 读取 JSFX 参数区段名称，不可用时返回 null。
+- JSFX 参数元数据及 TypeScript 声明新增明确的 unit: null 字段，补充公开 API 对枚举标签、单位和分组的限制。
