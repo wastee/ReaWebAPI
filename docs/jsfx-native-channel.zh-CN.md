@@ -33,6 +33,8 @@ Windows、macOS 和 Linux 上，每个通道引擎编译覆盖 256 个值的暂�
 
 同一 VM 的序列化恢复通过已有槽位续约。重建后的 VM 在有限续约等待后重新绑定。新代次使旧操作、快照和传输票据失效。实际持久状态或资源修改仍会通知 REAPER 并参与撤销，该通知与连接建立分开处理。
 
+Web UI SDK 在 Session 更换或可恢复的传输关闭后重建已打开的 DSP 流并保留订阅，有效流暂时无数据时保持连接。生命周期与重试行为见 [Web UI 流恢复说明](jsfx-webui.zh-CN.md)。
+
 在 `@slider`、每次 `@block` 服务调用前及 SDK 序列化后执行 `sliderN=reaweb_jsfx_handshake(sliderN)`。该专用滑块不得用于自动化、其他参数或网页编辑。
 
 ## 同步与边界

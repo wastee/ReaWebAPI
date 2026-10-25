@@ -110,10 +110,18 @@ function nativeFixture() {
     if(method==='findOperation')return result({operation:null});
     return result({operationId:'operation',requestId:data.requestId,revision:'1',status:'queued'});
   }});
-  let closed=false,closedCallback;
-  f.stream={get closed(){return closed;},on:(event,fn)=>{if(event==='close')closedCallback=fn;return()=>{};},close:async()=>{closed=true;closedCallback?.();}};
-  f.reaper.stream={open:async name=>{assert.equal(name,'private-test');return f.stream;}};
-  f.replaceSession=()=>{session='instance-new';capRevision='1';f.events.capabilitiesChanged({sessionId:session,capabilityRevision:capRevision,reason:'sessionChanged'});};
+  f.rawStreams=[];
+  f.reaper.stream={open:async name=>{
+    assert.equal(name,'private-test');
+    let closed=false,last=null;const handlers=new Map();
+    const emit=(event,value)=>{for(const fn of [...(handlers.get(event)||[])])fn(value);};
+    const stream={info:{jsfx:{sessionId:session},channels:2},dropped:0,get closed(){return closed;},latest:()=>last,read:()=>last,
+      on:(event,fn)=>{if(!handlers.has(event))handlers.set(event,new Set());handlers.get(event).add(fn);return()=>handlers.get(event).delete(fn);},
+      emit,data:packet=>{last=packet;emit('data',packet);},handlers,
+      close:async()=>{if(closed)return;closed=true;last=null;emit('close',Object.assign(new Error('closed'),{code:'STREAM_CLOSED'}));handlers.clear();}};
+    f.rawStreams.push(stream);f.stream=stream;return stream;
+  }};
+  f.replaceSession=(next='instance-new')=>{session=next;capRevision='1';f.events.capabilitiesChanged({sessionId:session,capabilityRevision:capRevision,reason:'sessionChanged'});};
   return f;
 }
 test('native namespaces preserve request IDs, independent revisions and stream ownership',async()=>{
@@ -127,7 +135,7 @@ test('native namespaces preserve request IDs, independent revisions and stream o
   f.events.operationChanged({sessionId:f.sessionId,operationId:'o',revision:'10',status:'running'});
   f.events.operationChanged({sessionId:f.sessionId,operationId:'o',revision:'9',status:'queued'});
   assert.equal(changes.length,1);await off();
-  const stream=await f.fx.streams.open('output');assert.equal(stream,f.stream);
+  const stream=await f.fx.streams.open('output');assert.equal(stream.info,f.stream.info);
   f.visibility(false,2);await turn();assert(stream.closed);
   await f.fx.dispose();assert.equal(Object.keys(f.events).length,0);
 });
@@ -173,7 +181,7 @@ test('EEL runtime replacement re-handshakes without mixing old revisions or stre
   const f=await connect(nativeFixture());
   const stream=await f.fx.streams.open('output');
   f.replaceSession();await turn();await turn();
-  assert.equal(f.fx.params.snapshot.sessionId,'instance-new');assert(stream.closed);
+  assert.equal(f.fx.params.snapshot.sessionId,'instance-new');assert(f.stream.closed);assert(!stream.closed);
   assert.equal((await f.fx.getCapabilities()).sessionId,'instance-new');
   await f.fx.dataState.get('constructor');assert.equal(f.nativeCalls.at(-1).data.sessionId,'instance-new');
   await f.fx.dispose();assert.deepEqual(f.errors,[]);

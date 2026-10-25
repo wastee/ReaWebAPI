@@ -2,10 +2,10 @@
 
 ## English
 
-- Add `app.json.dawKeyboard` for ordinary App initial Space routing, defaulting to `false`.
-- Allow JSFX Web UI to use `window.setDawKeyboard`. Both page types restore their JSON settings on reload without writing configuration. The JSFX default remains `true`.
+- Restore SDK-managed JSFX DSP streams and subscriptions after session replacement or transport closure, including preset reset, recompilation and audio-device recovery.
+- Keep valid silent streams connected, bound failed recovery attempts, and cancel recovery on explicit close, editor deactivation or page cleanup.
 
 ## 简体中文
 
-- 普通 App 新增 `app.json.dawKeyboard` 初始 Space 路由配置，默认 `false`。
-- JSFX Web UI 支持 `window.setDawKeyboard` 动态设置。两类页面重载后均恢复各自 JSON 配置，不回写文件，JSFX 默认仍为 `true`。
+- SDK 管理的 JSFX DSP Stream 在 Session 更换或传输关闭后自动恢复连接和订阅，覆盖预设重置、重新编译和音频设备恢复。
+- 有效流暂时无数据时保持连接，限制失败重试次数，主动关闭、编辑器失活或页面清理时取消恢复。

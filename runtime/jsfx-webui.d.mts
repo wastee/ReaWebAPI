@@ -133,6 +133,7 @@ export interface JSFXConnection {
   };
   readonly params: JSFXParams;
   readonly dataState: JSFXDataStateAPI;
+  /** Open streams retain subscriptions across DSP session/transport recovery. Explicit close and editor deactivation are terminal. */
   readonly streams: { open(id: string, options?: { updateRate?: number }): Promise<ReaWebStream> };
   readonly commands: {
     invoke(id: string, args: unknown, options?: { requestId?: string }): Promise<Readonly<JSFXOperation>>;

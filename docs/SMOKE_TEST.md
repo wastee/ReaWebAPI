@@ -1,5 +1,11 @@
 # REAPER host acceptance
 
+## JSFX DSP stream recovery
+
+Run `python tests/jsfx_stream_recovery_reaper.py --reaper <executable> --extension <binary> --output <new-profile>` on an isolated desktop. The fixture verifies spectrum, waveform, audio and meter data after a factory preset reset, source recompilation through offline/online reload, and `Audio_Quit`/`Audio_Init`. It checks retained page identity, four native streams, editor close/reopen and explicit stream close. macOS uses the current user's CoreAudio settings in the disposable profile. The test track has its master send disabled.
+
+Also verify recompilation from the JSFX editor, physical device disconnect/reconnect and project switching. Valid silent streams must stay connected. Session replacement must discard old data and retain listeners. Explicit close, editor deactivation, page cleanup, deleted FX and invalid projects must stop recovery. `jsfx_stream_recovery_js` covers delayed opens, cancellation, subscription ownership, suspended DSP and bounded retries without a REAPER instance.
+
 ## Keyboard routing
 
 - On macOS, open a floating App with `window.setKeyboardCapture(true)`. Press unmodified Enter repeatedly and verify one trusted `keydown`/`keyup` pair per press without blur. Switch to REAPER and back using the title bar or window switcher, then type without clicking the page. Repeat docked, with capture disabled, and with arrows, Space, letters, Shift+Enter and Cmd+Enter. Capture-disabled routing must retain REAPER's existing behavior.

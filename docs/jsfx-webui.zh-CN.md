@@ -154,6 +154,8 @@ ID 满足 `[A-Za-z][A-Za-z0-9_.-]{0,127}`，在所属类别内唯一。EEL 数�
 
 流支持 `audio`、`spectrum`、`waveform`、`meter`、`binary` 和 `midi`。前四类接收插件显式发布的交错 PCM。频谱为 Hann 窗、按通道交错的线性幅值。波形按采样点及通道排列 min/max 对。Audio 保留原始样本，适合示波器和相位图。Meter 复用 `reaper.audio.decodeMeter` 布局。Binary/MIDI 承载插件定义的字节记录，应用需约定布局，不代表硬件 MIDI 输入。音符输入通过下述命令辅助函数管理所有权。
 
+通过 `jsfx.streams.open` 打开的流在 DSP Session 更换或可恢复的传输关闭后保留对象和订阅，覆盖预设重置、重新编译和音频设备恢复。恢复时更新 `info`，清除旧缓冲数据。重连期间 `read()` 和 `latest()` 返回 `null`，`closed` 保持 `false`。有效流暂时无数据时保持连接。连接已失效且 DSP 暂停时，每秒检查一次恢复条件。其他恢复失败最多尝试六次，退避间隔为 100–4000 ms，收到数据后重置计数。终止失败触发 `error`、`close` 及 `connectJSFX` 错误处理器。主动 `close()`、编辑器失活和页面清理会终止流，编辑器重新激活时按需重新打开。FX 删除或工程失效时停止恢复，无需重载页面或自行实现 Session 重连循环。现有插件需更新随插件分发的 `jsfx-webui.mjs` 才能使用此行为。
+
 JSFX 流协商布局版本 2，不改变既有 Stream 数据包。`packet.timing` 包含 `clockEpoch`、`firstSample`、`sourceDropped`、`position`、`playState`、`discontinuity`。遇到不连续应清空分析及显示历史。描述符提供采样点、通道标签、采样率和 FFT 大小。分析按包边界及协商的 1–120 Hz 频率发布，默认 30 Hz，不保证固定样本 hop。背压下允许丢弃遥测，不能等待网页。触发检测、预计算频谱和专用 MIDI 记录可由插件结合 audio/binary 流实现。
 
 资源格式为原始字节和有限值的 IEEE float32 小端数据。声明上限还受 EEL 缓冲容量约束。提交必须提供小写 SHA-256 校验和及预期修订号。二进制块包含 CRC32、序号、偏移确认和有界重试。完整暂存区通过 CAS 后才在块边界切换，失败保留旧数据。下载提供固定快照、校验和及元数据。元数据为最多 768 个 UTF-8 字节的 JSON 对象。文件选择复用已有文件 API 或浏览器文件输入。格式解析与重采样放在 `@block` 之外，并显式提供采样率及通道元数据。本版通过 `@serialize` 内嵌注册资源，不新增文件引用重定位机制或音频文件解码器。

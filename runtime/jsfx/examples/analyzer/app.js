@@ -12,7 +12,7 @@ const wait=async operation=>{
   if(operation.status!=='succeeded')throw Object.assign(new Error(operation.error.message),operation.error);
   return operation.result;
 };
-let streams=[],opening=false;
+let streams=[],opening=false,failed=false,activation=0;
 el('tone').checked=jsfx.params.snapshot.parameters[0].normalized>0.5;
 el('tone').onchange=action(()=>jsfx.params.set(0,el('tone').checked?1:0));
 await jsfx.params.onChange(s=>{el('tone').checked=s.parameters[0].normalized>0.5;});
@@ -29,16 +29,19 @@ function draw(id,stream,packet){
   ctx.stroke();status.textContent=`${id} · sample ${packet.timing?.firstSample} · dropped ${packet.timing?.sourceDropped}`;
 }
 async function open(){
-  if(opening||!jsfx.active||streams.some(s=>!s.closed))return;
-  opening=true;
+  if(opening||failed||!jsfx.active||streams.some(s=>!s.closed))return;
+  opening=true;const at=activation;
   try{
     if((await jsfx.getCapabilities()).status!=='ready')return;
     for(const id of ['spectrum','waveform','scope']){
-      const stream=await jsfx.streams.open(id);streams.push(stream);
+      const stream=await jsfx.streams.open(id);
+      if(at!==activation){await stream.close();return;}streams.push(stream);
       stream.on('data',packet=>{draw(id,stream,packet);if(id==='scope')while(stream.read()){};});stream.on('error',report);
+      stream.on('close',()=>{if(jsfx.active)failed=true;});
     }
-  }catch(error){await Promise.allSettled(streams.map(s=>s.close()));streams=[];report(error);}finally{opening=false;}
+  }catch(error){failed=at===activation;await Promise.allSettled(streams.map(s=>s.close()));streams=[];if(failed)report(error);}
+  finally{opening=false;if(at!==activation)open();}
 }
-await jsfx.onVisibilityChange(active=>{if(active)open();else streams=[];});
-await jsfx.onCapabilitiesChange(()=>{streams=streams.filter(s=>!s.closed);open();});
-await open();setInterval(()=>open(),1000);
+await jsfx.onVisibilityChange(active=>{activation++;if(active){failed=false;open();}else streams=[];});
+await jsfx.onCapabilitiesChange(()=>open());
+await open();

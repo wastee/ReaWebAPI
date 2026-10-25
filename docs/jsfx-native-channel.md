@@ -33,6 +33,8 @@ A copied or restored slider value alone cannot establish a binding. Initial conn
 
 Serialization restore in the same VM renews its owned slot. Recreated VMs establish a new binding after a bounded renewal interval. New generations invalidate stale operations, snapshots and transfer tickets. Successful durable state/resource changes still notify REAPER and participate in Undo. That notification is separate from connection setup.
 
+The Web UI SDK restores already-open DSP streams and their listeners after session replacement or recoverable transport closure. Valid silent streams remain connected. See [stream recovery](jsfx-webui.md#optional-dsp-capabilities) for lifecycle and retry behavior.
+
 Call `sliderN=reaweb_jsfx_handshake(sliderN)` from `@slider`, before servicing each `@block`, and after SDK serialization. Do not automate, repurpose or send UI edits to this reserved slider.
 
 ## Synchronization and bounds
