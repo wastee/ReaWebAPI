@@ -1,4 +1,9 @@
 /// <reference path="./runtime-api.d.ts" />
+export interface JSFXEnumOption {
+  /** Raw parameter value. */
+  readonly value: number;
+  readonly label: string;
+}
 export interface JSFXParameter {
   index: number;
   name: string | null;
@@ -17,6 +22,8 @@ export interface JSFXParameter {
   toggle: boolean | null;
   /** Public REAPER APIs do not expose a JSFX enumeration table. */
   enum: null;
+  /** ReaWebAPI extension, read from the loaded JSFX engine at snapshot time. */
+  reaweb: { readonly enum: readonly JSFXEnumOption[] | null };
   /** No independent JSFX unit metadata is available. Not inferred from name/formatted. */
   unit: null;
   formatted: string | null;

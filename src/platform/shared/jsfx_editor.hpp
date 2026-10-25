@@ -35,6 +35,7 @@ public:
   virtual bool retain_during_switch() const { return false; }
   virtual std::optional<int> selected_fx() const { return {}; }
   virtual void sync_selection(int) {}
+  virtual void read_parameter_metadata(Host&, int, Json&) const {}
   virtual void request_size(int, int, bool = false) {}
   virtual void set_background(unsigned) {}
   virtual void on_destroy(std::function<void()>) {}

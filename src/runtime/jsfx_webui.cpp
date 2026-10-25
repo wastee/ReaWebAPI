@@ -160,7 +160,8 @@ Json JsfxBinding::parameter(int param, bool metadata) {
   if (!metadata) return result;
   result.update({{"name", string("GetParamName")}, {"ident", string("GetParamIdent")},
     {"min", minimum}, {"max", maximum}, {"mid", midpoint}, {"defaultNormalized", nullptr}, {"section", nullptr},
-    {"step", nullptr}, {"smallStep", nullptr}, {"largeStep", nullptr}, {"toggle", nullptr}, {"enum", nullptr}, {"unit", nullptr}});
+    {"step", nullptr}, {"smallStep", nullptr}, {"largeStep", nullptr}, {"toggle", nullptr}, {"enum", nullptr}, {"unit", nullptr},
+    {"reaweb", {{"enum", nullptr}}}});
   const auto section_api = std::string(target_.take ? "TakeFX_" : "TrackFX_") + "GetParamSectionName";
   const auto section = host_.native_function
     ? reinterpret_cast<void (*)(void*, int, int, char*, int)>(host_.native_function(section_api.c_str())) : nullptr;

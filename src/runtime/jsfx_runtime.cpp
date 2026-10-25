@@ -95,6 +95,8 @@ Json Runtime::jsfx_state(Session& session) {
   session.startup_timing->mark(StartupTiming::ParametersStart);
   auto& ui = *session.jsfx;
   auto state = ui.instance->binding->state();
+  if (ui.editor.host && ui.instance->binding->editor_matches(ui.editor))
+    ui.editor.host->read_parameter_metadata(host_, ui.instance->binding->resolve(), state["parameters"]);
   if(ui.instance->native)for(auto& parameter:state["parameters"])
     if(parameter["index"]==ui.instance->native->parameter()) {parameter["reserved"]=true;parameter["readOnly"]=true;}
   ui.count = state["count"]; ui.initialized = bool(ui.editor.host);

@@ -2,7 +2,7 @@
 
 ## JSFX parameter metadata
 
-Run `python tests/jsfx_metadata_reaper.py --reaper <executable> --extension <binary> --output <new-profile>` on Windows, macOS and Linux. The disposable profile verifies track and take JSFX with enumerated, stepped numeric, unit-named and group-like parameters, then checks SDK gestures, host value changes and snapshot refresh. JSFX enum tables, independent units and absent sections must remain `null`, while the current enum display follows the host. `jsfx_webui` covers absent optional APIs and empty/nonempty section output. `jsfx_chains` covers TrackFX/TakeFX routing for nested, input, monitoring and master FX. Nonempty section output is a mocked host case, not a JSFX capability claim.
+Run `python tests/jsfx_metadata_reaper.py --reaper <executable> --extension <binary> --output <new-profile>` on Windows, macOS and Linux, then repeat with `--chain`. The disposable profile verifies track, take, input, master and monitoring FX. Cases include numeric sliders, single-option enums, hidden/sparse sliders, aliased parameters, duplicate and Unicode labels, and file-selection sliders. Check `reaweb.enum` against loaded engine values, including REAPER's expanded single-option host range and the engine's omission of empty source labels. Modifying the source file after loading must not change the enum snapshot. SDK gestures, host changes and `getState()` must preserve metadata. `jsfx_enum` covers ABI/range mismatch, UTF-8, truncation and read limits. Existing `jsfx_webui` and `jsfx_chains` tests cover optional APIs and instance routing. On macOS, dismiss the disposable profile's initial audio-device selection prompt if it appears.
 
 ## JSFX DSP stream recovery
 

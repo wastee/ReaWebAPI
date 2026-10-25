@@ -1,4 +1,5 @@
 #include "platform/shared/jsfx_editor.hpp"
+#include "platform/shared/jsfx_enum.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
@@ -595,6 +596,8 @@ std::shared_ptr<ChainLayout> chain_layout(HWND owner, Host& host, JsfxTarget tar
 }
 struct Attachment {
   HWND editor = nullptr, child = nullptr, owner = nullptr;
+  JsfxTarget target;
+  Guid fx_guid{};
   std::vector<HWND> hidden;
   bool alive = true, prepared = false;
   unsigned background = 0xffffff;
@@ -831,8 +834,12 @@ class EditorHost final : public JsfxEditorHost {
       GetDlgItem(state_->editor, 1023) && GetDlgItem(state_->editor, 1062);
   }
 public:
-  EditorHost(HWND editor, HWND owner, std::shared_ptr<ChainLayout> layout) : state_(std::make_shared<Attachment>()) {
+  EditorHost(HWND editor, HWND owner, std::shared_ptr<ChainLayout> layout, Host& host, JsfxTarget target, int fx) : state_(std::make_shared<Attachment>()) {
     state_->editor = editor; state_->owner = owner;
+    state_->target = target;
+    const auto guid = target.api<Guid* (*)(void*, int)>(host, "GetFXGUID")(target.object(), fx);
+    if (!guid) throw Error("FX_STALE", "JSFX editor identity is unavailable");
+    state_->fx_guid = *guid;
     state_->layout = std::move(layout);
     if (state_->layout) state_->background = state_->layout->background;
     if (attachments.count(editor)) throw Error("EDITOR_BUSY", "JSFX editor already attached");
@@ -860,6 +867,11 @@ public:
 #endif
   }
   void* parent() const override { return state_->editor; }
+  void read_parameter_metadata(Host& host, int fx, Json& parameters) const override {
+    if (!valid()) return;
+    const auto guid = state_->target.api<Guid* (*)(void*, int)>(host, "GetFXGUID")(state_->target.object(), fx);
+    if (guid && *guid == state_->fx_guid) jsfx_editor_enum_metadata(state_->editor, parameters);
+  }
   void on_destroy(std::function<void()> callback) override { state_->on_destroy = std::move(callback); }
   bool valid() const override {
     return native_valid() && IsWindowVisible(state_->editor);
@@ -926,6 +938,20 @@ public:
   explicit ChainHost(std::shared_ptr<ChainLayout> layout) : layout_(std::move(layout)), target_(layout_->target), fx_(layout_->active_fx) {}
   ~ChainHost() override { if (!attached_ && layout_->active_host.expired()) restore_chain(layout_); }
   void* parent() const override { return layout_->backdrop; }
+  void read_parameter_metadata(Host& host, int fx, Json& parameters) const override {
+    if (!valid() || layout_->selected() != fx) return;
+    const auto guid = target_.api<Guid* (*)(void*, int)>(host, "GetFXGUID")(target_.object(), fx);
+    if (!guid) return;
+    HWND window = nullptr;
+    for (const auto& entry : attachments) {
+      const auto& state = *entry.second;
+      if (state.layout != layout_ || state.target != target_ || state.fx_guid != *guid || !state.alive ||
+          !IsWindow(state.editor) || !IsWindowVisible(state.editor) || !IsChild(layout_->owner, state.editor)) continue;
+      if (window) return;
+      window = state.editor;
+    }
+    jsfx_editor_enum_metadata(window, parameters);
+  }
   bool valid() const override {
     return layout_->alive && layout_->target == target_ && IsWindow(layout_->owner) && IsWindowVisible(layout_->owner) &&
       layout_->backdrop && IsWindow(layout_->backdrop);
@@ -1089,7 +1115,7 @@ BOOL CALLBACK inspect(HWND editor, LPARAM parameter) {
     auto layout = !is_floating && editor != owner ? chain_layout(owner, search.host, target, fx, search.match) : nullptr;
     auto host = [&] {
       ObserverTiming::Scope timing(search.timing, ObserverTiming::CreateHost);
-      return std::make_shared<EditorHost>(editor, owner, layout);
+      return std::make_shared<EditorHost>(editor, owner, layout, search.host, target, fx);
     }();
     { ObserverTiming::Scope conceal_timing(search.timing, ObserverTiming::Conceal); host->prepare(search.timing); }
     if (layout) {

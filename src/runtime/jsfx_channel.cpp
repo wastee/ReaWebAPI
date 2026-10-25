@@ -1,4 +1,5 @@
 #include "runtime/jsfx_channel.hpp"
+#include "runtime/jsfx_engine_api.hpp"
 #include "runtime/external_settings.hpp"
 #include "jsfx_channel_source.hpp"
 #include <cmath>
@@ -17,23 +18,7 @@
 
 namespace reaweb {
 namespace {
-// Versioned public export prefix from Cockos jsfx/jsfx_api.h, not SX_Instance layout.
-struct EngineApi {
-  unsigned version;
-  void* (*create)(const char*, const char*, bool*);
-  int (*process)(void*, double*, int, int, int, double, int, int, double, double, double, double, double, int);
-  void* (*create_ui)(void*, void*, void*, void*);
-  void* (*get_ui)(void*);
-  void (*delete_ui)(void*);
-  void (*destroy)(void*);
-  const char* (*name)(void*);
-  void (*load)(void*, const char*);
-  const char* (*save)(void*, int*);
-  int (*count)(void*);
-  double (*get)(void*, int, double*, double*, double*);
-  void (*param_name)(void*, int, char*, int);
-  void (*set)(void*, int, double, int);
-};
+using EngineApi = JsfxEngineApi;
 template<class T> T required(Host& host, const char* name) {
   auto fn = host.native_function ? reinterpret_cast<T>(host.native_function(name)) : nullptr;
   if (!fn) throw Error("UNSUPPORTED", std::string("JSFX channel requires host export: ") + name);

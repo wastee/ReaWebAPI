@@ -2,6 +2,7 @@
 
 - [REAPER extension SDK](https://github.com/justinfrankel/reaper-sdk), Cockos Incorporated: zlib-style license; SDK header retains the complete notice.
 - [WDL / SWELL](https://github.com/justinfrankel/WDL), Cockos Incorporated: zlib-style license. Used for native dockable containers on macOS and Linux.
+- [JSFX](https://github.com/justinfrankel/jsfx), Copyright (C) 2004 and onwards, Cockos Incorporated: LGPL. `src/runtime/jsfx_engine_api.hpp` adapts the engine API prefix for the native channel and loaded-instance enumeration metadata. See `COPYING.LESSER` and `COPYING`.
 - [nlohmann/json 3.11.3](https://github.com/nlohmann/json), Niels Lohmann and contributors: MIT.
 - [libebur128 1.2.6](https://github.com/jiixyj/libebur128/tree/v1.2.6), Jan Kokemüller and contributors: MIT. Used for worker-thread EBU R128 loudness analysis. Its bundled queue header retains the BSD notice.
 - REAPER `analysis/loudness_meter`, Copyright (C) 2021 and later Cockos Incorporated: LGPL. The built-in Meter adapts its True Peak, RMS-I, K-weighted loudness and LRA algorithms. See `src/runtime/licenses/loudness_meter.txt`, `COPYING.LESSER` and `COPYING`.

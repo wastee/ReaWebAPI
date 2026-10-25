@@ -291,6 +291,16 @@ async function jsfxContract() {
   const section: string | null = state.parameters[0].section;
   const unit: null = state.parameters[0].unit;
   const choices: null = state.parameters[0].enum;
+  const options = state.parameters[0].reaweb.enum;
+  if (options) {
+    const value: number = options[0].value;
+    const label: string = options[0].label;
+    void value; void label;
+    // @ts-expect-error Enum options are immutable snapshots.
+    options[0].label = 'Changed';
+    // @ts-expect-error Enum arrays are immutable snapshots.
+    options.push({ value: 3, label: 'Other' });
+  }
   void section; void unit; void choices;
   const revision: string = state.revision;
   const result = await jsfx.params.set(0, .5);

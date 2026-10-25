@@ -2,10 +2,10 @@
 
 ## English
 
-- Read JSFX parameter section names through optional TrackFX/TakeFX host APIs, returning null when unavailable.
-- Add the explicit null unit field to JSFX parameter metadata and TypeScript declarations, and document public API limits for enum labels, units and groups.
+- Add `parameter.reaweb.enum` with raw values and labels read from the loaded JSFX instance through the official engine API on Windows, macOS and Linux.
+- Validate editor identity and engine ABI, returning null when enumeration metadata cannot be read safely or completely. Include immutable SDK types and usage examples.
 
 ## 简体中文
 
-- 通过可选的 TrackFX/TakeFX 宿主 API 读取 JSFX 参数区段名称，不可用时返回 null。
-- JSFX 参数元数据及 TypeScript 声明新增明确的 unit: null 字段，补充公开 API 对枚举标签、单位和分组的限制。
+- 新增 `parameter.reaweb.enum`，在 Windows、macOS 和 Linux 上通过官方 JSFX 引擎 API 读取已加载实例的枚举原始值及标签。
+- 校验编辑器实例身份及引擎 ABI，无法安全、完整读取时返回 null，同步提供不可变 SDK 类型及使用示例。
