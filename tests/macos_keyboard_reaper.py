@@ -60,6 +60,18 @@ def cmd(op,**args):
     assert not isinstance(value,dict) or 'error' not in value,value
     return value
 def ev(script):return cmd('eval',script=script)
+
+def promise(script):
+    ev('window.promiseResult=null;Promise.resolve('+script+').then(value=>promiseResult={value},error=>promiseResult={error:error.message});true')
+    value=wait(lambda:ev('promiseResult'))
+    assert 'error' not in value,value
+    return value.get('value')
+
+def reload_page():
+    ev('setTimeout(()=>location.reload(),500);true');time.sleep(1)
+    wait(lambda:ev('!!window.reaper'));promise('reaper.lifecycle.ready')
+    if a.jsfx:wait(lambda:ev('!!window.jsfx'))
+    cmd('focus',content=True);time.sleep(.3)
 def press(key,flags=0):
     cmd('key',key=key,down=True,flags=flags);time.sleep(.12)
     cmd('key',key=key,down=False,flags=flags);time.sleep(.2)
@@ -75,6 +87,24 @@ with (root/'process.log').open('w') as log:
         cmd('focus',content=True);time.sleep(.5)
         assert cmd('state')['keyWindow'] and ev('document.hasFocus()'), 'The test WebView must be active'
         if a.jsfx:
+            cmd('focus',main=True);press(49);cmd('focus',content=True);time.sleep(.5)
+            if not a.baseline:
+                initial=a.jsfx!='false'
+                before=(folder/'probe.json').read_bytes()
+                for enabled in [not initial,initial]:
+                    assert promise('reaper.window.setDawKeyboard('+str(enabled).lower()+')')==enabled
+                    assert promise('reaper.window.getState()')['dawKeyboard']==enabled
+                    if enabled:
+                        for capture in [True,False]:
+                            promise('reaper.window.setKeyboardCapture('+str(capture).lower()+')')
+                            for target,route in [("document.querySelector('#button')",True),('closedInput',False)]:
+                                ev(f'{target}.focus();keys=[];true');before_keys=cmd('state')['shortcuts'];press(49)
+                                assert cmd('state')['shortcuts']-before_keys==int(route)
+                                assert len(ev('keys'))==(0 if route else 2)
+                promise('reaper.window.setDawKeyboard('+str(not initial).lower()+')')
+                reload_page()
+                assert promise('reaper.window.getState()')['dawKeyboard']==initial
+                assert (folder/'probe.json').read_bytes()==before
             for target in ["document.querySelector('#slider')","document.querySelector('#button')","document.querySelector('#text')","document.querySelector('#area')","document.querySelector('#edit')",'openInput','closedInput']:
                 ev(f'{target}.focus();keys=[];true');before=cmd('state')['shortcuts'];press(49)
                 state=cmd('state');keys=ev('keys');route=a.jsfx!='false' and target in ["document.querySelector('#slider')","document.querySelector('#button')"]
@@ -112,6 +142,18 @@ with (root/'process.log').open('w') as log:
             cmd('focus',main=True);press(49);cmd('focus',content=True);time.sleep(.5)
             ev('window.initialDawKeyboard=null;reaper.window.getState().then(s=>initialDawKeyboard=s.dawKeyboard);true')
             wait(lambda:ev('initialDawKeyboard!==null'));assert ev('initialDawKeyboard') is False
+            for initial in [True,False,None]:
+                config={'id':'keyboard-acceptance'}
+                if initial is not None:config['dawKeyboard']=initial
+                manifest=folder/'app.json';manifest.write_text(json.dumps(config));before=manifest.read_bytes()
+                reload_page();expected=initial is True
+                assert promise('reaper.window.getState()')['dawKeyboard']==expected
+                ev("document.querySelector('#button').focus();keys=[];true");before_keys=cmd('state')['shortcuts'];press(49)
+                assert cmd('state')['shortcuts']-before_keys==int(expected)
+                promise('reaper.window.setDawKeyboard('+str(not expected).lower()+')')
+                assert manifest.read_bytes()==before
+                reload_page();assert promise('reaper.window.getState()')['dawKeyboard']==expected
+                report.append(dict(appConfig=initial,reload=expected))
             def setting(method,value):
                 ev('window.settingDone=false;reaper.window.'+method+'('+str(value).lower()+').then(()=>settingDone=true);true')
                 wait(lambda:ev('settingDone'))

@@ -4,9 +4,7 @@
 
 [English](README.md) | **简体中文**
 
-JSFX Web UI 默认将非编辑区域的无修饰 Space 交给 REAPER 快捷键绑定处理。设置 [`JSFX_WebUI.dawKeyboard`](docs/jsfx-webui.zh-CN.md#页面关联) 为 `false` 可恢复原有键盘行为。
-
-普通 App 可通过 [`reaper.window.setDawKeyboard(true)`](docs/runtime-api.zh-CN.md#普通-app-space-路由) 启用相同行为，默认关闭。
+Space 路由的初始值由普通 App 的 `app.json.dawKeyboard` 或 JSFX 的 `JSFX_WebUI.dawKeyboard` 决定，默认值分别为 `false` 和 `true`。两者均支持 [`reaper.window.setDawKeyboard()`](docs/runtime-api.zh-CN.md#space-路由) 动态覆盖，重载恢复 JSON 配置，不回写文件。
 
 ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩展，提供可停靠的 WebView 窗口，并通过 `reaper` 对象异步调用 REAPER API。
 

@@ -229,7 +229,6 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
   }
   if (method == "ReaWeb_SetDawKeyboard") {
     if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected a boolean");
-    if (s.jsfx) throw Error("WINDOW_HOSTED", "Use JSFX_WebUI.dawKeyboard for a hosted JSFX editor");
     const bool enabled = args[0].get<bool>();
     if (enabled && !dock_.daw_space) throw Error("HOST_UNAVAILABLE", "REAPER shortcut routing is unavailable");
     if (!enabled) release_daw_space(s);
@@ -561,6 +560,11 @@ void Runtime::tick() {
       if (method == "__reawebHello") {
         if (data["args"] != Json::array({1})) throw Error("PROTOCOL_MISMATCH", "Unsupported bridge protocol");
         if (s->ready && s->document != document) throw Error("DOCUMENT_STALE", "Reload the page to start a new document");
+        if (!s->ready) {
+          s->daw_keyboard = daw_keyboard_default(*s);
+          if (dock_.daw_space)
+            s->window->evaluate(std::string("window.__reawebSetDawKeyboard?.(") + (s->daw_keyboard ? "true" : "false") + ");");
+        }
         s->document = document; s->ready = true;
         s->startup_timing->mark(StartupTiming::Handshake);
         auto query = data; query["method"] = "ReaWeb_GetCapabilities"; query["args"] = Json::array();

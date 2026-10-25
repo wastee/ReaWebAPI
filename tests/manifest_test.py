@@ -31,6 +31,17 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(app=path.relative_to(web).as_posix()):
                 validate(path)
 
+    def test_daw_keyboard_boolean(self):
+        for enabled in (True, False):
+            self.write(dawKeyboard=enabled)
+            before = self.path.read_bytes()
+            self.assertIs(validate(self.path)[0]['dawKeyboard'], enabled)
+            self.assertEqual(self.path.read_bytes(), before)
+        for value in ('true', 0, 1, None, [], {}):
+            self.write(dawKeyboard=value)
+            with self.assertRaises(ValueError):
+                validate(self.path)
+
     def test_invalid_fields_and_entry_paths(self):
         for fields in ({'permissions': []}, {'schemaVersion': True}, {'version': 'latest'}, {'name': ''},
                        {'entry': '../index.html'}, {'entry': 'C:/index.html'}, {'entry': '/index.html'}, {'entry': 'missing.html'}):

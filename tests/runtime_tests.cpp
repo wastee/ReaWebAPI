@@ -215,6 +215,41 @@ int main() {
       runtime.close(second_id); runtime.tick();
     }
     {
+      const auto directory = root / "Scripts" / "KeyboardConfig";
+      fs::create_directories(directory);
+      const auto page = directory / "index.html", manifest = directory / "app.json";
+      std::ofstream(page) << "<!doctype html>";
+      const Json config{{"id", "keyboard-config"}, {"dawKeyboard", true}};
+      std::ofstream(manifest) << config;
+      auto keyboard_docks = docks;
+      keyboard_docks.daw_space = [](bool, bool) {};
+      Runtime runtime(host, root, [](const std::string&) {}, keyboard_docks);
+      const auto id = runtime.open(page.u8string()); auto window = windows.back().lock();
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(window->daw_keyboard && runtime.diagnostics(id)["window"]["dawKeyboard"] == true);
+      result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {false}));
+      CHECK(!window->daw_keyboard && Json::parse(std::ifstream(manifest)) == config);
+      const auto second_id = runtime.open(page.u8string()); auto second = windows.back().lock();
+      result(runtime, *second, second->send("__reawebHello", {1}));
+      CHECK(second->daw_keyboard && !window->daw_keyboard);
+      window->reload(); window->document = "configured-reload";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(window->daw_keyboard);
+      auto changed = config; changed["dawKeyboard"] = false;
+      std::ofstream(manifest) << changed;
+      window->reload(); window->document = "changed-config";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(!window->daw_keyboard && second->daw_keyboard);
+      changed["dawKeyboard"] = "true"; std::ofstream(manifest) << changed;
+      window->reload(); window->document = "invalid-config";
+      CHECK(result(runtime, *window, window->send("__reawebHello", {1}))["error"]["code"] == "APP_MANIFEST_INVALID");
+      CHECK(!runtime.is_ready(id));
+      bool rejected = false;
+      try { runtime.open(page.u8string()); } catch (const Error& error) { rejected = error.code == "APP_MANIFEST_INVALID"; }
+      CHECK(rejected);
+      runtime.close(id); runtime.close(second_id); runtime.tick();
+    }
+    {
       struct Editor final : JsfxEditorHost {
         bool alive = true;
         int size_requests = 0;
@@ -239,6 +274,7 @@ int main() {
       fs::create_directories(directory);
       std::ofstream(directory / "test.jsfx") << "desc:Test\n@sample\n";
       std::ofstream(directory / "test.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html"}})";
+      std::ofstream(directory / "app.json") << R"({"id":"jsfx-keyboard-config","dawKeyboard":false})";
       std::ofstream(directory / "index.html") << "<html></html>";
       auto jsfx_host = host;
       int jsfx_undo_begin = 0, jsfx_undo_end = 0;
@@ -281,7 +317,27 @@ int main() {
       for (const auto key : {"u", "r", "d", "d", "r", "u", "u"}) window->options.on_message(std::string("__reawebDawKey:") + key);
       CHECK(keys.empty());
       runtime.tick(); CHECK(keys == "dru");
-      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {false}))["error"]["code"] == "WINDOW_HOSTED");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {false}))["result"] == false);
+      CHECK(!window->daw_keyboard && !runtime.diagnostics(id)["window"]["dawKeyboard"].get<bool>());
+      const auto association_path = directory / "test.json";
+      const auto original_association = Json::parse(std::ifstream(association_path));
+      auto disabled_association = original_association;
+      disabled_association["JSFX_WebUI"]["dawKeyboard"] = false;
+      std::ofstream(association_path) << disabled_association;
+      window->reload(); window->document = "jsfx-disabled-config";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(!window->daw_keyboard && !runtime.diagnostics(id)["window"]["dawKeyboard"].get<bool>());
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {true}))["result"] == true);
+      result(runtime, *window, window->send("ReaWeb_SetKeyboardCapture", {false}));
+      CHECK(runtime.captures_keyboard(window.get(), [](void*, void*) { return false; }, true));
+      CHECK(Json::parse(std::ifstream(association_path)) == disabled_association);
+      window->reload(); window->document = "jsfx-config-restored";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(!window->daw_keyboard);
+      std::ofstream(association_path) << original_association;
+      window->reload(); window->document = "jsfx-default-config";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(window->daw_keyboard);
       const auto call = [&](const char* method, Json payload = Json::object()) {
         return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
       };

@@ -3,5 +3,6 @@
   "id": "reawebapi-runtime-demo",
   "name": "ReaWebAPI Runtime Studio",
   "version": "0.1.8",
-  "entry": "index.html"
+  "entry": "index.html",
+  "dawKeyboard": false
 }

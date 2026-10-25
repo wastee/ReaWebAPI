@@ -5,15 +5,27 @@
 #include <regex>
 
 namespace reaweb {
+namespace {
+Json app_manifest(const fs::path& root) {
+  const auto path = root / "app.json";
+  if (!fs::exists(path)) return Json::object();
+  if (!fs::is_regular_file(path) || fs::file_size(path) > 65536) throw Error("APP_MANIFEST_INVALID", "app.json exceeds 64 KiB or is not a file");
+  std::ifstream stream(path, std::ios::binary);
+  auto manifest = Json::parse(stream, nullptr, false);
+  if (manifest.is_discarded() || !manifest.is_object()) throw Error("APP_MANIFEST_INVALID", "app.json must contain a JSON object");
+  return manifest;
+}
+}
+bool app_daw_keyboard(const fs::path& root) {
+  const auto value = app_manifest(root).value("dawKeyboard", Json(false));
+  if (!value.is_boolean()) throw Error("APP_MANIFEST_INVALID", "dawKeyboard must be a boolean");
+  return value.get<bool>();
+}
 Json app_info(const fs::path& root, const fs::path& data, const std::string& id) {
   Json result = {{"id", id}, {"name", root.filename().u8string()}, {"version", nullptr},
     {"rootPath", fs::canonical(root).u8string()}, {"dataPath", fs::absolute(data).lexically_normal().u8string()}};
-  const auto path = root / "app.json";
-  if (fs::exists(path)) {
-    if (!fs::is_regular_file(path) || fs::file_size(path) > 65536) throw Error("APP_MANIFEST_INVALID", "app.json exceeds 64 KiB or is not a file");
-    std::ifstream stream(path, std::ios::binary);
-    auto manifest = Json::parse(stream, nullptr, false);
-    if (manifest.is_discarded() || !manifest.is_object()) throw Error("APP_MANIFEST_INVALID", "app.json must contain a JSON object");
+  {
+    const auto manifest = app_manifest(root);
     for (const auto* field : {"name", "version"}) if (manifest.contains(field)) {
       if (!manifest[field].is_string()) throw Error("APP_MANIFEST_INVALID", std::string("Invalid App ") + field);
       const auto value = manifest[field].get<std::string>();

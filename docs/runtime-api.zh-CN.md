@@ -256,16 +256,24 @@ const destination = source && await reaper.dialog.saveFile();
 if (source && destination) await reaper.fs.moveFile(source, destination);
 ```
 
-## 普通 App Space 路由
+## Space 路由
 
-`reaper.window.setDawKeyboard(enabled)` 返回 `Promise<boolean>`，仅用于普通 App。默认关闭，各窗口独立，导航或重载后重置。`getState().dawKeyboard` 返回当前状态。它不修改 `setKeyboardCapture`，在键盘捕获开启或关闭时均可使用。
+普通 App 和 JSFX Web UI 均使用 `reaper.window.setDawKeyboard(boolean)` 动态设置当前窗口，通过 `getState().dawKeyboard` 读取当前状态。无需为控件分别设置，不影响其他窗口，也不修改 `setKeyboardCapture`。
+
+| 页面类型 | 初始配置 | 未配置默认值 |
+| --- | --- | --- |
+| 普通 App | 入口目录 `app.json` 的 `dawKeyboard` | `false` |
+| JSFX Web UI | 关联 JSON 的 `JSFX_WebUI.dawKeyboard` | `true` |
+
+普通 App 可在已有 `app.json` 中添加 `"dawKeyboard": true`。JSFX 始终使用自身关联 JSON，该页面旁的 `app.json.dawKeyboard` 不参与设置。字段必须是布尔值，普通 App 非法值返回 `APP_MANIFEST_INVALID`。
 
 ```js
 await reaper.lifecycle.ready;
+// 可选：覆盖 JSON 初始值，仅影响当前页面。
 await reaper.window.setDawKeyboard(true);
-// await reaper.window.setDawKeyboard(false);
+const enabled = (await reaper.window.getState()).dawKeyboard;
 ```
 
-启用后，非编辑区域的无修饰 Space 通过 REAPER 主区当前快捷键绑定处理。输入框、文本区域、contenteditable、开放或封闭 Shadow DOM 中的编辑控件及输入法组合输入保留网页行为。其他键和带修饰键的新按键保持原有处理。按住 Space 时保持首次按下的归属，失焦或关闭开关会释放宿主按键。
+创建窗口和导航或重载时重新读取 JSON，初始状态在 `lifecycle.ready` 完成前生效。运行时覆盖不回写配置。JSFX 编辑器缓存复用同一页面时保留当前覆盖，页面重载才恢复配置。关联缺失或无效时，JSFX 重载握手返回 `JSFX_ASSOCIATION_INVALID`。
 
-JSFX Web UI 继续由关联 JSON 的 `JSFX_WebUI.dawKeyboard` 控制，默认启用。在 JSFX 页面调用此方法返回 `WINDOW_HOSTED`。普通 App 不读取该 JSON 配置。
+启用后，非编辑区域的无修饰 Space 使用 REAPER 主区当前快捷键绑定。输入框、textarea、contenteditable、开放或封闭 Shadow DOM 中的编辑控件及 IME 组合输入保留网页行为。其他按键和带修饰键的新按键保持原有处理。按住 Space 时保持首次按下的归属，失焦或关闭开关会释放宿主按键。

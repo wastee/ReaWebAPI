@@ -17,7 +17,7 @@ def validate(path):
             value[key] = child
         return value
     manifest = json.loads(path.read_text(encoding='utf-8-sig'), object_pairs_hook=object_pairs)
-    if not isinstance(manifest, dict) or set(manifest) - {'schemaVersion', 'id', 'name', 'version', 'author', 'entry'}:
+    if not isinstance(manifest, dict) or set(manifest) - {'schemaVersion', 'id', 'name', 'version', 'author', 'entry', 'dawKeyboard'}:
         raise ValueError('Invalid manifest fields; permissions are not implemented')
     for key in ('name', 'version', 'entry'):
         if not isinstance(manifest.get(key), str) or not manifest[key].strip() or '\0' in manifest[key]:
@@ -32,6 +32,8 @@ def validate(path):
         raise ValueError('Unsupported manifest schema version')
     if 'author' in manifest and (not isinstance(manifest['author'], str) or len(manifest['author']) > 256):
         raise ValueError('Invalid manifest author')
+    if 'dawKeyboard' in manifest and type(manifest['dawKeyboard']) is not bool:
+        raise ValueError('dawKeyboard must be a boolean')
     entry = manifest['entry']
     relative = PurePosixPath(entry)
     if '\\' in entry or ':' in entry or relative.is_absolute() or PureWindowsPath(entry).drive or '..' in relative.parts:

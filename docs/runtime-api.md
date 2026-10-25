@@ -171,7 +171,7 @@ await dispose(); // Still safe after off.
 
 ## Manifest validation and example
 
-`SDK/app-manifest.schema.json` defines name/version/entry with optional id, schemaVersion and author. Run `python tools/validate_app.py runtime/runtime-demo/app.json` in source, or `python tools/validate_app.py runtime-demo/app.json` inside the SDK. Validation is read-only and checks field types, existence and resolved entry containment.
+`SDK/app-manifest.schema.json` defines name/version/entry with optional id, schemaVersion, author and dawKeyboard. Run `python tools/validate_app.py runtime/runtime-demo/app.json` in source, or `python tools/validate_app.py runtime-demo/app.json` inside the SDK. Validation is read-only and checks field types, existence and resolved entry containment.
 
 Manifest files do not automatically launch/install an App; existing HTML launchers remain the entry point. No app manager, updater, installer or permission enforcement is included. Unsupported permissions fields are rejected. Apps remain trusted; the resource-server root is not a native API sandbox.
 
@@ -211,16 +211,24 @@ const destination = source && await reaper.dialog.saveFile();
 if (source && destination) await reaper.fs.moveFile(source, destination);
 ```
 
-## Ordinary App Space routing
+## Space routing
 
-`reaper.window.setDawKeyboard(enabled)` returns `Promise<boolean>` and applies only to ordinary Apps. It is disabled by default, independent per window, and reset on navigation or reload. Read the current state through `getState().dawKeyboard`. It does not change `setKeyboardCapture` and works with keyboard capture enabled or disabled.
+Ordinary Apps and JSFX Web UI both use `reaper.window.setDawKeyboard(boolean)` to override routing for the current window, and `getState().dawKeyboard` to read its current state. No per-control setup is needed. Other windows and `setKeyboardCapture` remain independent.
+
+| Page type | Initial configuration | Default when omitted |
+| --- | --- | --- |
+| Ordinary App | `dawKeyboard` in the entry directory's `app.json` | `false` |
+| JSFX Web UI | `JSFX_WebUI.dawKeyboard` in the association JSON | `true` |
+
+Ordinary Apps can add `"dawKeyboard": true` to their existing `app.json`. JSFX always uses its association JSON and ignores the adjacent `app.json.dawKeyboard`. Values must be booleans. Invalid ordinary App values return `APP_MANIFEST_INVALID`.
 
 ```js
 await reaper.lifecycle.ready;
+// Optional override of the JSON initial value for this page only.
 await reaper.window.setDawKeyboard(true);
-// await reaper.window.setDawKeyboard(false);
+const enabled = (await reaper.window.getState()).dawKeyboard;
 ```
 
-When enabled, unmodified Space outside editable fields uses REAPER's current main-section shortcut binding. Text inputs, textareas, contenteditable, editable controls in open or closed Shadow DOM, and IME composition retain browser behavior. Other keys and newly pressed modified keys retain their existing handling. A held Space retains its initial owner. Blur or disabling the switch releases a host-owned key.
+Window creation and navigation or reload reread JSON and apply its initial state before `lifecycle.ready` resolves. Runtime overrides never write configuration. Reusing a cached JSFX page retains its override until that page reloads. A missing or invalid JSFX association rejects the reload handshake with `JSFX_ASSOCIATION_INVALID`.
 
-JSFX Web UI continues to use the association JSON option `JSFX_WebUI.dawKeyboard`, enabled by default. Calling this method from a JSFX page returns `WINDOW_HOSTED`. Ordinary Apps do not read that JSON setting.
+When enabled, unmodified Space outside editable fields uses REAPER's current main-section shortcut binding. Text inputs, textareas, contenteditable, editable controls in open or closed Shadow DOM, and IME composition retain browser behavior. Other keys and newly pressed modified keys retain existing handling. A held Space retains its initial owner. Blur or disabling the switch releases a host-owned key.

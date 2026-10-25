@@ -271,8 +271,8 @@ interface ReaWebAPI {
     isDocked(): Promise<boolean>;
     /** Default true. False allows REAPER's normal global shortcut policy for this window. */
     setKeyboardCapture(capture: boolean): Promise<boolean>;
-    /** Ordinary Apps only. Route unmodified Space outside editable fields to REAPER's binding.
-     * Defaults to false and resets on navigation. Does not change keyboard capture. */
+    /** Route unmodified Space outside editable fields to REAPER for this App or JSFX page.
+     * Overrides JSON until navigation/reload, without writing configuration or changing keyboard capture. */
     setDawKeyboard(enabled: boolean): Promise<boolean>;
     /** Explicitly trust a loopback HTTP server; regular window.open stays local-file only. */
     openDev(url: string): Promise<number>;

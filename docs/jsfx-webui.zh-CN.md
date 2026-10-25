@@ -25,9 +25,9 @@ Effects/Author/Utility/
 
 `entry` 必须指向 JSFX 所在目录内的 HTML 文件，JSFX 必须位于 `Effects` 下。关联缺失、禁用或无效时保留原生编辑器。`width`、`height` 指定独立 FX 窗口的初始内容尺寸，范围为 100..2048，默认 640×420。停靠窗口保留宿主尺寸。HTML 目录内可提供遵循普通 App 身份契约的 `app.json`，未提供时按 `fx_ident` 生成稳定的 App ID。使用下方 helper 时，将 `SDK/jsfx-webui.mjs` 复制到页面旁。
 
-`dawKeyboard` 在 Windows、macOS 和 Linux 上默认为 `true`。非编辑区域的无修饰 Space 使用 REAPER 主操作区的快捷键绑定，支持自定义绑定。文本输入框、textarea、contenteditable 和 IME 组合输入保留 Space，其他按键和修饰组合键维持原有行为。设置 `dawKeyboard: false` 可恢复原有键盘行为。非布尔值会使关联无效。该配置仅作用于当前关联的 Hosted JSFX WebView，不改变普通 App 的 `window.setKeyboardCapture()` 语义。修改关联后关闭并重新打开编辑器。
+`dawKeyboard` 是 Windows、macOS 和 Linux 上的初始 Space 路由配置，省略时为 `true`。非布尔值使关联无效。启用后，非编辑区域的无修饰 Space 使用 REAPER 主区当前快捷键绑定，编辑区域与 IME 组合输入保留空格输入。
 
-普通 App 使用独立的 [`reaper.window.setDawKeyboard`](runtime-api.zh-CN.md#普通-app-space-路由) 开关，默认关闭。
+普通 App 和 JSFX 均可通过 [`reaper.window.setDawKeyboard`](runtime-api.zh-CN.md#space-路由) 动态覆盖当前状态，不回写配置。页面重载后重新读取各自 JSON。JSFX 忽略 `app.json.dawKeyboard`，普通 App 的该字段默认 `false`。
 
 ## 参数服务
 

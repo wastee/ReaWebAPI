@@ -10,6 +10,7 @@
     "name": { "type": "string", "minLength": 1, "maxLength": 256 },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[A-Za-z0-9.-]+)?$" },
     "author": { "type": "string", "maxLength": 256 },
+    "dawKeyboard": { "type": "boolean", "default": false, "description": "Initial Space routing for ordinary Apps. Runtime overrides reset from this configuration on page reload." },
     "entry": { "type": "string", "minLength": 1, "maxLength": 4096,
       "description": "Existing .html/.htm path relative to this manifest. Forward slashes only; absolute paths, parent traversal, and links outside the App directory are rejected by validate_app.py." }
   }

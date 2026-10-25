@@ -144,7 +144,7 @@ private:
       Clock::time_point discovered = Clock::now();
     };
     std::shared_ptr<Jsfx> jsfx;
-    bool daw_keyboard_enabled() const { return jsfx ? jsfx->daw_keyboard && bool(jsfx->editor.host) : daw_keyboard; }
+    bool daw_keyboard_enabled() const { return daw_keyboard && (!jsfx || bool(jsfx->editor.host)); }
     bool lifecycle_enabled = false, allow_reload = false;
     std::string lifecycle_action, lifecycle_token;
     Clock::time_point lifecycle_deadline;
@@ -229,6 +229,7 @@ private:
   Json jsfx_result(int window, const std::string& method, const Json& payload);
   void end_jsfx_edit(Session& session);
   void release_daw_space(Session& session);
+  bool daw_keyboard_default(Session& session);
   void tick_daw_keyboard();
   void check_thread() const;
   void enqueue_message(Session& session, const std::string& message, bool to_web);

@@ -229,9 +229,10 @@ Run `python tests/window_appearance_smoke.py --reaper <executable> --extension <
 
 `host_features` checks relative/absolute Unicode move paths, overwrite protection, same-file no-op, missing directories, symlink rejection and files larger than 16 MiB. Set `REAWEB_TEST_MOVE_VOLUME` to an existing writable directory on another filesystem to exercise staged cross-volume moves.
 
-### Ordinary App Space routing (v0.3.9.4)
+### App and JSFX Space routing (v0.3.9.5)
 
-- Verify `getState().dawKeyboard` is initially `false`. Enable it with `setDawKeyboard(true)` and test floating and docked windows with keyboard capture both enabled and disabled.
+- Test omitted, `true`, `false` and invalid `dawKeyboard` in ordinary App manifests. Test JSFX association defaults independently of the adjacent app.json. Both page types support `setDawKeyboard`. Verify per-window overrides, no JSON writes, and rereading changed configuration on reload.
+- Test floating and docked windows with keyboard capture both enabled and disabled. Confirm closed Shadow DOM inputs remain editable when enabling a page whose JSON started disabled.
 - Bind Space to a different REAPER main-section action. Non-editable buttons and sliders must invoke that binding once per press. Text inputs, textareas, contenteditable and open/closed Shadow DOM editors must receive Space without invoking the host action.
 - Disable routing and compare against the initial behavior. Check held-key release, window isolation and reset after reload. JSFX JSON defaults and opt-out behavior must remain unchanged.
 - `tests/keyboard_reaper.py` includes the Windows/Linux ordinary App matrix. On macOS, run `tests/macos_keyboard_reaper.py --extension <module> --probe <keyboard-probe> --output <new-profile> --app-routing` on an unlocked desktop.

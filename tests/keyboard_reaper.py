@@ -143,7 +143,10 @@ def main():
     def command(op,arg=''):
         (root/'reply.txt').unlink(missing_ok=True)
         (root/'command.tmp').write_text(op+'|'+str(arg),encoding='utf-8');(root/'command.tmp').replace(root/'command.txt')
-        wait(lambda:(root/'reply.txt').exists());value=(root/'reply.txt').read_text(encoding='utf-8')
+        def read_reply():
+            try:return (root/'reply.txt').read_text(encoding='utf-8')
+            except (FileNotFoundError,PermissionError):return None
+        value=wait(read_reply)
         assert not value.startswith('ERROR:'),value
         return value
     def evaluate(script):
@@ -156,6 +159,12 @@ def main():
         native_key(codes[name],True);time.sleep(.08);native_key(codes[name],False)
         if shift:native_key(codes['shift'],False)
         time.sleep(.3)
+    def reload_page(jsfx=False):
+        evaluate('reaper.DeleteExtState("KeyboardProbe","id",false)')
+        evaluate('setTimeout(()=>location.reload(),800);true');time.sleep(1)
+        wait(lambda:int(command('ready'))>0)
+        if jsfx:wait(lambda:evaluate('!!window.jsfx'))
+        activate();command('focus');time.sleep(.3)
     report=[]
     with (root/'process.log').open('w') as log:
         process=subprocess.Popen([str(args.reaper.resolve()),'-newinst','-cfgfile',str(root/'reaper.ini'),'-new','-ignoreerrors','-nosplash',str(root/'launch.lua')],stdout=log,stderr=log)
@@ -189,9 +198,38 @@ def main():
                         native_key(codes['space'],True);time.sleep(.2)
                         native_key(codes['space'],False);native_key(codes['shift'],False);time.sleep(.2)
                         assert float(command('state'))==repeat_position, ('Held Space changed shortcut ownership after Shift',repeat_position)
-                    report.append(dict(mode=mode,floating=floating,modifiedKeys=evaluate('keys'),passed=True));command('closefx');time.sleep(.6)
+                    report.append(dict(mode=mode,floating=floating,modifiedKeys=evaluate('keys'),passed=True))
+                    initial=mode is not False
+                    before=(effect/'probe.json').read_bytes()
+                    for enabled in [not initial,initial]:
+                        assert evaluate('reaper.window.setDawKeyboard('+str(enabled).lower()+')')==enabled
+                        for target,editable in [("document.querySelector('#button')",False),('closedInput',True)]:
+                            evaluate(f'{target}.focus();keys=[];true');command('cursor',12);press('space')
+                            host=enabled and not editable
+                            assert float(command('state'))==(0 if host else 12)
+                            assert len(evaluate('keys'))==(0 if host else 2)
+                    evaluate('reaper.window.setDawKeyboard('+str(not initial).lower()+')')
+                    reload_page(True)
+                    assert evaluate('reaper.window.getState().then(s=>s.dawKeyboard)')==initial
+                    assert (effect/'probe.json').read_bytes()==before
+                    report.append(dict(jsfxDynamic=True,mode=mode,floating=floating,reload=initial,passed=True))
+                    command('closefx');time.sleep(.6)
             command('open');wait(lambda:int(command('ready'))>0);command('focus');time.sleep(.3)
             assert evaluate('reaper.window.getState().then(s=>s.dawKeyboard)') is False
+            manifest=root/'Scripts/Keyboard/app.json'
+            for initial in [True,False,None]:
+                config={'id':'keyboard-acceptance'}
+                if initial is not None:config['dawKeyboard']=initial
+                manifest.write_text(json.dumps(config));before=manifest.read_bytes()
+                reload_page();expected=initial is True
+                assert evaluate('reaper.window.getState().then(s=>s.dawKeyboard)')==expected
+                evaluate("document.querySelector('#button').focus();keys=[];true");command('cursor',12);press('space')
+                assert float(command('state'))==(0 if expected else 12)
+                evaluate('reaper.window.setDawKeyboard('+str(not expected).lower()+')')
+                assert manifest.read_bytes()==before
+                reload_page()
+                assert evaluate('reaper.window.getState().then(s=>s.dawKeyboard)')==expected
+                report.append(dict(appConfig=initial,reload=expected,passed=True))
             for docked in [False,True]:
                 command('dock',str(docked).lower());command('focus');time.sleep(.3)
                 for capture in [True,False]:

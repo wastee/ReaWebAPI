@@ -45,7 +45,7 @@ Lua 后端与 WebView UI 之间的消息。Text messages between a Lua backend a
 | `reaper.window.setDocked(docked)` | `Promise<boolean>` | true 停靠、false 取消停靠；返回实际停靠状态，取消停靠成功返回 false |
 | `reaper.window.isDocked()` | `Promise<boolean>` | 读取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `Promise<boolean>` | 设置键盘捕获策略 |
-| `reaper.window.setDawKeyboard(enabled)` | `Promise<boolean>` | Ordinary App Space routing, disabled by default |
+| `reaper.window.setDawKeyboard(enabled)` | `Promise<boolean>` | Current-window Space routing for ordinary Apps and JSFX Web UI |
 | `reaper.window.close()` | `Promise<boolean>` | 请求清理并关闭当前窗口 |
 | `reaper.window.reload()` | `Promise<boolean>` | 请求清理并重新加载当前页面 |
 

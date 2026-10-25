@@ -118,6 +118,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   session->transparent = transparent;
   session->entry = entry;
   session->app = app;
+  session->daw_keyboard = daw_keyboard_default(*session);
   std::set<int> slots;
   for (const auto& item : sessions_) if (item.second->entry == entry) slots.insert(item.second->slot);
   while (slots.count(session->slot)) ++session->slot;
@@ -135,8 +136,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   std::weak_ptr<Session> weak = session;
   auto window_resources = app->resources ? std::make_shared<WebResources>(app->resources->root(), app_id) : nullptr;
   session->window = app->platform->open(WindowOptions{entry, std::string(bridge_script) +
-    (dock_.daw_space && (!session->jsfx || session->jsfx->daw_keyboard) ? std::string(daw_keyboard_script) +
-      (session->jsfx ? "window.__reawebSetDawKeyboard(true);" : "") : ""), session->title,
+    (dock_.daw_space ? std::string(daw_keyboard_script) : ""), session->title,
     [this, weak](std::string message) {
       if (auto s = weak.lock(); s && !s->closing) {
         if (message.rfind("__reawebDawKey:", 0) == 0) {
@@ -324,6 +324,14 @@ bool Runtime::show(int id) {
   return true;
 }
 
+bool Runtime::daw_keyboard_default(Session& session) {
+  if (!session.jsfx) return app_daw_keyboard(session.entry.parent_path());
+  const auto association = jsfx_association(resource_ / "Effects", session.jsfx->instance->binding->ident());
+  if (!association) throw Error("JSFX_ASSOCIATION_INVALID", "The JSFX Web UI association is missing or invalid");
+  session.jsfx->daw_keyboard = association->daw_keyboard;
+  return association->daw_keyboard;
+}
+
 void Runtime::release_daw_space(Session& session) {
   session.space_events.clear();
   const bool down = session.space_down;
@@ -355,7 +363,7 @@ bool Runtime::captures_keyboard(void* handle, const std::function<bool(void*, vo
   check_thread();
   for (const auto& item : sessions_) {
     const auto& s = *item.second;
-    if (daw_only ? (!s.daw_keyboard_enabled() || (s.jsfx && !s.capture_keyboard)) : !s.capture_keyboard) continue;
+    if (daw_only ? !s.daw_keyboard_enabled() : !s.capture_keyboard) continue;
     auto root = s.window->native_handle();
     if (!s.closing && !s.window->closed() && root &&
         (root == handle || is_child(root, handle))) return true;

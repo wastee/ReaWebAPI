@@ -64,7 +64,7 @@ interface ReaWebWindowState {
   visible: boolean;
   focused: boolean;
   keyboardCapture: boolean;
-  /** Space routing to REAPER. Ordinary Apps default to false. */
+  /** Current Space routing state. JSON defaults: ordinary Apps false, JSFX Web UI true. */
   dawKeyboard: boolean;
   iconVisible: boolean;
   frameless: boolean;
