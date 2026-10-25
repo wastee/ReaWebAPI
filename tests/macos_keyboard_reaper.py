@@ -12,6 +12,7 @@ p.add_argument('--capture-disabled',action='store_true')
 p.add_argument('--reference',type=Path)
 p.add_argument('--jsfx',choices=['default','true','false'])
 p.add_argument('--chain',action='store_true')
+p.add_argument('--app-routing',action='store_true')
 a=p.parse_args()
 if a.jsfx=='false' and not (a.baseline or a.reference):
     p.error('--jsfx false requires --reference <baseline-result.json> or --baseline')
@@ -106,6 +107,40 @@ with (root/'process.log').open('w') as log:
                 cmd('key',key=49,down=False);time.sleep(.2)
                 result=dict(blurWhileHeld=True,shortcuts=cmd('state')['shortcuts']-before,keys=ev('keys'))
                 report.append(result);assert result['shortcuts']==0 and not result['keys'],result
+        elif a.app_routing:
+            # Initialize REAPER's shortcut lookup before comparing the legacy path.
+            cmd('focus',main=True);press(49);cmd('focus',content=True);time.sleep(.5)
+            ev('window.initialDawKeyboard=null;reaper.window.getState().then(s=>initialDawKeyboard=s.dawKeyboard);true')
+            wait(lambda:ev('initialDawKeyboard!==null'));assert ev('initialDawKeyboard') is False
+            def setting(method,value):
+                ev('window.settingDone=false;reaper.window.'+method+'('+str(value).lower()+').then(()=>settingDone=true);true')
+                wait(lambda:ev('settingDone'))
+            for docked in [False,True]:
+                cmd('dock',value=docked);cmd('focus',content=True);time.sleep(.5)
+                for capture in [True,False]:
+                    setting('setKeyboardCapture',capture);baseline=[]
+                    for enabled in [False,True,False]:
+                        setting('setDawKeyboard',enabled);actual=[]
+                        for target in ["document.querySelector('#slider')","document.querySelector('#button')","document.querySelector('#text')","document.querySelector('#area')","document.querySelector('#edit')",'openInput','closedInput']:
+                            ev(f'{target}.focus();keys=[];true');before=cmd('state')['shortcuts'];press(49)
+                            state=cmd('state');keys=ev('keys');shortcuts=state['shortcuts']-before
+                            actual.append(dict(target=target,shortcuts=shortcuts,keys=keys))
+                            if enabled:
+                                route=target in ["document.querySelector('#slider')","document.querySelector('#button')"]
+                                assert shortcuts==int(route) and (not route or state['command']==1016),(docked,capture,actual[-1])
+                                assert len(keys)==(0 if route else 2),(docked,capture,actual[-1])
+                        if not enabled:
+                            if baseline:assert actual==baseline,(docked,capture,actual,baseline)
+                            else:baseline=actual
+                        report.append(dict(appRouting=True,docked=docked,capture=capture,enabled=enabled,controls=actual))
+                    setting('setDawKeyboard',True)
+                    ev("document.querySelector('#slider').focus();keys=[];true")
+                    cmd('key',key=49,down=True);time.sleep(.2)
+                    setting('setDawKeyboard',False);before=cmd('state')['shortcuts']
+                    cmd('key',key=49,down=True,repeat=True);time.sleep(.2)
+                    cmd('key',key=49,down=False);time.sleep(.2)
+                    result=dict(disableWhileHeld=True,docked=docked,capture=capture,shortcuts=cmd('state')['shortcuts']-before,keys=ev('keys'))
+                    report.append(result);assert result['shortcuts']==0 and not result['keys'],result
         else:
             capture='false' if a.capture_disabled else 'true'
             ev('window.captureReady=false;reaper.window.setKeyboardCapture('+capture+').then(()=>captureReady=true);true');wait(lambda:ev('captureReady'))

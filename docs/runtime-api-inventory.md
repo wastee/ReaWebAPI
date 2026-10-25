@@ -1,8 +1,8 @@
 # Runtime API 完整清单 / Complete API inventory
 
-JavaScript Runtime 公开以下 **15 个命名空间、80 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
+JavaScript Runtime 公开以下 **15 个命名空间、81 个方法和 1 个 Promise 属性**。Host Service 代理另提供 `invoke/send/on/off`。730 项 REAPER Mirror 保持原始根级名称、参数顺序、Promise 和返回值规则。
 
-The JavaScript Runtime exposes fifteen namespaces: 80 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
+The JavaScript Runtime exposes fifteen namespaces: 81 methods and one Promise property, plus `invoke/send/on/off` on named service proxies. The 730 REAPER Mirror functions keep their original root-level names and signatures. Exact types: [runtime-api.d.ts](../runtime/runtime-api.d.ts). Contracts: [中文](runtime-api.zh-CN.md) · [English](runtime-api.md) · [Native Services](native-services.md).
 
 Lua bootstrap is separate: `reaper.ReaWeb_Open(path)` runs before the browser exists. Lua-only native entry points remain documented in [Host API](host-api.md#lua-entry-points). They are not JavaScript aliases. Native transport command names in `capabilities.methods` are diagnostic wire identifiers, not callable JavaScript property paths; use `capabilities.runtime.namespaces` and this inventory for the public SDK surface.
 
@@ -45,6 +45,7 @@ Lua 后端与 WebView UI 之间的消息。Text messages between a Lua backend a
 | `reaper.window.setDocked(docked)` | `Promise<boolean>` | true 停靠、false 取消停靠；返回实际停靠状态，取消停靠成功返回 false |
 | `reaper.window.isDocked()` | `Promise<boolean>` | 读取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `Promise<boolean>` | 设置键盘捕获策略 |
+| `reaper.window.setDawKeyboard(enabled)` | `Promise<boolean>` | Ordinary App Space routing, disabled by default |
 | `reaper.window.close()` | `Promise<boolean>` | 请求清理并关闭当前窗口 |
 | `reaper.window.reload()` | `Promise<boolean>` | 请求清理并重新加载当前页面 |
 

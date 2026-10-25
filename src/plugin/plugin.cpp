@@ -197,7 +197,7 @@ accelerator_register_t webview_keys{[](MSG* message, accelerator_register_t*) ->
     (message->message == WM_KEYUP || native_key_repeat());
   const bool raw = eligible && (!modified || continuing);
   space_window = raw && message->message == WM_KEYDOWN ? message->hwnd : nullptr;
-  // FX accelerators run before WKWebView can decide whether Space edits text.
+  // Let opted-in pages decide whether Space edits text before host accelerators.
   return raw ? -10 : 0;
 }, true, nullptr};
 #endif

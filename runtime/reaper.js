@@ -630,6 +630,7 @@
     setFrameless: host('ReaWeb_SetFrameless'), setCornerRadius: host('ReaWeb_SetCornerRadius'),
     setDocked: host('ReaWeb_SetDocked'), isDocked: host('ReaWeb_IsDocked'),
     setKeyboardCapture: host('ReaWeb_SetKeyboardCapture'),
+    setDawKeyboard: host('ReaWeb_SetDawKeyboard'),
     close: host('ReaWeb_Close'), reload: host('ReaWeb_Reload')
   });
   api.fs = Object.freeze({

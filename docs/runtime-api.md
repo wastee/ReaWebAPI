@@ -24,7 +24,7 @@ All fifteen namespaces provide implemented members: 77 methods and one Promise p
 
 On Windows and macOS, new windows automatically become visible after their initial native frame is prepared. `getState().visible` stays false while presentation is pending, independently of `reaper.lifecycle.ready`. A pending `hide()` suppresses automatic display until `show()` or `focus()`. Closing cancels pending display, including during lifecycle cleanup. Existing `windowstatechange` events report the eventual visibility change. Linux retains the v0.3.8.10 window display behavior without a pending first-frame stage.
 
-`reaper.window` provides `open(path)`, `openDev(url)`, `getSize`, `setSize(width,height)`, `getPosition`, `setPosition(x,y)`, `show`, `hide`, `getState`, `setTitle`, `setIcon`, `setIconVisible`, `focus`, `setDocked`, `isDocked`, `setKeyboardCapture`, `close` and `reload`. Use `setDocked(true)` to dock and `setDocked(false)` to undock; both return the actual docked state, so successful undocking returns false. New-window methods resolve to a window ID; controls act on the calling window without an ID. Bounds are outer window dimensions and screen coordinates in native desktop units, not CSS pixels. Size limits are 100–16384; coordinates are -1000000–1000000, clamped to the desktop work area. Docker geometry belongs to REAPER: setters reject with `WINDOW_DOCKED`. Hiding affects the App container, not the entire REAPER window.
+`reaper.window` provides `open(path)`, `openDev(url)`, `getSize`, `setSize(width,height)`, `getPosition`, `setPosition(x,y)`, `show`, `hide`, `getState`, `setTitle`, `setIcon`, `setIconVisible`, `focus`, `setDocked`, `isDocked`, `setKeyboardCapture`, `setDawKeyboard`, `close` and `reload`. Use `setDocked(true)` to dock and `setDocked(false)` to undock; both return the actual docked state, so successful undocking returns false. New-window methods resolve to a window ID; controls act on the calling window without an ID. Bounds are outer window dimensions and screen coordinates in native desktop units, not CSS pixels. Size limits are 100–16384; coordinates are -1000000–1000000, clamped to the desktop work area. Docker geometry belongs to REAPER: setters reject with `WINDOW_DOCKED`. Hiding affects the App container, not the entire REAPER window.
 
 ```js
 await reaper.window.setSize(900, 700);
@@ -210,3 +210,17 @@ const source = await reaper.dialog.openFile();
 const destination = source && await reaper.dialog.saveFile();
 if (source && destination) await reaper.fs.moveFile(source, destination);
 ```
+
+## Ordinary App Space routing
+
+`reaper.window.setDawKeyboard(enabled)` returns `Promise<boolean>` and applies only to ordinary Apps. It is disabled by default, independent per window, and reset on navigation or reload. Read the current state through `getState().dawKeyboard`. It does not change `setKeyboardCapture` and works with keyboard capture enabled or disabled.
+
+```js
+await reaper.lifecycle.ready;
+await reaper.window.setDawKeyboard(true);
+// await reaper.window.setDawKeyboard(false);
+```
+
+When enabled, unmodified Space outside editable fields uses REAPER's current main-section shortcut binding. Text inputs, textareas, contenteditable, editable controls in open or closed Shadow DOM, and IME composition retain browser behavior. Other keys and newly pressed modified keys retain their existing handling. A held Space retains its initial owner. Blur or disabling the switch releases a host-owned key.
+
+JSFX Web UI continues to use the association JSON option `JSFX_WebUI.dawKeyboard`, enabled by default. Calling this method from a JSFX page returns `WINDOW_HOSTED`. Ordinary Apps do not read that JSON setting.

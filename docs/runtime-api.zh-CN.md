@@ -35,7 +35,7 @@ await reaper.window.show();
 await reaper.window.hide();
 ```
 
-另有 `open(path)`、`openDev(url)`、`getState`、`setTitle`、`setIcon`、`setIconVisible`、`focus`、`setDocked`、`isDocked`、`setKeyboardCapture`、`close`、`reload`。使用 `setDocked(true)` 停靠、`setDocked(false)` 取消停靠；返回实际停靠状态，取消停靠成功返回 false。创建新窗口返回窗口 ID，其余窗口控制针对当前调用页，不接收 ID。尺寸是包含边框的原生桌面窗口尺寸，坐标是屏幕坐标，返回 `units: 'native'`；不要当作网页 CSS 像素。后端和桌面缩放可能影响它们与 CSS 像素的比例。宽高允许 100–16384，位置允许 -1000000–1000000，系统会将窗口限制到可用屏幕区域。
+另有 `open(path)`、`openDev(url)`、`getState`、`setTitle`、`setIcon`、`setIconVisible`、`focus`、`setDocked`、`isDocked`、`setKeyboardCapture`、`setDawKeyboard`、`close`、`reload`。使用 `setDocked(true)` 停靠、`setDocked(false)` 取消停靠；返回实际停靠状态，取消停靠成功返回 false。创建新窗口返回窗口 ID，其余窗口控制针对当前调用页，不接收 ID。尺寸是包含边框的原生桌面窗口尺寸，坐标是屏幕坐标，返回 `units: 'native'`；不要当作网页 CSS 像素。后端和桌面缩放可能影响它们与 CSS 像素的比例。宽高允许 100–16384，位置允许 -1000000–1000000，系统会将窗口限制到可用屏幕区域。
 
 返回的 `mode` 区分 `floating` 与 `docked`。Docker 布局由 REAPER 控制，停靠时 `setSize/setPosition` 报 `WINDOW_DOCKED`，不会修改 REAPER 主窗口。隐藏只作用于本页容器，显示时激活对应 Docker 标签。窗口支持标题、聚焦、停靠和位置保存。
 
@@ -255,3 +255,17 @@ const source = await reaper.dialog.openFile();
 const destination = source && await reaper.dialog.saveFile();
 if (source && destination) await reaper.fs.moveFile(source, destination);
 ```
+
+## 普通 App Space 路由
+
+`reaper.window.setDawKeyboard(enabled)` 返回 `Promise<boolean>`，仅用于普通 App。默认关闭，各窗口独立，导航或重载后重置。`getState().dawKeyboard` 返回当前状态。它不修改 `setKeyboardCapture`，在键盘捕获开启或关闭时均可使用。
+
+```js
+await reaper.lifecycle.ready;
+await reaper.window.setDawKeyboard(true);
+// await reaper.window.setDawKeyboard(false);
+```
+
+启用后，非编辑区域的无修饰 Space 通过 REAPER 主区当前快捷键绑定处理。输入框、文本区域、contenteditable、开放或封闭 Shadow DOM 中的编辑控件及输入法组合输入保留网页行为。其他键和带修饰键的新按键保持原有处理。按住 Space 时保持首次按下的归属，失焦或关闭开关会释放宿主按键。
+
+JSFX Web UI 继续由关联 JSON 的 `JSFX_WebUI.dawKeyboard` 控制，默认启用。在 JSFX 页面调用此方法返回 `WINDOW_HOSTED`。普通 App 不读取该 JSON 配置。

@@ -6,6 +6,8 @@
 
 JSFX Web UI 默认将非编辑区域的无修饰 Space 交给 REAPER 快捷键绑定处理。设置 [`JSFX_WebUI.dawKeyboard`](docs/jsfx-webui.zh-CN.md#页面关联) 为 `false` 可恢复原有键盘行为。
 
+普通 App 可通过 [`reaper.window.setDawKeyboard(true)`](docs/runtime-api.zh-CN.md#普通-app-space-路由) 启用相同行为，默认关闭。
+
 ReaWebAPI 是用于开发 HTML、CSS 和 JavaScript 工具的 REAPER 原生扩展，提供可停靠的 WebView 窗口，并通过 `reaper` 对象异步调用 REAPER API。
 
 - [JSFX Web UI](docs/jsfx-webui.zh-CN.md) 托管关联配置的轨道、主轨、Take、输入、监听及嵌套容器 JSFX，通过 `params` 提供实例绑定的参数同步、归一化写入和参数组撤销。`editor` 提供持久保存的共享内容尺寸。可选 EEL SDK 提供 DSP 流、复杂状态、命令和二进制资源。[原生通道](docs/jsfx-native-channel.zh-CN.md) 使用固定大小的暂存程序，降低初始化时的 EEL 编译开销。Windows、macOS 和 Linux 的初始能力与状态读取无需额外等待一次宿主调度。

@@ -27,6 +27,8 @@ Effects/Author/Utility/
 
 `dawKeyboard` 在 Windows、macOS 和 Linux 上默认为 `true`。非编辑区域的无修饰 Space 使用 REAPER 主操作区的快捷键绑定，支持自定义绑定。文本输入框、textarea、contenteditable 和 IME 组合输入保留 Space，其他按键和修饰组合键维持原有行为。设置 `dawKeyboard: false` 可恢复原有键盘行为。非布尔值会使关联无效。该配置仅作用于当前关联的 Hosted JSFX WebView，不改变普通 App 的 `window.setKeyboardCapture()` 语义。修改关联后关闭并重新打开编辑器。
 
+普通 App 使用独立的 [`reaper.window.setDawKeyboard`](runtime-api.zh-CN.md#普通-app-space-路由) 开关，默认关闭。
+
 ## 参数服务
 
 等待 `reaper.lifecycle.ready` 后使用 `reaper.host.service('jsfx')`。请求绑定到调用方的 Hosted WebView，普通 App 与 External Client 无法选择或冒充绑定实例。

@@ -3,20 +3,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const script = fs.readFileSync(require('node:path').join(__dirname, '../src/platform/shared/daw_keyboard.hpp'), 'utf8').match(/R"JS\(([\s\S]*?)\)JS"/)[1];
-function fixture() {
+function fixture(enabled = true) {
   const events = {}, sent = [];
   class Element { attachShadow() { return {activeElement: null}; } }
   const document = {activeElement: null, designMode: 'off'};
   const window = {chrome: {webview: {postMessage: value => sent.push(value.slice(15))}}};
   window.top = window;
   vm.runInNewContext(script, {window, document, Element, addEventListener: (name, fn) => { events[name] = fn; }});
+  window.__reawebSetDawKeyboard(enabled);
   function key(type, extra = {}) {
     const event = {isTrusted: true, code: 'Space', key: ' ', repeat: false, composedPath: () => [],
       preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...extra};
     events[type](event);
     return event;
   }
-  return {events, sent, document, key, Element};
+  return {events, sent, document, key, Element, enable: window.__reawebSetDawKeyboard};
 }
 test('host owns the entire press, including repeats and modifiers changed before release', () => {
   const f = fixture();
@@ -71,5 +72,22 @@ test('blur releases host once, suppresses held repeats and trailing keyup, then 
   assert.ok(f.key('keyup').prevented);
   assert.deepEqual(f.sent, ['d','u']);
   f.key('keydown'); f.key('keyup');
+  assert.deepEqual(f.sent, ['d','u','d','u']);
+});
+
+test('ordinary App routing defaults off and changes do not transfer a held page press', () => {
+  const f = fixture(false);
+  assert.ok(!f.key('keydown').prevented);
+  f.enable(true);
+  assert.ok(!f.key('keydown', {repeat:true}).prevented);
+  assert.ok(!f.key('keyup').prevented);
+  assert.deepEqual(f.sent, []);
+  assert.ok(f.key('keydown').prevented);
+  f.enable(false); f.enable(false);
+  assert.ok(f.key('keydown', {repeat:true}).prevented);
+  assert.ok(f.key('keyup').prevented);
+  assert.deepEqual(f.sent, ['d','u']);
+  assert.ok(!f.key('keydown').prevented); f.key('keyup');
+  f.enable(true); f.key('keydown'); f.key('keyup');
   assert.deepEqual(f.sent, ['d','u','d','u']);
 });

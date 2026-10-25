@@ -34,6 +34,7 @@ test('The public SDK has exactly 730 unchanged Mirror methods and fifteen frozen
     "setCornerRadius",
     "isDocked",
     "setKeyboardCapture",
+    "setDawKeyboard",
     "close",
     "reload"
   ],
@@ -171,6 +172,7 @@ test('Migrated host services keep their native argument and result contracts', a
     ['fs','moveFile','ReaWeb_MoveFile',['input.wav','output.wav',{overwrite:true}],{source:'input.wav',path:'output.wav',bytes:4}],
     ['window','isDocked','ReaWeb_IsDocked',[],false],
     ['window','setKeyboardCapture','ReaWeb_SetKeyboardCapture',[false],false],
+    ['window','setDawKeyboard','ReaWeb_SetDawKeyboard',[true],true],
     ['system','getCapabilities','ReaWeb_GetCapabilities',[],{runtime:{contract:2}}],
     ['debug','setBufferSize','ReaWeb_SetBufferSize',[131072],131072],
     ['fs','stat','ReaWeb_Stat',['folder'],{path:'folder',exists:true,type:'directory',size:null}],

@@ -227,6 +227,16 @@ Json Runtime::host_call(int id, const std::string& method, const Json& args) {
     set_title(s, title); s.title_explicit = true;
     return true;
   }
+  if (method == "ReaWeb_SetDawKeyboard") {
+    if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected a boolean");
+    if (s.jsfx) throw Error("WINDOW_HOSTED", "Use JSFX_WebUI.dawKeyboard for a hosted JSFX editor");
+    const bool enabled = args[0].get<bool>();
+    if (enabled && !dock_.daw_space) throw Error("HOST_UNAVAILABLE", "REAPER shortcut routing is unavailable");
+    if (!enabled) release_daw_space(s);
+    s.daw_keyboard = enabled;
+    s.window->evaluate(std::string("window.__reawebSetDawKeyboard?.(") + (enabled ? "true" : "false") + ");");
+    return enabled;
+  }
   if (method == "ReaWeb_SetKeyboardCapture") {
     if (!args[0].is_boolean()) throw Error("INVALID_ARGUMENT", "Expected a boolean");
     s.capture_keyboard = args[0].get<bool>();
@@ -438,6 +448,7 @@ void Runtime::tick() {
     try { prepare_platform(); } catch (const std::exception&) {}
   }
   sync_external();
+  tick_daw_keyboard();
   tick_jsfx();
   if (auto platform = platform_.lock()) platform->pump();
   for (auto it = apps_.begin(); it != apps_.end();) {

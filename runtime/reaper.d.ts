@@ -64,6 +64,8 @@ interface ReaWebWindowState {
   visible: boolean;
   focused: boolean;
   keyboardCapture: boolean;
+  /** Space routing to REAPER. Ordinary Apps default to false. */
+  dawKeyboard: boolean;
   iconVisible: boolean;
   frameless: boolean;
   resizable: boolean;

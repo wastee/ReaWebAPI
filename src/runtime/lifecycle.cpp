@@ -2,7 +2,7 @@
 
 namespace reaweb {
 void Runtime::navigate(Session& session) {
-  release_jsfx_space(session);
+  release_daw_space(session);
   if (session.generation) session.startup_timing->reset("navigation");
   session.startup_timing->mark(StartupTiming::Navigation);
   end_jsfx_edit(session);
@@ -35,6 +35,7 @@ void Runtime::navigate(Session& session) {
   session.subscriptions.clear();
   session.outstanding = session.output_pending = 0;
   session.capture_keyboard = true;
+  session.daw_keyboard = false;
   session.audio.clear();
   session.lifecycle_enabled = false;
   session.allow_reload = false;

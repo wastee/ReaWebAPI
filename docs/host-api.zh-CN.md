@@ -41,7 +41,8 @@
 | `reaper.window.setDocked(docked)` | `boolean` | 返回实际停靠状态，保留页面 |
 | `reaper.window.isDocked()` | `boolean` | 获取停靠状态 |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | 默认 `true`，设为 `false` 后遵循 REAPER 的全局快捷键规则 |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`iconVisible`、`frameless`、`resizable`、`framelessActive`、`transparent`、`transparentActive`, `cornerRadius`, `cornerRadiusActive` |
+| `reaper.window.setDawKeyboard(enabled)` | `boolean` | 普通 App 的无修饰 Space 路由开关，默认关闭，导航或重载后重置 |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`、`title`、`docked`、`visible`、`focused`、`keyboardCapture`、`dawKeyboard`、`iconVisible`、`frameless`、`resizable`、`framelessActive`、`transparent`、`transparentActive`, `cornerRadius`, `cornerRadiusActive` |
 | `reaper.window.setFrameless(value)` | `ReaWebWindowState` | 动态显示或隐藏原生标题栏，保留同一窗口 |
 | `reaper.window.setCornerRadius(radius)` | `ReaWebWindowState` | 原生圆角半径 `0..64`，停靠和最大化时暂停裁剪 |
 

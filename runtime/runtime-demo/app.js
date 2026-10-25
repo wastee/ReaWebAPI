@@ -52,6 +52,13 @@ action('meter', async () => {
 });
 action('resize', () => reaper.window.setSize(900,760));
 action('dock', async () => reaper.window.setDocked(!(await reaper.window.getState()).docked));
+el('daw-keyboard').addEventListener('change', async event => {
+  const input = event.target;
+  input.disabled = true;
+  try { input.checked = await reaper.window.setDawKeyboard(input.checked); }
+  catch (error) { input.checked = !input.checked; showError(error); }
+  finally { input.disabled = false; }
+});
 action('reload', () => reaper.window.reload());
 action('diagnostics', async () => { el('status').textContent = JSON.stringify(await reaper.debug.getDiagnostics(),null,2); });
 action('data-folder', async () => reaper.system.revealInFileManager(await reaper.app.getDataPath()));
@@ -65,6 +72,8 @@ for (const [id, start] of [['drag-file', () => reaper.dragDrop.startFiles([selec
 }
 try {
   const capabilities = await reaper.lifecycle.ready;
+  el('daw-keyboard').checked = (await reaper.window.getState()).dawKeyboard;
+  el('daw-keyboard').disabled = false;
   const infoStarted = performance.now();
   const [name, id, version, rootPath, dataPath, platform, architecture] = await Promise.all([
     reaper.app.getName(), reaper.app.getId(), reaper.app.getVersion(), reaper.app.getRootPath(),

@@ -41,7 +41,8 @@ Both capabilities and diagnostics include `webRuntime`: `contract` (1), `mode` (
 | `reaper.window.setDocked(docked)` | `boolean` | Returns the actual docked state, preserving the page |
 | `reaper.window.isDocked()` | `boolean` | Reads docked state |
 | `reaper.window.setKeyboardCapture(capture)` | `boolean` | Default `true`. Setting `false` allows REAPER's normal global shortcut policy |
-| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `iconVisible`, `frameless`, `resizable`, `framelessActive`, `transparent`, `transparentActive`, `cornerRadius`, `cornerRadiusActive` |
+| `reaper.window.setDawKeyboard(enabled)` | `boolean` | Ordinary App unmodified Space routing, off by default and reset on navigation or reload |
+| `reaper.window.getState()` | `ReaWebWindowState` | `id`, `title`, `docked`, `visible`, `focused`, `keyboardCapture`, `dawKeyboard`, `iconVisible`, `frameless`, `resizable`, `framelessActive`, `transparent`, `transparentActive`, `cornerRadius`, `cornerRadiusActive` |
 | `reaper.window.setFrameless(value)` | `ReaWebWindowState` | Show or hide the native title bar on the same window |
 | `reaper.window.setCornerRadius(radius)` | `ReaWebWindowState` | Native corner radius `0..64`, suspended while docked or maximized |
 

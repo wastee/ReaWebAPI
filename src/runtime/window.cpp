@@ -135,13 +135,14 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   std::weak_ptr<Session> weak = session;
   auto window_resources = app->resources ? std::make_shared<WebResources>(app->resources->root(), app_id) : nullptr;
   session->window = app->platform->open(WindowOptions{entry, std::string(bridge_script) +
-    (session->jsfx && session->jsfx->daw_keyboard && dock_.daw_space ? daw_keyboard_script : ""), session->title,
+    (dock_.daw_space && (!session->jsfx || session->jsfx->daw_keyboard) ? std::string(daw_keyboard_script) +
+      (session->jsfx ? "window.__reawebSetDawKeyboard(true);" : "") : ""), session->title,
     [this, weak](std::string message) {
       if (auto s = weak.lock(); s && !s->closing) {
         if (message.rfind("__reawebDawKey:", 0) == 0) {
-          if (s->ready && s->jsfx && s->jsfx->daw_keyboard && s->jsfx->editor.host &&
+          if (s->ready && s->daw_keyboard_enabled() &&
               message.size() == 16 && (message.back() == 'd' || message.back() == 'r' || message.back() == 'u')) {
-            auto& events = s->jsfx->space_events;
+            auto& events = s->space_events;
             if (message.back() != 'r' || events.empty() || events.back() != 'r') {
               if (events.size() >= 64) { events.clear(); events.push_back('u'); }
               else events.push_back(message.back());
@@ -323,13 +324,40 @@ bool Runtime::show(int id) {
   return true;
 }
 
+void Runtime::release_daw_space(Session& session) {
+  session.space_events.clear();
+  const bool down = session.space_down;
+  session.space_down = false;
+  if (down && dock_.daw_space) dock_.daw_space(false, false);
+}
+void Runtime::tick_daw_keyboard() {
+  // Shortcuts may close windows or switch FX editors. Keep each session alive during dispatch.
+  std::vector<std::shared_ptr<Session>> keyed;
+  for (const auto& item : sessions_) if (!item.second->space_events.empty()) keyed.push_back(item.second);
+  for (const auto& session : keyed) {
+    if (session->closing || session->window->closed() || !session->daw_keyboard_enabled()) { release_daw_space(*session); continue; }
+    while (!session->space_events.empty() && !session->closing && session->daw_keyboard_enabled()) {
+      const char key = session->space_events.front(); session->space_events.pop_front();
+      if ((key == 'u' || key == 'r') && !session->space_down) continue;
+      if (key == 'd' && session->space_down) continue;
+      if (key != 'u' && session->jsfx) {
+        bool current = false;
+        try { current = session->jsfx->instance->binding->editor_matches(session->jsfx->editor); } catch (const Error&) {}
+        if (!current) { release_daw_space(*session); break; }
+      }
+      session->space_down = key != 'u';
+      if (dock_.daw_space) dock_.daw_space(key != 'u', key == 'r');
+    }
+  }
+}
+
 bool Runtime::captures_keyboard(void* handle, const std::function<bool(void*, void*)>& is_child, bool daw_only) const {
   check_thread();
   for (const auto& item : sessions_) {
     const auto& s = *item.second;
-    if (daw_only && (!s.jsfx || !s.jsfx->daw_keyboard || !s.jsfx->editor.host)) continue;
+    if (daw_only ? (!s.daw_keyboard_enabled() || (s.jsfx && !s.capture_keyboard)) : !s.capture_keyboard) continue;
     auto root = s.window->native_handle();
-    if (!s.closing && !s.window->closed() && s.capture_keyboard && root &&
+    if (!s.closing && !s.window->closed() && root &&
         (root == handle || is_child(root, handle))) return true;
   }
   return false;
@@ -432,7 +460,7 @@ void Runtime::refresh_icon(Session& s) {
 
 Json Runtime::window_state(const Session& s) const {
   return {{"id", s.id}, {"title", s.title}, {"docked", is_docked(s.id)},
-    {"visible", s.window->visible()}, {"focused", s.window->focused()}, {"keyboardCapture", s.capture_keyboard},
+    {"visible", s.window->visible()}, {"focused", s.window->focused()}, {"keyboardCapture", s.capture_keyboard}, {"dawKeyboard", s.daw_keyboard_enabled()},
     {"iconVisible", s.icon_visible}, {"frameless", s.frameless}, {"resizable", s.resizable},
     {"framelessActive", !is_docked(s.id) && s.window->frameless_active()},
     {"cornerRadius", s.corner_radius}, {"cornerRadiusActive", !is_docked(s.id) && s.window->corner_radius_active()},

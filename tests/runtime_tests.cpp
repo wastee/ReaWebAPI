@@ -22,6 +22,7 @@ double jsfx_values[2] = {.25, .5};
 int jsfx_writes = 0, jsfx_ends = 0, jsfx_fail_param = -1;
 struct FakeWindow : Window {
   WindowOptions options;
+  bool daw_keyboard = false;
   bool is_closed = false;
   bool shown = true;
   bool deferred = false, wants_visible = true, presentation_cancelled = false;
@@ -64,6 +65,9 @@ struct FakeWindow : Window {
     wants_visible = !options.hidden; shown = !deferred;
   }
   void evaluate(const std::string& script) override {
+    if (script.rfind("window.__reawebSetDawKeyboard?.(", 0) == 0) {
+      daw_keyboard = script.find("(true)") != std::string::npos; return;
+    }
     const auto start = script.find('(') + 1;
     auto message = Json::parse(script.substr(start, script.size() - start - 2));
     if (!message.value("started", false)) responses.push_back(std::move(message));
@@ -175,6 +179,42 @@ int main() {
       [&](void* h, const std::string&, const std::string& ident) { CHECK(ident.find("ReaWebAPI:") == 0); docked.insert(h); },
       [&](void* h) { docked.erase(h); }, [&](void* h) { return docked.count(h) ? 3 : -1; }, [](void*) {}};
     {
+      auto keyboard_docks = docks;
+      std::string keys;
+      keyboard_docks.daw_space = [&](bool down, bool repeat) { keys += down ? (repeat ? 'r' : 'd') : 'u'; };
+      Runtime runtime(host, root, [&](const std::string& error) { errors.push_back(error); }, keyboard_docks);
+      const auto id = runtime.open(entry.u8string()); auto window = windows.back().lock();
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(runtime.diagnostics(id)["window"]["dawKeyboard"] == false);
+      window->options.on_message("__reawebDawKey:d"); runtime.tick(); CHECK(keys.empty());
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {"true"}))["error"]["code"] == "INVALID_ARGUMENT");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {true}))["result"] == true);
+      CHECK(window->daw_keyboard && runtime.diagnostics(id)["window"]["dawKeyboard"] == true);
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetKeyboardCapture", {false}))["result"] == false);
+      CHECK(!runtime.captures_keyboard(window.get(), [](void*, void*) { return false; }));
+      CHECK(runtime.captures_keyboard(window.get(), [](void*, void*) { return false; }, true));
+      for (const auto key : {"u", "r", "d", "d", "r", "u", "u"}) window->options.on_message(std::string("__reawebDawKey:") + key);
+      CHECK(keys.empty()); runtime.tick(); CHECK(keys == "dru");
+      const auto second_id = runtime.open(entry.u8string()); auto second = windows.back().lock();
+      result(runtime, *second, second->send("__reawebHello", {1}));
+      CHECK(runtime.diagnostics(second_id)["window"]["dawKeyboard"] == false);
+      second->options.on_message("__reawebDawKey:d"); runtime.tick(); CHECK(keys == "dru");
+      window->options.on_message("__reawebDawKey:d"); runtime.tick(); CHECK(keys == "drud");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {false}))["result"] == false);
+      CHECK(keys == "drudu" && !window->daw_keyboard);
+      window->options.on_message("__reawebDawKey:r"); window->options.on_message("__reawebDawKey:u"); runtime.tick(); CHECK(keys == "drudu");
+      result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {true}));
+      window->options.on_message("__reawebDawKey:d"); runtime.tick();
+      window->reload(); CHECK(keys == "drududu");
+      CHECK(runtime.diagnostics(id)["window"]["dawKeyboard"] == false);
+      window->document = "ordinary-reloaded";
+      result(runtime, *window, window->send("__reawebHello", {1}));
+      result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {true}));
+      window->options.on_message("__reawebDawKey:d"); runtime.tick();
+      runtime.close(id); runtime.tick(); CHECK(keys == "drudududu");
+      runtime.close(second_id); runtime.tick();
+    }
+    {
       struct Editor final : JsfxEditorHost {
         bool alive = true;
         int size_requests = 0;
@@ -241,6 +281,7 @@ int main() {
       for (const auto key : {"u", "r", "d", "d", "r", "u", "u"}) window->options.on_message(std::string("__reawebDawKey:") + key);
       CHECK(keys.empty());
       runtime.tick(); CHECK(keys == "dru");
+      CHECK(result(runtime, *window, window->send("ReaWeb_SetDawKeyboard", {false}))["error"]["code"] == "WINDOW_HOSTED");
       const auto call = [&](const char* method, Json payload = Json::object()) {
         return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
       };

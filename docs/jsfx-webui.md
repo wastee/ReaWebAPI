@@ -27,6 +27,8 @@ Effects/Author/Utility/
 
 `dawKeyboard` defaults to `true` on Windows, macOS and Linux. Unmodified Space outside editable fields uses REAPER's main-section shortcut binding, including custom bindings. Text inputs, textareas, contenteditable and IME composition retain Space. Other keys and modified shortcuts retain their existing behavior. Set `dawKeyboard: false` to retain the previous keyboard behavior. Non-boolean values invalidate the association. This setting applies only to the associated Hosted JSFX WebView and does not change ordinary Apps' `window.setKeyboardCapture()` behavior. Close and reopen the editor after changing the association.
 
+Ordinary Apps use the separate [`reaper.window.setDawKeyboard`](runtime-api.md#ordinary-app-space-routing) switch, disabled by default.
+
 ## Parameter service
 
 After `reaper.lifecycle.ready`, use `reaper.host.service('jsfx')`. Requests bind to the calling Hosted WebView. Ordinary Apps and External Clients cannot select or impersonate a binding.

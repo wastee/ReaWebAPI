@@ -6,6 +6,8 @@ ReaWebAPI is a native REAPER extension for building tools with HTML, CSS and Jav
 
 JSFX Web UI routes unmodified Space outside editable fields to REAPER's shortcut binding by default. Set [`JSFX_WebUI.dawKeyboard`](docs/jsfx-webui.md#association) to `false` to retain the previous keyboard behavior.
 
+Ordinary Apps can opt in with [`reaper.window.setDawKeyboard(true)`](docs/runtime-api.md#ordinary-app-space-routing), disabled by default.
+
 - 730 standard REAPER 7.80 API bindings with TypeScript declarations.
 - Mirror-aware Batch Builder for 456 reviewed APIs, including transport queries and time conversions, with deferred references, tuple destructuring and typed results.
 - Lua backend + WebView UI through `ReaWeb_Send`, `ReaWeb_Receive`, `reaper.host.send` and `message` events.

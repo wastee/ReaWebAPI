@@ -19,7 +19,7 @@ inline const char* daw_keyboard_script = R"JS(
       return root;
     }
   });
-  let owner = null, composing = false, cancelled = false;
+  let enabled = false, owner = null, composing = false, cancelled = false;
   const editable = event => {
     if (document.designMode === 'on') return true;
     const nodes = event.composedPath();
@@ -43,13 +43,17 @@ inline const char* daw_keyboard_script = R"JS(
     owner = null;
     composing = false;
   };
+  Object.defineProperty(window, '__reawebSetDawKeyboard', {value: value => {
+    if (enabled && !value) release();
+    enabled = value === true;
+  }});
   addEventListener('compositionstart', () => { composing = true; }, true);
   addEventListener('compositionend', () => { composing = false; }, true);
   addEventListener('keydown', event => {
     if (!event.isTrusted || (event.code !== 'Space' && event.key !== ' ')) return;
     if (cancelled && event.repeat) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     cancelled = false;
-    if (owner === null) owner = !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
+    if (owner === null) owner = enabled && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
       !composing && !event.isComposing && event.keyCode !== 229 && !editable(event) ? 'host' : 'page';
     if (owner !== 'host') return;
     event.preventDefault(); event.stopImmediatePropagation();

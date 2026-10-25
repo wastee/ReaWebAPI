@@ -117,7 +117,7 @@ def main():
                 user.SetForegroundWindow(targets[0]);assert user.GetForegroundWindow()==targets[0]
             finally:
                 for thread in threads:user.AttachThreadInput(current,thread,False)
-        def native_key(key,down):user.keybd_event(key,0,0 if down else 2,0)
+        def native_key(key,down):user.keybd_event(key,user.MapVirtualKeyW(key,0),0 if down else 2,0)
         codes=dict(space=32,enter=13,shift=16,a=65)
     else:
         def activate(): pass
@@ -191,6 +191,29 @@ def main():
                         assert float(command('state'))==repeat_position, ('Held Space changed shortcut ownership after Shift',repeat_position)
                     report.append(dict(mode=mode,floating=floating,modifiedKeys=evaluate('keys'),passed=True));command('closefx');time.sleep(.6)
             command('open');wait(lambda:int(command('ready'))>0);command('focus');time.sleep(.3)
+            assert evaluate('reaper.window.getState().then(s=>s.dawKeyboard)') is False
+            for docked in [False,True]:
+                command('dock',str(docked).lower());command('focus');time.sleep(.3)
+                for capture in [True,False]:
+                    evaluate('reaper.window.setKeyboardCapture('+str(capture).lower()+')')
+                    baseline=[]
+                    for enabled in [False,True,False]:
+                        evaluate('reaper.window.setDawKeyboard('+str(enabled).lower()+')')
+                        state=evaluate('reaper.window.getState()')
+                        assert state['dawKeyboard']==enabled and state['keyboardCapture']==capture,state
+                        actual=[]
+                        for target in ["document.querySelector('#slider')","document.querySelector('#button')","document.querySelector('#text')","document.querySelector('#area')","document.querySelector('#edit')",'openInput','closedInput']:
+                            editable=target not in ["document.querySelector('#slider')","document.querySelector('#button')"]
+                            evaluate(f'{target}.focus();keys=[];true');command('cursor',12);press('space')
+                            position=float(command('state'));keys=evaluate('keys');actual.append([position,keys])
+                            if enabled:
+                                assert position==(12 if editable else 0),(docked,capture,target,position,keys)
+                                assert len(keys)==(2 if editable else 0),(docked,capture,target,keys)
+                        if not enabled:
+                            if baseline:assert actual==baseline,(docked,capture,actual,baseline)
+                            else:baseline=actual
+                        report.append(dict(appRouting=True,docked=docked,capture=capture,enabled=enabled,controls=actual,passed=True))
+            evaluate('reaper.window.setKeyboardCapture(true)')
             for docked in [False,True,False,True,False]:
                 command('dock',str(docked).lower());command('focus');time.sleep(.3)
                 evaluate("document.querySelector('#text').focus();keys=[];true")

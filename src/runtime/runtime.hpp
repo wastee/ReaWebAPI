@@ -108,6 +108,8 @@ private:
     uint64_t generation = 0, event_sequence = 0, processed = 0;
     size_t outstanding = 0, output_pending = 0;
     bool ready = false, capture_keyboard = true;
+    bool daw_keyboard = false, space_down = false;
+    std::deque<char> space_events;
     bool closing = false;
     bool background_start = false, pending_dock = false;
     bool frameless = false, resizable = true;
@@ -133,8 +135,7 @@ private:
       std::vector<int> editing;
       std::string gesture_id;
       bool group_edit = false;
-      bool daw_keyboard = true, space_down = false;
-      std::deque<char> space_events;
+      bool daw_keyboard = true;
       uint64_t host_revision = 0, activation = 1;
       bool initialized = false, presented = false;
       double presentation_ms = 0;
@@ -143,6 +144,7 @@ private:
       Clock::time_point discovered = Clock::now();
     };
     std::shared_ptr<Jsfx> jsfx;
+    bool daw_keyboard_enabled() const { return jsfx ? jsfx->daw_keyboard && bool(jsfx->editor.host) : daw_keyboard; }
     bool lifecycle_enabled = false, allow_reload = false;
     std::string lifecycle_action, lifecycle_token;
     Clock::time_point lifecycle_deadline;
@@ -226,7 +228,8 @@ private:
   Json jsfx_call(int window, const std::string& method, const Json& payload);
   Json jsfx_result(int window, const std::string& method, const Json& payload);
   void end_jsfx_edit(Session& session);
-  void release_jsfx_space(Session& session);
+  void release_daw_space(Session& session);
+  void tick_daw_keyboard();
   void check_thread() const;
   void enqueue_message(Session& session, const std::string& message, bool to_web);
   void clear_messages(Session& session);

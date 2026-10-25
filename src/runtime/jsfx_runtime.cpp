@@ -64,8 +64,8 @@ void Runtime::end_jsfx_edit(Session& session) {
   }
 }
 void Runtime::release_jsfx(Session& session) {
+  release_daw_space(session);
   if (!session.jsfx) return;
-  release_jsfx_space(session);
   end_jsfx_edit(session);
   if(session.jsfx->instance->native)session.jsfx->instance->native->close_window(session.id);
   auto host = session.jsfx->editor.host;
@@ -77,7 +77,7 @@ void Runtime::release_jsfx(Session& session) {
 void Runtime::park_jsfx(Session& session) {
   auto& ui = *session.jsfx;
   if (!ui.editor.host) return;
-  release_jsfx_space(session);
+  release_daw_space(session);
   end_jsfx_edit(session);
   if(ui.instance->native)ui.instance->native->close_window(session.id);
   auto host = ui.editor.host;
@@ -327,35 +327,8 @@ Json Runtime::jsfx_call(int window, const std::string& method, const Json& paylo
   ui.next_poll = Clock::now();
   return {{group ? "applied" : "parameter", group ? parameters : parameters.front()}, {"revision", std::to_string(++ui.instance->revision)}};
 }
-void Runtime::release_jsfx_space(Session& session) {
-  if (!session.jsfx) return;
-  auto& ui = *session.jsfx;
-  ui.space_events.clear();
-  const bool down = ui.space_down;
-  ui.space_down = false;
-  if (down && dock_.daw_space) dock_.daw_space(false, false);
-}
 void Runtime::tick_jsfx() {
   if (!jsfx_service_) return;
-  // Dispatch outside browser callbacks. Shortcuts can close or switch FX editors.
-  std::vector<std::shared_ptr<Session>> keyed;
-  for (const auto& item : sessions_) if (item.second->jsfx && !item.second->jsfx->space_events.empty()) keyed.push_back(item.second);
-  for (const auto& session : keyed) {
-    auto& ui = *session->jsfx;
-    if (session->closing || !ui.editor.host || session->window->closed()) { release_jsfx_space(*session); continue; }
-    while (!ui.space_events.empty() && !session->closing && ui.editor.host) {
-      const char key = ui.space_events.front(); ui.space_events.pop_front();
-      if ((key == 'u' || key == 'r') && !ui.space_down) continue;
-      if (key == 'd' && ui.space_down) continue;
-      if (key != 'u') {
-        bool current = false;
-        try { current = ui.instance->binding->editor_matches(ui.editor); } catch (const Error&) {}
-        if (!current) { release_jsfx_space(*session); break; }
-      }
-      ui.space_down = key != 'u';
-      if (dock_.daw_space) dock_.daw_space(key != 'u', key == 'r');
-    }
-  }
   for(auto& instance:jsfx_instances_)if(instance->native) {
     try {
       const bool changed=instance->native->tick(*instance->binding,[this](const std::string& label) {
