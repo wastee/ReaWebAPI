@@ -14,18 +14,12 @@ export interface JSFXParameter {
   max: number;
   mid: number;
   defaultNormalized: number | null;
-  /** Host section name, or null when absent or unsupported by the host/JSFX. */
-  section: string | null;
   step: number | null;
   smallStep: number | null;
   largeStep: number | null;
   toggle: boolean | null;
-  /** Public REAPER APIs do not expose a JSFX enumeration table. */
-  enum: null;
-  /** ReaWebAPI extension, read from the loaded JSFX engine at snapshot time. */
-  reaweb: { readonly enum: readonly JSFXEnumOption[] | null };
-  /** No independent JSFX unit metadata is available. Not inferred from name/formatted. */
-  unit: null;
+  /** Read from the loaded JSFX engine at snapshot time. Null when unavailable. */
+  enum: readonly JSFXEnumOption[] | null;
   formatted: string | null;
   reserved?: boolean;
   readOnly?: boolean;

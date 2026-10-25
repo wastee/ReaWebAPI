@@ -62,7 +62,7 @@ JSFX 回复统一为 `{ok:true,sessionId,data}` 或 `{ok:false,sessionId?,error:
 
 未声明 EEL 原生通道时，能力返回 `status:'parameterOnly'`、参数组可用及 `nativeChannel:false`，扩展方法返回 `UNSUPPORTED`。接入 SDK 的插件可通过同一服务暴露已声明的流、经过 schema 校验的复杂状态、带执行确认的命令和可靠二进制资源。传输及同步契约见[原生通道](jsfx-native-channel.zh-CN.md)。
 
-参数元数据包括 `index`、`name`、`ident`、`min`、`max`、`mid`、`defaultNormalized`、`step`、`smallStep`、`largeStep`、`toggle`、`section`、`enum`、`unit`、`reaweb`、`value`、`normalized` 和 `formatted`。不支持的字段为 `null`。`defaultNormalized` 来自宿主归一化默认值，`mid` 是宿主中点，不是默认值。归一化写入保留 REAPER 的参数映射。
+参数元数据包括 `index`、`name`、`ident`、`min`、`max`、`mid`、`defaultNormalized`、`step`、`smallStep`、`largeStep`、`toggle`、`enum`、`value`、`normalized` 和 `formatted`。不支持的字段为 `null`。`defaultNormalized` 来自宿主归一化默认值，`mid` 是宿主中点，不是默认值。归一化写入保留 REAPER 的参数映射。
 
 ### 元数据可用性
 
@@ -70,29 +70,26 @@ Windows、macOS 和 Linux 使用相同契约。`params.snapshot` 和 `params.onC
 
 | 字段 | 来源与不可用时的行为 |
 | --- | --- |
-| `section` | 可选的 `TrackFX_GetParamSectionName` / `TakeFX_GetParamSectionName`，原样保留宿主文本。输出为空或函数不可用时为 `null`。官方 API 说明支持 VST3 unit 和 CLAP module，未声明支持 JSFX 分组。 |
-| `enum` | 保留兼容的 `null` 字段。引擎枚举元数据使用 `reaweb.enum`。 |
-| `reaweb.enum` | ReaWebAPI 扩展，通过已加载 JSFX 引擎的 `sx_parmIsEnum`、`sx_getParmVal` 和 `sx_getParmDisplay` 读取。返回 `{value, label}` 数组，非枚举或不可用时为 `null`。`value` 是参数原始值。 |
-| `unit` | `null`。这些 API 没有独立的 JSFX 单位字段。不将 `name` 中的 `(Hz)` 或 `formatted` 后缀解释为元数据。 |
+| `enum` | ReaWebAPI 通过已加载 JSFX 引擎的 `sx_parmIsEnum`、`sx_getParmVal` 和 `sx_getParmDisplay` 读取。返回 `{value, label}` 数组，非枚举或不可用时为 `null`。`value` 是参数原始值。 |
 | `formatted` | `TrackFX_GetFormattedParamValue` / `TakeFX_GetFormattedParamValue`。表示当前显示文本，可能是当前枚举标签，不是选项列表或独立单位。 |
 
 [官方 JSFX 引擎 API](https://github.com/justinfrankel/jsfx/blob/main/jsfx/jsfx_api.h) 与公开 TrackFX/TakeFX API 分开。ReaWebAPI 从经过身份校验的原生编辑器取得不透明实例指针，检查引擎 ABI `0xf0f01091`，查询已加载选项，不解析源文件、不创建另一实例、不改变参数值。这依赖 JSFX 原生对话框的实例存储约定。编辑器不可用或归属不明确、ABI 不支持、参数布局不匹配时返回 `null`。`toggle` 仍独立采用公开宿主 API 的结果，两个选项也不会被自动改判为开关。
 
-例如 `slider1:0<0,2,1{Off,Low,High}>Mode` 的 `reaweb.enum` 为 `[{value:0,label:'Off'}, {value:1,label:'Low'}, {value:2,label:'High'}]`。保留引擎中的选项顺序、重复标签和空标签，支持单选项枚举。引擎跳过的空选项声明不会被重建。文件选择滑块、自定义 `@gfx` 菜单及 REAPER 的 Bypass/Wet/Delta 不属于该接口识别的枚举，返回 `null`。专用标签、单位和分组可由 UI 作者定义。
+例如 `slider1:0<0,2,1{Off,Low,High}>Mode` 的 `enum` 为 `[{value:0,label:'Off'}, {value:1,label:'Low'}, {value:2,label:'High'}]`。保留引擎中的选项顺序、重复标签和空标签，支持单选项枚举。引擎跳过的空选项声明不会被重建。文件选择滑块、自定义 `@gfx` 菜单及 REAPER 的 Bypass/Wet/Delta 不属于该接口识别的枚举，返回 `null`。
 
 连接、编辑器重新激活及 `params.getState()` 时读取枚举。效果重新编译后，调用 `getState()` 刷新元数据。原生读取器不缓存实例指针或枚举表。每个参数最多读取 1,024 个选项，每次快照最多读取 4,096 个选项、128 KiB 标签文本，每个标签最多 4,094 个 UTF-8 字节。序列化快照同时受宿主服务的 1 MiB 消息上限约束。无法在上限内完整返回的枚举表为 `null`。
 
 ```js
 const rows = state => state.parameters.map(p => ({
   index: p.index, name: p.name,
-  display: p.formatted ?? String(p.value), choices: p.reaweb?.enum ?? null
+  display: p.formatted ?? String(p.value), choices: p.enum ?? null
 }));
 console.table(rows(jsfx.params.snapshot));
 const stop = await jsfx.params.onChange(state => console.table(rows(state)));
 
 // 将选项原始值换算为归一化值写入。
 const p = jsfx.params.snapshot.parameters[0];
-const option = p.reaweb?.enum?.[1];
+const option = p.enum?.[1];
 if (option && p.max > p.min) {
   await jsfx.params.beginEdit(p.index);
   try { await jsfx.params.set(p.index, (option.value - p.min) / (p.max - p.min)); }

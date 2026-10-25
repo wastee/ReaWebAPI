@@ -43,7 +43,7 @@ void jsfx_enum_metadata(const JsfxEngineApi& api, void* instance, Json& paramete
       const auto bytes = result.dump().size();
       if (bytes > remaining_json) continue;
       remaining_json -= bytes;
-      parameter["reaweb"]["enum"] = std::move(result);
+      parameter["enum"] = std::move(result);
     }
   }
 }

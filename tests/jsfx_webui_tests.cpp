@@ -10,9 +10,6 @@ namespace {
 struct Fx { Guid guid{}; double value = 0.25; std::string ident = "Utility/utility.jsfx"; };
 std::vector<Fx> effects{{Guid{1}}, {Guid{2}}};
 int writes = 0, ended = 0, selected = 0;
-bool section_available = true;
-std::string section_name;
-int section_reads = 0;
 void* floating = nullptr;
 struct Editor : JsfxEditorHost {
   std::optional<int> selection;
@@ -25,12 +22,6 @@ struct Editor : JsfxEditorHost {
 };
 void* native(const char* name) {
 #define FN(n, lambda) if (!std::strcmp(name, n)) return reinterpret_cast<void*>(+lambda)
-  if (!std::strcmp(name, "TrackFX_GetParamSectionName") && !section_available) return nullptr;
-  FN("TrackFX_GetParamSectionName", [](void*, int, int, char* out, int size) {
-    ++section_reads;
-    CHECK(size > int(section_name.size()));
-    std::strcpy(out, section_name.c_str());
-  });
   FN("TrackFX_GetCount", [](void*) { return int(effects.size()); });
   FN("TrackFX_GetFXGUID", [](void*, int fx) -> Guid* { return fx >= 0 && fx < int(effects.size()) ? &effects[fx].guid : nullptr; });
   FN("TrackFX_GetNamedConfigParm", [](void*, int fx, const char* key, char* out, int) {
@@ -87,17 +78,10 @@ int main() {
     editor->selection.reset();
     const auto state = binding.state();
     CHECK(writes == 0 && state["parameters"][0]["value"] == 0.25);
-    CHECK(state["parameters"][0]["defaultNormalized"] == 0.5 && state["parameters"][0]["section"].is_null());
-    CHECK(state["parameters"][0]["unit"].is_null() && state["parameters"][0]["enum"].is_null());
+    CHECK(state["parameters"][0]["defaultNormalized"] == 0.5);
+    CHECK(state["parameters"][0]["enum"].is_null());
     CHECK(state["parameters"][0]["formatted"] == "25%");
-    section_name = u8"Filter / 滤波";
-    CHECK(binding.parameter(0, true)["section"] == section_name);
-    const auto reads = section_reads;
-    CHECK(!binding.parameter(0).contains("section") && section_reads == reads);
-    section_available = false;
-    CHECK(binding.parameter(0, true)["section"].is_null() && section_reads == reads);
-    section_available = true; section_name.clear();
-    CHECK(binding.parameter(0, true)["section"].is_null() && writes == 0);
+    for (const auto* key : {"unit", "section", "reaweb"}) CHECK(!state["parameters"][0].contains(key));
     binding.set(0, 0.75, true); binding.end(0);
     CHECK(effects[0].value == 0.75 && effects[1].value == 0.25 && ended == 1);
     std::swap(effects[0], effects[1]);

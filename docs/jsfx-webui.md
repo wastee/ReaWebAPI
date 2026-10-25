@@ -62,7 +62,7 @@ All JSFX replies use `{ok:true,sessionId,data}` or `{ok:false,sessionId?,error:{
 
 Without an EEL native declaration, capabilities report `status:'parameterOnly'`, parameter groups enabled and `nativeChannel:false`. Extended methods reject with `UNSUPPORTED`. Participating effects can expose declared streams, schema-checked data states, acknowledged commands and reliable binary resources through the same service. See the [native channel](jsfx-native-channel.md) for transport and synchronization contracts.
 
-Parameter metadata includes `index`, `name`, `ident`, `min`, `max`, `mid`, `defaultNormalized`, `step`, `smallStep`, `largeStep`, `toggle`, `section`, `enum`, `unit`, `reaweb`, `value`, `normalized` and `formatted`. Unsupported metadata is `null`. The native API supplies normalized defaults. `mid` is the host midpoint, not a default. The normalized setter preserves REAPER's parameter shaping.
+Parameter metadata includes `index`, `name`, `ident`, `min`, `max`, `mid`, `defaultNormalized`, `step`, `smallStep`, `largeStep`, `toggle`, `enum`, `value`, `normalized` and `formatted`. Unsupported metadata is `null`. The native API supplies normalized defaults. `mid` is the host midpoint, not a default. The normalized setter preserves REAPER's parameter shaping.
 
 ### Metadata availability
 
@@ -70,29 +70,26 @@ The same contract applies on Windows, macOS and Linux. `params.snapshot` and `pa
 
 | Field | Source and unavailable behavior |
 | --- | --- |
-| `section` | Optional `TrackFX_GetParamSectionName` / `TakeFX_GetParamSectionName`, copied verbatim. Empty output or an unavailable function becomes `null`. The official API documents VST3 units and CLAP modules, not JSFX groups. |
-| `enum` | Legacy `null` field. Use `reaweb.enum` for engine enumeration metadata. |
-| `reaweb.enum` | ReaWebAPI extension using the loaded JSFX engine's `sx_parmIsEnum`, `sx_getParmVal` and `sx_getParmDisplay`. An array of `{value, label}`, or `null` for non-enums or unavailable metadata. `value` is the raw parameter value. |
-| `unit` | `null`. JSFX has no independent unit field in these APIs. Text such as `(Hz)` in `name` or a suffix in `formatted` is not interpreted as metadata. |
+| `enum` | ReaWebAPI reads the loaded JSFX engine's `sx_parmIsEnum`, `sx_getParmVal` and `sx_getParmDisplay`. An array of `{value, label}`, or `null` for non-enums or unavailable metadata. `value` is the raw parameter value. |
 | `formatted` | `TrackFX_GetFormattedParamValue` / `TakeFX_GetFormattedParamValue`. This is the current display text, which may be an enum label, not a list of choices or a unit. |
 
 The [official JSFX engine API](https://github.com/justinfrankel/jsfx/blob/main/jsfx/jsfx_api.h) is separate from public TrackFX/TakeFX APIs. ReaWebAPI obtains the opaque instance from its validated native editor, checks engine ABI `0xf0f01091`, and queries already-loaded options without parsing source, creating another instance or changing parameter values. This depends on the native JSFX dialog convention. An unavailable or ambiguous editor, unsupported ABI or mismatched parameter layout returns `null`. `toggle` remains the independent public host result, including for two-option enums.
 
-For `slider1:0<0,2,1{Off,Low,High}>Mode`, `reaweb.enum` is `[{value:0,label:'Off'}, {value:1,label:'Low'}, {value:2,label:'High'}]`. Labels retain engine order, including duplicates and empty strings. Empty declarations skipped by the engine are not reconstructed. Single-option enums are supported. File-selection sliders, custom `@gfx` menus and REAPER's Bypass/Wet/Delta parameters are not engine enums and return `null`. UI-specific labels, units and groups can be defined by the UI author.
+For `slider1:0<0,2,1{Off,Low,High}>Mode`, `enum` is `[{value:0,label:'Off'}, {value:1,label:'Low'}, {value:2,label:'High'}]`. Labels retain engine order, including duplicates and empty strings. Empty declarations skipped by the engine are not reconstructed. Single-option enums are supported. File-selection sliders, custom `@gfx` menus and REAPER's Bypass/Wet/Delta parameters are not engine enums and return `null`.
 
 Enumeration is read on connection, editor reactivation and `params.getState()`. After recompiling an effect, call `getState()` to refresh its metadata. No instance pointer or enum table is cached in the native reader. Reads allow up to 1,024 options per parameter, 4,096 options and 128 KiB of label text per snapshot, and 4,094 UTF-8 bytes per label. The serialized snapshot also respects the host service's 1 MiB message limit. A table that cannot be returned completely within these limits is `null`.
 
 ```js
 const rows = state => state.parameters.map(p => ({
   index: p.index, name: p.name,
-  display: p.formatted ?? String(p.value), choices: p.reaweb?.enum ?? null
+  display: p.formatted ?? String(p.value), choices: p.enum ?? null
 }));
 console.table(rows(jsfx.params.snapshot));
 const stop = await jsfx.params.onChange(state => console.table(rows(state)));
 
 // Write a selected raw enum value through the normalized parameter service.
 const p = jsfx.params.snapshot.parameters[0];
-const option = p.reaweb?.enum?.[1];
+const option = p.enum?.[1];
 if (option && p.max > p.min) {
   await jsfx.params.beginEdit(p.index);
   try { await jsfx.params.set(p.index, (option.value - p.min) / (p.max - p.min)); }

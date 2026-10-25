@@ -159,17 +159,8 @@ Json JsfxBinding::parameter(int param, bool metadata) {
   Json result{{"index", param}, {"value", value}, {"normalized", normalized}, {"formatted", string("GetFormattedParamValue")}};
   if (!metadata) return result;
   result.update({{"name", string("GetParamName")}, {"ident", string("GetParamIdent")},
-    {"min", minimum}, {"max", maximum}, {"mid", midpoint}, {"defaultNormalized", nullptr}, {"section", nullptr},
-    {"step", nullptr}, {"smallStep", nullptr}, {"largeStep", nullptr}, {"toggle", nullptr}, {"enum", nullptr}, {"unit", nullptr},
-    {"reaweb", {{"enum", nullptr}}}});
-  const auto section_api = std::string(target_.take ? "TakeFX_" : "TrackFX_") + "GetParamSectionName";
-  const auto section = host_.native_function
-    ? reinterpret_cast<void (*)(void*, int, int, char*, int)>(host_.native_function(section_api.c_str())) : nullptr;
-  if (section) {
-    text[0] = 0;
-    section(target_.object(), fx, param, text, sizeof(text));
-    if (text[0]) result["section"] = text;
-  }
+    {"min", minimum}, {"max", maximum}, {"mid", midpoint}, {"defaultNormalized", nullptr},
+    {"step", nullptr}, {"smallStep", nullptr}, {"largeStep", nullptr}, {"toggle", nullptr}, {"enum", nullptr}});
   auto default_value = target_.config(host_, fx, "param." + std::to_string(param) + ".default_value");
   if (!default_value.empty()) {
     char* end = nullptr; const auto d = std::strtod(default_value.c_str(), &end);

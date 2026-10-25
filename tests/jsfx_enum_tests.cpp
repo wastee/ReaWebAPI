@@ -10,7 +10,7 @@ int flag = 2, reads = 0;
 double lo = 0, hi = 2, increment = 1;
 Json parameters() {
   Json result = Json::array();
-  for (int i = 0; i < 4; ++i) result.push_back({{"index", i}, {"min", lo}, {"max", hi}, {"reaweb", {{"enum", nullptr}}}});
+  for (int i = 0; i < 4; ++i) result.push_back({{"index", i}, {"min", lo}, {"max", hi}, {"enum", nullptr}});
   return result;
 }
 }
@@ -31,35 +31,35 @@ int main() {
     api.set = [](void*, int, double, int) { throw std::runtime_error("Unexpected parameter write"); };
     const auto read = [&] { auto result = parameters(); jsfx_enum_metadata(api, &api, result); return result; };
     auto result = read();
-    CHECK(result[0]["reaweb"]["enum"] == Json::parse(R"([{"value":0,"label":"Off"},{"value":1,"label":"Low"},{"value":2,"label":"High"}])"));
-    CHECK(result[1]["reaweb"]["enum"].is_null() && reads == 3);
+    CHECK(result[0]["enum"] == Json::parse(R"([{"value":0,"label":"Off"},{"value":1,"label":"Low"},{"value":2,"label":"High"}])"));
+    CHECK(result[1]["enum"].is_null() && reads == 3);
     labels = {u8"低", "", u8"低"};
-    CHECK(read()[0]["reaweb"]["enum"][2]["label"] == u8"低");
+    CHECK(read()[0]["enum"][2]["label"] == u8"低");
     labels = {"Only"}; hi = 0; flag = 1;
-    CHECK(read()[0]["reaweb"]["enum"].size() == 1);
+    CHECK(read()[0]["enum"].size() == 1);
     auto singleton = parameters(); singleton[0]["max"] = 1;
     jsfx_enum_metadata(api, &api, singleton);
-    CHECK(singleton[0]["reaweb"]["enum"].size() == 1);
+    CHECK(singleton[0]["enum"].size() == 1);
     labels = {"Off", "On"}; hi = 1;
-    CHECK(read()[0]["reaweb"]["enum"].size() == 2);
+    CHECK(read()[0]["enum"].size() == 2);
     flag = 0;
-    CHECK(read()[0]["reaweb"]["enum"].is_null());
+    CHECK(read()[0]["enum"].is_null());
     flag = 1; api.version++;
-    CHECK(read()[0]["reaweb"]["enum"].is_null());
+    CHECK(read()[0]["enum"].is_null());
     api.version--;
     auto mismatch = parameters(); mismatch.push_back(mismatch[0]);
-    jsfx_enum_metadata(api, &api, mismatch); CHECK(mismatch[0]["reaweb"]["enum"].is_null());
+    jsfx_enum_metadata(api, &api, mismatch); CHECK(mismatch[0]["enum"].is_null());
     mismatch = parameters(); mismatch[0]["max"] = 99;
-    jsfx_enum_metadata(api, &api, mismatch); CHECK(mismatch[0]["reaweb"]["enum"].is_null());
-    increment = 0.1; CHECK(read()[0]["reaweb"]["enum"].is_null()); increment = 1;
-    lo = -1; CHECK(read()[0]["reaweb"]["enum"].is_null()); lo = 0;
-    hi = std::numeric_limits<double>::infinity(); CHECK(read()[0]["reaweb"]["enum"].is_null());
-    hi = 1024; flag = 1024; CHECK(read()[0]["reaweb"]["enum"].is_null());
+    jsfx_enum_metadata(api, &api, mismatch); CHECK(mismatch[0]["enum"].is_null());
+    increment = 0.1; CHECK(read()[0]["enum"].is_null()); increment = 1;
+    lo = -1; CHECK(read()[0]["enum"].is_null()); lo = 0;
+    hi = std::numeric_limits<double>::infinity(); CHECK(read()[0]["enum"].is_null());
+    hi = 1024; flag = 1024; CHECK(read()[0]["enum"].is_null());
     hi = 1; flag = 1; labels[1] = std::string(4095, 'x');
-    CHECK(read()[0]["reaweb"]["enum"].is_null());
-    labels[1] = std::string(1, char(0xff)); CHECK(read()[0]["reaweb"]["enum"].is_null());
+    CHECK(read()[0]["enum"].is_null());
+    labels[1] = std::string(1, char(0xff)); CHECK(read()[0]["enum"].is_null());
     labels[1] = "On";
-    api.display = nullptr; CHECK(read()[0]["reaweb"]["enum"].is_null());
+    api.display = nullptr; CHECK(read()[0]["enum"].is_null());
     api.count = [](void*) { return 5; };
     api.is_enum = [](void*, int) { return 1023; };
     api.get = [](void*, int, double* minimum, double* maximum, double* step) {
@@ -67,19 +67,19 @@ int main() {
     };
     api.display = [](void*, int, char* text, int, double*) { ++reads; std::strcpy(text, "Choice"); };
     Json bounded = Json::array();
-    for (int i = 0; i < 8; ++i) bounded.push_back({{"index", i}, {"min", 0}, {"max", 1023}, {"reaweb", {{"enum", nullptr}}}});
+    for (int i = 0; i < 8; ++i) bounded.push_back({{"index", i}, {"min", 0}, {"max", 1023}, {"enum", nullptr}});
     reads = 0; jsfx_enum_metadata(api, &api, bounded);
-    CHECK(reads == 4096 && bounded[3]["reaweb"]["enum"].size() == 1024 && bounded[4]["reaweb"]["enum"].is_null());
-    for (auto& parameter : bounded) parameter["reaweb"]["enum"] = nullptr;
+    CHECK(reads == 4096 && bounded[3]["enum"].size() == 1024 && bounded[4]["enum"].is_null());
+    for (auto& parameter : bounded) parameter["enum"] = nullptr;
     api.display = [](void*, int, char* text, int, double*) { ++reads; std::memset(text, 'x', 1000); text[1000] = 0; };
     reads = 0; jsfx_enum_metadata(api, &api, bounded);
     CHECK(reads < 140);
-    for (const auto& parameter : bounded) CHECK(parameter["reaweb"]["enum"].is_null());
+    for (const auto& parameter : bounded) CHECK(parameter["enum"].is_null());
     bounded[0]["name"] = std::string(950000, 'x');
     api.display = [](void*, int, char* text, int, double*) { std::memset(text, 1, 100); text[100] = 0; };
     jsfx_enum_metadata(api, &api, bounded);
     CHECK(bounded.dump().size() < host_message_limit - 8192);
-    CHECK(bounded[0]["reaweb"]["enum"].is_null());
+    CHECK(bounded[0]["enum"].is_null());
     std::cout << "JSFX engine enumeration tests passed\n";
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

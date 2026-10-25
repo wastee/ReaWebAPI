@@ -57,24 +57,24 @@ const report=async e=>{await reaper.SetExtState('Metadata','error',e.stack||e.me
 try {
   const fx=await connectJSFX(reaper,report), initial=fx.params.snapshot;
   await reaper.SetExtState('Metadata','initial',JSON.stringify(initial),false);
-  const metadata=p=>JSON.stringify([p.name,p.ident,p.min,p.max,p.defaultNormalized,p.enum,p.unit,p.section,p.reaweb]);
+  const metadata=p=>JSON.stringify([p.name,p.ident,p.min,p.max,p.defaultNormalized,p.enum]);
   const baseline=initial.parameters.map(metadata);
   const verify=state=>{
     check(state.parameters.length===15,'Parameter count: '+state.parameters.length);
     for(const p of state.parameters){
-      check(p.enum===null&&p.unit===null&&p.section===null,'Unavailable metadata');
+      check(!('unit' in p)&&!('section' in p)&&!('reaweb' in p),'Removed metadata fields');
       check(metadata(p)===baseline[p.index],'Metadata changed during value update');
     }
   };
   verify(initial);
-  check(JSON.stringify(initial.parameters[0].reaweb.enum)===JSON.stringify([
+  check(JSON.stringify(initial.parameters[0].enum)===JSON.stringify([
     {label:'Off',value:0},{label:'Low',value:1},{label:'High',value:2}]),'Loaded enum table: '+JSON.stringify(initial));
-  const choices=index=>initial.parameters[index].reaweb.enum;
+  const choices=index=>initial.parameters[index].enum;
   check(choices(7)?.length===1&&choices(7)[0].label==='Only','Single option');
   check(choices(8)?.length===2&&choices(8)[1].label==='On','Hidden sparse slider');
   check(choices(9)?.length===2&&choices(9)[0].label==='Same'&&choices(9)[1].label==='Same','Aliased choices: engine skips empty declarations');
   check(choices(10)?.length===2&&choices(10)[1].label==='高','Unicode labels');
-  for(const p of initial.parameters)if(![0,7,8,9,10].includes(p.index))check(p.reaweb.enum===null,'Unexpected enum: '+p.name);
+  for(const p of initial.parameters)if(![0,7,8,9,10].includes(p.index))check(p.enum===null,'Unexpected enum: '+p.name);
   check(initial.parameters[0].formatted==='Off','Initial enum display');
   let changes=0;
   await fx.params.onChange(state=>{try {verify(state);changes++;}catch(e){report(e);}});
@@ -133,7 +133,7 @@ local function main()
   local sourcefile=root..'/Effects/metadata/probe.jsfx'
   local f=assert(io.open(sourcefile,'r'));local original=f:read('*a');f:close()
   local function source(text) local out=assert(io.open(sourcefile,'w'));out:write(text);out:close() end
-  local index,deadline,changed=0,0,false
+  local index,deadline,changed,show_at=0,0,false,0
   local function advance()
     if cases[index] then reaper[cases[index].prefix..'Show'](cases[index].owner,cases[index].fx,chain and 0 or 2) end
     index=index+1
@@ -144,16 +144,19 @@ local function main()
     local add=reaper[c.prefix..'AddByName']
     local fx=c.prefix=='TrackFX_' and add(c.owner,'metadata/probe.jsfx',c.input or false,-1) or add(c.owner,'metadata/probe.jsfx',-1)
     assert(fx>=0,'Could not load JSFX');if c.input then fx=fx|0x1000000 end;c.fx=fx
-    for p=0,6 do
-      assert(reaper[c.prefix..'GetParamSectionName'](c.owner,fx,p,'')=='','Unexpected JSFX group')
-    end
-    reaper[c.prefix..'Show'](c.owner,fx,chain and 1 or 3)
-    deadline=reaper.time_precise()+45;changed=false
+    show_at=reaper.time_precise()+0.25
+    deadline=show_at+45;changed=false
   end
   advance()
   local function tick()
     local ok,err=xpcall(function()
       local c=cases[index];if not c then return end
+      if show_at>0 then
+        if reaper.time_precise()>=show_at then
+          reaper[c.prefix..'Show'](c.owner,c.fx,chain and 1 or 3);show_at=0
+        end
+        return
+      end
       local snapshot=reaper.GetExtState('Metadata','initial');if snapshot~='' then write(c.kind..'-initial.json',snapshot) end
       local error=reaper.GetExtState('Metadata','error');assert(error=='',error)
       assert(reaper.time_precise()<deadline,'Metadata timeout: '..c.kind)
@@ -170,8 +173,13 @@ local function main()
   end
   reaper.defer(tick)
 end
-local ok,err=xpcall(main,debug.traceback)
-if not ok then write('error.txt',err);quit() end
+local ready=reaper.time_precise()+1
+local function start()
+  if reaper.time_precise()<ready then reaper.defer(start);return end
+  local ok,err=xpcall(main,debug.traceback)
+  if not ok then write('error.txt',err);quit() end
+end
+reaper.defer(start)
 '''
 (root / 'launch.lua').write_text(lua.replace('ROOT', '[[' + root.as_posix() + ']]').replace('CHAIN', str(args.chain).lower()), encoding='utf-8')
 with (root / 'process.log').open('w') as log:
@@ -180,6 +188,9 @@ with (root / 'process.log').open('w') as log:
                                 '-new', '-ignoreerrors', '-nosplash', str(root / 'launch.lua')],
                                stdout=log, stderr=log, **options)
     try:
+        if sys.platform == 'darwin':
+            subprocess.run(['osascript', '-e', 'tell application "System Events" to set frontmost of '
+                            f'first application process whose unix id is {process.pid} to true'], check=True, timeout=10)
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline and process.poll() is None:
             if (root / 'done.txt').exists() or (root / 'error.txt').exists():
