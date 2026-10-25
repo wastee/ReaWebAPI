@@ -218,6 +218,10 @@ void open_external(const std::string& url) {
 
 
 namespace reaweb {
+bool native_key_repeat() {
+  auto event = NSApp.currentEvent;
+  return event.type == NSEventTypeKeyDown && event.isARepeat;
+}
 namespace {
 NSString* ns(const std::string& text) { return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding]; }
 char dock_icon_owner;
@@ -250,6 +254,7 @@ class MacWindow final : public Window, public std::enable_shared_from_this<MacWi
   std::unique_ptr<SwellWindow> window_;
   ReaWebNativeView* webview_;
   id mouse_monitor_;
+  id focus_observer_;
   DragRegions drag_regions_;
   bool alpha_ready_ = false;
   double corner_radius_ = 0;
@@ -471,7 +476,10 @@ public:
     webview_.navigationDelegate = delegate_;
     webview_.UIDelegate = delegate_;
     webview_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, std::function<void()>{}, delegate_->options.on_close, true, delegate_->options.hosted);
+    window_ = std::make_unique<SwellWindow>(delegate_->options.title, delegate_->options.parent, [this] {
+      const auto& capture = delegate_->options.captures_keyboard;
+      if (!webview_->sourceClosed && capture && capture()) [webview_.window makeFirstResponder:webview_];
+    }, delegate_->options.on_close, true, delegate_->options.hosted);
     delegate_->navigationStarted = [this] { startup_.navigate(delegate_->options.hosted); drag_regions_.clear(); };
     delegate_->options.on_message = [this, receive = delegate_->options.on_message](std::string message) {
       if (message == "__reawebPresent") { prepare_startup(); return; }
@@ -500,6 +508,16 @@ public:
       [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"reaweb"];
       throw;
     }
+    focus_observer_ = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification
+      object:nil queue:nil usingBlock:^(NSNotification* notification) {
+        auto view = weak_view;
+        if (!view || view->sourceClosed || delegate_->options.hosted || notification.object != floating_window()) return;
+        const auto& capture = delegate_->options.captures_keyboard;
+        if (!capture || !capture()) return;
+        auto responder = view.window.firstResponder;
+        if (!responder || responder == view.superview || responder == view.window)
+          [view.window makeFirstResponder:view];
+      }];
     devtools_ = std::make_unique<MacDevTools>(webview_, [this] { if (!closed()) focus(); });
     webview_->devtoolsMenu = [this](NSMenu* menu, NSInteger index) { return devtools_->insert_menu(menu, index); };
     webview_->windowMenuAction = [this](int command) {
@@ -522,6 +540,7 @@ public:
     } else [webview_ loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:ns(delegate_->options.url)]]];
   }
   ~MacWindow() override {
+    if (focus_observer_) [NSNotificationCenter.defaultCenter removeObserver:focus_observer_];
     release_dock_icon();
     if (mouse_monitor_) [NSEvent removeMonitor:mouse_monitor_];
     webview_->devtoolsMenu = {};

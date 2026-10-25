@@ -180,6 +180,27 @@ int window_info(HWND window, INT_PTR type) {
     return IsChild(static_cast<HWND>(parent), static_cast<HWND>(child)) != 0;
   }) ? 1 : 0; }, 0);
 }
+#ifdef __APPLE__
+accelerator_register_t webview_keys{[](MSG* message, accelerator_register_t*) -> int {
+  if (!message || (message->message != WM_KEYDOWN && message->message != WM_KEYUP)) return 0;
+  const bool modified = (message->lParam & 0xff & ~FVIRTKEY) != 0;
+  if (message->wParam == VK_RETURN && !modified) {
+    // SWELL's dialog fallback moves unmodified Return to the parent container.
+    return window_info(message->hwnd, 0) == 1 ? -10 : 0;
+  }
+  if (message->wParam != VK_SPACE || !runtime) return 0;
+  static HWND space_window = nullptr;
+  const bool eligible = guarded([&] { return runtime->captures_keyboard(message->hwnd, [](void* parent, void* child) {
+    return IsChild(static_cast<HWND>(parent), static_cast<HWND>(child)) != 0;
+  }, true); }, false);
+  const bool continuing = space_window == message->hwnd &&
+    (message->message == WM_KEYUP || native_key_repeat());
+  const bool raw = eligible && (!modified || continuing);
+  space_window = raw && message->message == WM_KEYDOWN ? message->hwnd : nullptr;
+  // FX accelerators run before WKWebView can decide whether Space edits text.
+  return raw ? -10 : 0;
+}, true, nullptr};
+#endif
 void* dock_vararg(void** args, int count) {
   if (count < 2) return nullptr;
   return reinterpret_cast<void*>(static_cast<intptr_t>(ReaWeb_SetDocked(
@@ -362,6 +383,33 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
         bool floating = false;
         if (dock_index(hwnd, &floating) >= 0 && floating && IsWindowVisible(hwnd)) activate_dock(hwnd);
       }};
+    const auto translate_key = load<int (*)(HWND, MSG*, KbdSectionInfo*)>(rec, "kbd_translateAccelerator");
+    const auto main_section = load<KbdSectionInfo* (*)(int)>(rec, "SectionFromUniqueID");
+    dock.daw_space = [translate_key, main_section, main = rec->hwnd_main](bool down, bool repeat) {
+      MSG message{};
+      message.hwnd = main; message.message = down ? WM_KEYDOWN : WM_KEYUP; message.wParam = VK_SPACE;
+#ifdef _WIN32
+      message.lParam = 1 | (MapVirtualKeyW(VK_SPACE, MAPVK_VK_TO_VSC) << 16) |
+        (repeat || !down ? LPARAM(1) << 30 : 0) | (!down ? LPARAM(1) << 31 : 0);
+      // The browser owns this unmodified press. Later modifiers must not remap it.
+      struct KeyboardState {
+        BYTE saved[256]{};
+        bool valid = GetKeyboardState(saved) != FALSE;
+        KeyboardState() {
+          if (!valid) return;
+          BYTE state[256]; std::copy(std::begin(saved), std::end(saved), state);
+          for (int key : {VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+                          VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN}) state[key] &= 0x7f;
+          SetKeyboardState(state);
+        }
+        ~KeyboardState() { if (valid) SetKeyboardState(saved); }
+      } keyboard_state;
+#else
+      (void)repeat;
+      message.lParam = FVIRTKEY;
+#endif
+      if (auto section = main_section(0)) translate_key(main, &message, section);
+    };
     runtime = std::make_unique<Runtime>(std::move(host), fs::u8path(resource()), log_error, std::move(dock));
     runtime->schedule_webview_warmup();
     runtime->configure_webviews(idle_webview_preferences());
@@ -419,6 +467,9 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
     add_api("ReaWeb_OpenDev", reinterpret_cast<void*>(ReaWeb_OpenDev), reinterpret_cast<void*>(dev_vararg),
       "int\0const char*\0url\0Open an explicitly trusted loopback HTTP development server.\0");
     add_registration("hwnd_info", reinterpret_cast<void*>(window_info));
+#ifdef __APPLE__
+    add_registration("accelerator", &webview_keys);
+#endif
     add_registration("projectconfig", &project_events);
     add_registration("csurf_inst", &event_surface);
     add_registration("timer", reinterpret_cast<void*>(timer));

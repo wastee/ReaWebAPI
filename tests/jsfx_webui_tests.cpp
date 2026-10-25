@@ -100,6 +100,13 @@ int main() {
     CHECK(!jsfx_association(root, "Utility/utility.jsfx"));
     std::ofstream(root / "Utility/utility.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"index.html"}})";
     CHECK(jsfx_association(root, "Utility/utility.jsfx").has_value());
+    CHECK(jsfx_association(root, "Utility/utility.jsfx")->daw_keyboard);
+    for (const auto value : {Json(true), Json(false), Json(), Json(0), Json("false"), Json::array(), Json::object()}) {
+      std::ofstream(root / "Utility/utility.json") << Json{{"schema", 1}, {"JSFX_WebUI", {{"entry", "index.html"}, {"dawKeyboard", value}}}};
+      const auto association = jsfx_association(root, "Utility/utility.jsfx");
+      CHECK(bool(association) == value.is_boolean());
+      if (association) CHECK(association->daw_keyboard == value.get<bool>());
+    }
     std::ofstream(root / "Utility/utility.json") << R"({"schema":1,"JSFX_WebUI":{"entry":"../outside.html"}})";
     std::ofstream(root / "outside.html") << "<!doctype html>";
     CHECK(!jsfx_association(root, "Utility/utility.jsfx"));

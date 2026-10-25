@@ -67,12 +67,14 @@ std::optional<JsfxAssociation> jsfx_association(const fs::path& effects, const s
   if (!data.is_object() || data.value("schema", Json()) != 1 || !data.contains("JSFX_WebUI")) return {};
   const auto& ui = data["JSFX_WebUI"];
   if (!ui.is_object() || !ui.value("entry", Json()).is_string() || ui.value("enabled", Json(true)) != true) return {};
+  const auto daw_keyboard = ui.value("dawKeyboard", Json(true));
+  if (!daw_keyboard.is_boolean()) return {};
   auto entry = fs::weakly_canonical(source.parent_path() / fs::u8path(ui["entry"].get<std::string>()), error);
   if (error || !beneath(source.parent_path(), entry) || !fs::is_regular_file(entry) || entry.extension() != ".html") return {};
   const auto width = ui.value("width", Json(640)), height = ui.value("height", Json(420));
   if (!width.is_number_integer() || !height.is_number_integer() || width.get<double>() < 100 || width.get<double>() > 2048 ||
       height.get<double>() < 100 || height.get<double>() > 2048) return {};
-  return JsfxAssociation{entry, ident, width.get<int>(), height.get<int>(), ui.value("native", Json())};
+  return JsfxAssociation{entry, ident, width.get<int>(), height.get<int>(), ui.value("native", Json()), daw_keyboard.get<bool>()};
 }
 JsfxBinding::JsfxBinding(Host& host, void* track, int fx)
   : JsfxBinding(host, JsfxTarget{track, nullptr, bool(fx & 0x1000000)}, fx) {}

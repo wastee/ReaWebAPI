@@ -2,16 +2,12 @@
 
 ## English
 
-- Add live title-bar switching with `window.setFrameless(boolean)`.
-- Add `window.setCornerRadius(0..64)` with Dock/maximize suspension and floating restoration.
-- Fix Windows frameless border remnants and resizing from all four edges and corners.
-- Add worker-thread `fs.moveFile()` with explicit source/destination paths, overwrite control and cross-volume moves.
-- Align page context menus with native window menus while retaining custom page menus and hiding browser defaults.
+- Fix unmodified Enter and keyboard focus restoration in captured macOS floating WebViews.
+- Fix native keyboard focus after focusing or docking Linux App windows.
+- Route unmodified Space from non-editable JSFX Web UI controls through REAPER's shortcut bindings on Windows, macOS and Linux. Add the association option `dawKeyboard: false` to opt out.
 
 ## 简体中文
 
-- 新增 `window.setFrameless(boolean)`，支持在同一窗口动态切换原生标题栏。
-- 新增 `window.setCornerRadius(0..64)`，停靠和最大化时暂停裁剪，恢复浮动后重新应用。
-- 修复 Windows 无标题栏窗口的边框残留与四边四角缩放问题。
-- 新增工作线程 `fs.moveFile()`，支持明确的源与目标路径、覆盖控制和跨卷移动。
-- 统一网页与原生窗口右键菜单，保留页面自定义菜单并继续隐藏浏览器默认项。
+- 修复 macOS 浮动 WebView 开启键盘捕获后的无修饰 Enter 与键盘焦点恢复。
+- 修复 Linux App 聚焦及停靠切换后的原生键盘焦点同步。
+- Windows、macOS 和 Linux 的 JSFX Web UI 默认将非编辑控件上的无修饰 Space 交给 REAPER 快捷键绑定处理，支持通过关联配置 `dawKeyboard: false` 关闭。

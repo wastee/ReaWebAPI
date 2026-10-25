@@ -228,11 +228,19 @@ int main() {
       };
       auto editor = std::make_shared<Editor>();
       auto discovery = std::make_shared<Discovery>(); discovery->editor = {&track, 0, false, editor.get(), editor};
-      Runtime runtime(jsfx_host, resource, [&](const std::string& error) { errors.push_back(error); }, docks);
+      auto keyboard_docks = docks;
+      std::string keys;
+      keyboard_docks.daw_space = [&](bool down, bool repeat) { keys += down ? (repeat ? 'r' : 'd') : 'u'; };
+      Runtime runtime(jsfx_host, resource, [&](const std::string& error) { errors.push_back(error); }, keyboard_docks);
       const auto before = windows.size(); runtime.initialize_jsfx(discovery);
       until(runtime, [&] { return windows.size() > before; });
       auto window = windows.back().lock(); const int id = 1;
       result(runtime, *window, window->send("__reawebHello", {1}));
+      CHECK(window->options.script.find("__reawebDawKey:") != std::string::npos);
+      CHECK(runtime.captures_keyboard(window.get(), [](void*, void*) { return false; }, true));
+      for (const auto key : {"u", "r", "d", "d", "r", "u", "u"}) window->options.on_message(std::string("__reawebDawKey:") + key);
+      CHECK(keys.empty());
+      runtime.tick(); CHECK(keys == "dru");
       const auto call = [&](const char* method, Json payload = Json::object()) {
         return result(runtime, *window, window->send("ReaWeb_ServiceInvoke", {"jsfx", method, payload}));
       };
@@ -293,7 +301,10 @@ int main() {
         window->document = "jsfx-reloaded";
         reload_hello = window->send("__reawebHello", {1});
       };
+      window->options.on_message("__reawebDawKey:d"); runtime.tick();
+      CHECK(keys == "drud");
       window->reload();
+      CHECK(keys == "drudu");
       CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["presented"] == false);
       result(runtime, *window, reload_hello);
       CHECK(runtime.is_ready(id));
@@ -319,8 +330,11 @@ int main() {
       CHECK(call("present", {{"sessionId", session_id}, {"activation", floating_state["activation"]}})["result"]["data"]["presented"] == false);
       const auto returned = call("getParamState", {{"sessionId", session_id}})["result"]["data"];
       CHECK(call("present", {{"sessionId", session_id}, {"activation", returned["activation"]}})["result"]["data"]["presented"] == true);
+      window->options.on_message("__reawebDawKey:d");
       editor->alive = false; runtime.tick();
+      CHECK(keys == "drudu");
       CHECK(!window->visible() && runtime.diagnostics(id)["jsfx"]["cached"] == true);
+      CHECK(!runtime.captures_keyboard(window.get(), [](void*, void*) { return false; }, true));
       CHECK(call("present", {{"sessionId", session_id}, {"activation", fresh["activation"]}})["result"]["data"]["presented"] == false);
     }
     windows.clear(); profiles.clear(); platform_count = 0; platform_pumps = 0;
@@ -711,6 +725,7 @@ int main() {
       first->icons.clear(); first->icon_visible = true; ++first->icon_target_generation;
       runtime.tick(); CHECK(!first->icon_visible && first->icons[0].rgba[0] == 255);
       CHECK(runtime.captures_keyboard(first.get(), [](void*, void*) { return false; }));
+      CHECK(!runtime.captures_keyboard(first.get(), [](void*, void*) { return false; }, true));
       CHECK(result(runtime, *first, first->send("ReaWeb_SetKeyboardCapture", {false}))["result"] == false);
       CHECK(!runtime.captures_keyboard(first.get(), [](void*, void*) { return false; }));
       CHECK(result(runtime, *first, first->send("ReaWeb_SetTitle", {"Mixer"}))["result"] == true);

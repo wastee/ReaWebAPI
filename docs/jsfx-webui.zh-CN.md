@@ -20,10 +20,12 @@ Effects/Author/Utility/
 ```
 
 ```json
-{"schema":1,"JSFX_WebUI":{"entry":"index.html","enabled":true,"width":640,"height":420}}
+{"schema":1,"JSFX_WebUI":{"entry":"index.html","enabled":true,"width":640,"height":420,"dawKeyboard":true}}
 ```
 
 `entry` 必须指向 JSFX 所在目录内的 HTML 文件，JSFX 必须位于 `Effects` 下。关联缺失、禁用或无效时保留原生编辑器。`width`、`height` 指定独立 FX 窗口的初始内容尺寸，范围为 100..2048，默认 640×420。停靠窗口保留宿主尺寸。HTML 目录内可提供遵循普通 App 身份契约的 `app.json`，未提供时按 `fx_ident` 生成稳定的 App ID。使用下方 helper 时，将 `SDK/jsfx-webui.mjs` 复制到页面旁。
+
+`dawKeyboard` 在 Windows、macOS 和 Linux 上默认为 `true`。非编辑区域的无修饰 Space 使用 REAPER 主操作区的快捷键绑定，支持自定义绑定。文本输入框、textarea、contenteditable 和 IME 组合输入保留 Space，其他按键和修饰组合键维持原有行为。设置 `dawKeyboard: false` 可恢复原有键盘行为。非布尔值会使关联无效。该配置仅作用于当前关联的 Hosted JSFX WebView，不改变普通 App 的 `window.setKeyboardCapture()` 语义。修改关联后关闭并重新打开编辑器。
 
 ## 参数服务
 

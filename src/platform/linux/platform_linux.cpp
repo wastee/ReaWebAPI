@@ -188,6 +188,7 @@ class LinuxWindow final : public Window, public std::enable_shared_from_this<Lin
   std::chrono::steady_clock::time_point last_resize_sync_{};
   bool immediate_resize_enabled_ = false;
   bool pending_origin_valid_ = false;
+  bool focus_pending_ = false;
   int pending_origin_x_ = 0, pending_origin_y_ = 0;
   LONG_PTR saved_style_ = 0;
   bool style_saved_ = false;
@@ -249,7 +250,7 @@ public:
       if (on_close) on_close();
     };
     window_ = std::make_unique<SwellWindow>(options.title, options.parent, [this] {
-      try { process_->send({{"id", id_}, {"op", "focus"}}); } catch (...) {}
+      focus_pending_ = true;
     }, options.on_close, /*hidden=*/true, options.hosted);
     if (options.hosted) window_->before_destroy = [this] {
       immediate_resize_enabled_ = false; wants_visible_ = false;
@@ -431,9 +432,12 @@ public:
     if (layout_changed) {
       process_->send(next);
       geometry_ = next;
-    } else if (focus_changed) {
+    }
+    // Send focus after SWELL activation and the helper's current embedding geometry.
+    if (focus_changed || focus_pending_) {
       process_->send({{"id", id_}, {"op", "focus"}, {"focused", next_focused_value}});
       geometry_["focused"] = next_focused_value;
+      focus_pending_ = false;
     }
     immediate_resize_enabled_ = !next_docked && next_visible;
   }

@@ -14,6 +14,7 @@ struct DockApi {
   std::function<void(void*)> activate;
   std::function<void(const std::string&, int)> remember;
   std::function<void(void*)> refresh;
+  std::function<void(bool, bool)> daw_space;
 };
 struct WindowOptions {
   fs::path entry;
@@ -38,6 +39,7 @@ struct WindowOptions {
   bool transparent = false;
   bool hosted = false;
   std::shared_ptr<StartupTiming> startup_timing;
+  std::function<bool()> captures_keyboard;
 };
 class Window {
   std::shared_ptr<WebResources> media_resources_;
@@ -112,4 +114,7 @@ public:
   virtual void desktop(const std::string&, const Json&, DesktopReply) { throw Error("HOST_UNAVAILABLE", "Desktop integration unavailable"); }
 };
 std::unique_ptr<Platform> make_platform(const fs::path& shared_data);
+#ifdef __APPLE__
+bool native_key_repeat();
+#endif
 }

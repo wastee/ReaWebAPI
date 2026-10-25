@@ -361,6 +361,14 @@ def dock_index(window, floating):
     floating[0] = False
     return 0 if window in docked else -1
 
+@api('kbd_translateAccelerator', C.c_int, C.c_void_p, C.c_void_p, C.c_void_p)
+def translate_key(window, message, section):
+    return 0
+
+@api('SectionFromUniqueID', C.c_void_p, C.c_int)
+def keyboard_section(identifier):
+    return None
+
 @api('DockWindowActivate', None, C.c_void_p)
 def dock_activate(window):
     pass

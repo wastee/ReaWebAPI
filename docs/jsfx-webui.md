@@ -20,10 +20,12 @@ Effects/Author/Utility/
 ```
 
 ```json
-{"schema":1,"JSFX_WebUI":{"entry":"index.html","enabled":true,"width":640,"height":420}}
+{"schema":1,"JSFX_WebUI":{"entry":"index.html","enabled":true,"width":640,"height":420,"dawKeyboard":true}}
 ```
 
 `entry` must resolve to an HTML file beneath the JSFX directory. The JSFX must resolve beneath `Effects`. Missing, disabled or invalid associations leave the native editor intact. `width` and `height` request the initial editor area (100..2048, defaults 640×420) for standalone FX windows. Docked windows retain host geometry. An optional `app.json` in the HTML directory follows the normal App identity contract. Without it, the module derives a stable App ID from `fx_ident`. Copy `SDK/jsfx-webui.mjs` beside the page to use the helper below.
+
+`dawKeyboard` defaults to `true` on Windows, macOS and Linux. Unmodified Space outside editable fields uses REAPER's main-section shortcut binding, including custom bindings. Text inputs, textareas, contenteditable and IME composition retain Space. Other keys and modified shortcuts retain their existing behavior. Set `dawKeyboard: false` to retain the previous keyboard behavior. Non-boolean values invalidate the association. This setting applies only to the associated Hosted JSFX WebView and does not change ordinary Apps' `window.setKeyboardCapture()` behavior. Close and reopen the editor after changing the association.
 
 ## Parameter service
 

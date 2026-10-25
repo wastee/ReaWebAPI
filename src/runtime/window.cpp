@@ -1,6 +1,7 @@
 #include "runtime/runtime.hpp"
 #include "bridge_script.hpp"
 #include "platform/shared/idle_pool.hpp"
+#include "platform/shared/daw_keyboard.hpp"
 #include <limits>
 
 namespace reaweb {
@@ -133,9 +134,21 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   }, std::to_string(id));
   std::weak_ptr<Session> weak = session;
   auto window_resources = app->resources ? std::make_shared<WebResources>(app->resources->root(), app_id) : nullptr;
-  session->window = app->platform->open(WindowOptions{entry, bridge_script, session->title,
+  session->window = app->platform->open(WindowOptions{entry, std::string(bridge_script) +
+    (session->jsfx && session->jsfx->daw_keyboard && dock_.daw_space ? daw_keyboard_script : ""), session->title,
     [this, weak](std::string message) {
       if (auto s = weak.lock(); s && !s->closing) {
+        if (message.rfind("__reawebDawKey:", 0) == 0) {
+          if (s->ready && s->jsfx && s->jsfx->daw_keyboard && s->jsfx->editor.host &&
+              message.size() == 16 && (message.back() == 'd' || message.back() == 'r' || message.back() == 'u')) {
+            auto& events = s->jsfx->space_events;
+            if (message.back() != 'r' || events.empty() || events.back() != 'r') {
+              if (events.size() >= 64) { events.clear(); events.push_back('u'); }
+              else events.push_back(message.back());
+            }
+          }
+          return;
+        }
         Work work;
         work.session = s->id; work.generation = s->generation; work.project = project_epoch_;
         work.text = std::move(message); work.reply = true;
@@ -221,7 +234,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
     }, window_resources, [this, weak] {
       if (auto s = weak.lock(); s && !s->closing && is_docked(s->id) && dock_.activate)
         dock_.activate(s->window->native_handle());
-    }, hidden, frameless, resizable, transparent, bool(session->jsfx), session->startup_timing});
+    }, hidden, frameless, resizable, transparent, bool(session->jsfx), session->startup_timing,
+    [weak] { auto s = weak.lock(); return s && !s->closing && s->capture_keyboard; }});
   session->window->set_media_resources(window_resources);
   if (session->jsfx) session->jsfx->editor.host->resize(session->window->native_handle());
   sessions_.emplace(id, session);
@@ -309,10 +323,11 @@ bool Runtime::show(int id) {
   return true;
 }
 
-bool Runtime::captures_keyboard(void* handle, const std::function<bool(void*, void*)>& is_child) const {
+bool Runtime::captures_keyboard(void* handle, const std::function<bool(void*, void*)>& is_child, bool daw_only) const {
   check_thread();
   for (const auto& item : sessions_) {
     const auto& s = *item.second;
+    if (daw_only && (!s.jsfx || !s.jsfx->daw_keyboard || !s.jsfx->editor.host)) continue;
     auto root = s.window->native_handle();
     if (!s.closing && !s.window->closed() && s.capture_keyboard && root &&
         (root == handle || is_child(root, handle))) return true;

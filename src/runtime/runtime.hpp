@@ -39,7 +39,7 @@ public:
   bool send(int id, const std::string& message);
   std::string receive(int id);
   Json diagnostics(int id) const;
-  bool captures_keyboard(void* handle, const std::function<bool(void*, void*)>& is_child) const;
+  bool captures_keyboard(void* handle, const std::function<bool(void*, void*)>& is_child, bool daw_only = false) const;
   void tick();
   ServiceRegistry& services() { return services_; }
   StreamHub& streams() { return streams_; }
@@ -133,6 +133,8 @@ private:
       std::vector<int> editing;
       std::string gesture_id;
       bool group_edit = false;
+      bool daw_keyboard = true, space_down = false;
+      std::deque<char> space_events;
       uint64_t host_revision = 0, activation = 1;
       bool initialized = false, presented = false;
       double presentation_ms = 0;
@@ -224,6 +226,7 @@ private:
   Json jsfx_call(int window, const std::string& method, const Json& payload);
   Json jsfx_result(int window, const std::string& method, const Json& payload);
   void end_jsfx_edit(Session& session);
+  void release_jsfx_space(Session& session);
   void check_thread() const;
   void enqueue_message(Session& session, const std::string& message, bool to_web);
   void clear_messages(Session& session);

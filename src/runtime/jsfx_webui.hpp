@@ -8,6 +8,7 @@ struct JsfxAssociation {
   std::string ident;
   int width = 640, height = 420;
   Json native;
+  bool daw_keyboard = true;
 };
 std::optional<JsfxAssociation> jsfx_association(const fs::path& effects, const std::string& ident);
 
