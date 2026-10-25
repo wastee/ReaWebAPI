@@ -220,6 +220,7 @@ endif()
 # Native UI integration tests are opt-in and excluded from ctest.
 if(NOT WIN32 AND REAWEB_BUILD_EXTENSION)
   add_library(swell_jsfx_controls MODULE EXCLUDE_FROM_ALL swell_jsfx_controls.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/shared/jsfx_enum.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/shared/swell_window.cpp")
   target_link_libraries(swell_jsfx_controls PRIVATE reaweb_runtime)
   target_include_directories(swell_jsfx_controls SYSTEM PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk" "${wdl_SOURCE_DIR}/WDL")
@@ -319,7 +320,8 @@ if(UNIX AND NOT APPLE AND REAWEB_BUILD_EXTENSION)
   target_link_libraries(linux_navigation PRIVATE reaweb_core PkgConfig::WEBKIT X11::X11)
 endif()
 if(WIN32 AND REAWEB_BUILD_EXTENSION)
-  add_executable(windows_jsfx_controls windows_jsfx_controls.cpp)
+  add_executable(windows_jsfx_controls windows_jsfx_controls.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/shared/jsfx_enum.cpp")
   target_link_libraries(windows_jsfx_controls PRIVATE reaweb_runtime user32 gdi32 comctl32 dwmapi)
   target_include_directories(windows_jsfx_controls PRIVATE "${PROJECT_BINARY_DIR}/sdk-layout/sdk")
   target_compile_definitions(windows_jsfx_controls PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

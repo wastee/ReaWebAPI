@@ -52,7 +52,16 @@ int main() {
     CHECK(visible(gfx) && visible(label) && !visible(hidden_before));
     {
       ShowWindow(owner, SW_SHOWNOACTIVATE);
-      EditorHost host(editor, owner, nullptr);
+      Guid fx_guid{1};
+      Host native_host;
+      native_host.native_function = [](const char* name) -> void* {
+        if (std::strcmp(name, "TrackFX_GetFXGUID")) return nullptr;
+        return reinterpret_cast<void*>(+[](void* track, int fx) -> Guid* {
+          CHECK(fx == 0);
+          return static_cast<Guid*>(track);
+        });
+      };
+      EditorHost host(editor, owner, nullptr, native_host, JsfxTarget{&fx_guid}, 0);
       host.prepare();
       DWORD cloaked = 0;
       CHECK(SUCCEEDED(DwmGetWindowAttribute(owner, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))));
