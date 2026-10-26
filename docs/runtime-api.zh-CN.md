@@ -111,6 +111,8 @@ await reaper.lifecycle.on('cleanup', () => worker.terminate());
 
 ## Events
 
+事件名称依据握手返回的 `capabilities.events` 校验。未公布的名称返回 `UNKNOWN_EVENT`，缺少事件列表返回 `SCHEMA_MISMATCH`。`frame` 事件不提供初始快照或回放。参见[帧通道约定](host-api.zh-CN.md)。
+
 ```js
 const stop = await reaper.events.on('track-added', event => console.log(event.guids));
 await stop();

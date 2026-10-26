@@ -94,6 +94,8 @@ On Windows, macOS and Linux, a floating Docker title bar follows the active WebV
 
 ## Events
 
+Event names are validated against the handshake `capabilities.events`. An unadvertised name rejects with `UNKNOWN_EVENT`, and a missing event list rejects with `SCHEMA_MISMATCH`. The `frame` event has no initial snapshot or replay. See the [frame channel contract](host-api.md).
+
 `await reaper.events.on(name, callback)` returns an async disposer. The event catalogue includes:
 
 | Name | Meaning |

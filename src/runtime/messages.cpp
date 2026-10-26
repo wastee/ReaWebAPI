@@ -39,6 +39,25 @@ std::string Runtime::receive(int id) {
     diagnostic_log_.event(Diagnostics::Level::Warn, Diagnostics::Scope::Runtime, "lua.receive.fail", {}, id, "WINDOW_CLOSED");
     throw Error("WINDOW_CLOSED", "Host message window is closed or unknown");
   }
+  if (!ticking_ && !receive_dispatched_ && sessions_.at(id)->to_host.empty()) {
+    // A request the page posts becomes a host message only after the WebView
+    // IPC is pumped and the request is dispatched, and tick() used to be the
+    // only place that did either. A Lua pass reads its messages before the
+    // extension timer of the same pass runs, so it saw the page's request one
+    // whole pass later than the page saw Lua's frames. Pumping and dispatching
+    // here, when this window has nothing queued, removes that pass.
+    //
+    // ticking_ is the reentrancy guard tick() uses: a native service callback
+    // reached from the dispatch below can call ReaWeb_Receive again, and that
+    // nested call must only read the queue. receive_dispatched_ keeps this to
+    // one pump and one dispatch per pass, because a Lua pass polls up to 32
+    // times in a row and each dispatch may spend the whole 2 ms budget.
+    ticking_ = true;
+    struct Reset { bool& value; ~Reset() { value = false; } } reset{ticking_};
+    receive_dispatched_ = true;
+    if (auto platform = platform_.lock()) platform->pump();
+    dispatch_requests(Clock::now() + std::chrono::milliseconds(2));
+  }
   auto& s = *sessions_.at(id);
   if (!s.diagnostic_host_connected) { s.diagnostic_host_connected = true; trace(s, "lua.channel.begin", Diagnostics::Level::Info); }
   if (s.to_host.empty()) return {};
