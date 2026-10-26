@@ -7,6 +7,7 @@ Reference for building WebView tools in REAPER.
 | Document | Contents |
 | --- | --- |
 | [Developer guide](development.md) | Project setup, calling conventions, resource management and distribution |
+| [Runtime Diagnostics](diagnostics.md) | Persistent logs, App/Runtime filtering and observable lifecycle events |
 | [DevTools](devtools.md) | Shortcuts, Inspector layout, saved preferences and platform fallbacks |
 | [SDK](../runtime/README.md) | Type declarations, templates and examples |
 | [REAPER API](api-reference.md) | 730 REAPER 7.80 signatures and return types |

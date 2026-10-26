@@ -2,6 +2,7 @@
 
 namespace reaweb {
 void Runtime::navigate(Session& session) {
+  trace(session, "webview.load.begin");
   release_daw_space(session);
   if (session.generation) session.startup_timing->reset("navigation");
   session.startup_timing->mark(StartupTiming::Navigation);
@@ -48,6 +49,7 @@ void Runtime::navigate(Session& session) {
 bool Runtime::lifecycle(Session& s, const std::string& action) {
   if (!s.ready || !s.lifecycle_enabled || s.failed || s.window->closed()) return false;
   if (!s.lifecycle_action.empty()) return true;
+  trace(s, action == "close" ? "lifecycle.close.begin" : "lifecycle.reload.begin");
   s.lifecycle_action = action;
   s.lifecycle_token = std::to_string(++lifecycle_sequence_);
   s.lifecycle_deadline = Clock::now() + std::chrono::milliseconds(2000);
@@ -65,6 +67,7 @@ bool Runtime::defer_reload(int id) {
 }
 void Runtime::complete_lifecycle(Session& s) {
   if (s.lifecycle_action.empty()) return;
+  trace(s, s.lifecycle_action == "close" ? "lifecycle.close.end" : "lifecycle.reload.end");
   const auto action = std::move(s.lifecycle_action);
   s.lifecycle_action.clear(); s.lifecycle_token.clear();
   if (action == "close") {

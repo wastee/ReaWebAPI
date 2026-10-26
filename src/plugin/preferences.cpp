@@ -8,7 +8,7 @@
 #ifndef _WIN32
 #define TEXT(value) value
 #include <swell/swell-dlggen.h>
-SWELL_DEFINE_DIALOG_RESOURCE_BEGIN2(201, SWELL_DLG_WS_CHILD, "ReaWebAPI settings", 330, 220)
+SWELL_DEFINE_DIALOG_RESOURCE_BEGIN2(201, SWELL_DLG_WS_CHILD, "ReaWebAPI settings", 330, 300)
 #include "preferences_controls.inc"
 SWELL_DEFINE_DIALOG_RESOURCE_END2(201)
 #endif
@@ -23,6 +23,10 @@ std::string external_read_error;
 std::function<void(const ExternalSettings&)> external_apply;
 unsigned saved_idle_webviews = default_idle_webviews;
 std::function<void(unsigned)> webviews_apply;
+DiagnosticSettings saved_diagnostics;
+std::function<void(const DiagnosticSettings&)> diagnostics_apply;
+std::function<void()> diagnostics_open;
+constexpr int app_debug_control = 1021, target_control = 1022, runtime_debug_control = 1023, logs_control = 1024;
 constexpr int idle_control = 1004;
 constexpr int frame_control = 1000, profile_control = 1001, restore_control = 1003;
 constexpr int enable_control = 1010, port_control = 1011, token_control = 1012, copy_control = 1013, regenerate_control = 1014;
@@ -65,7 +69,7 @@ void resize(HWND window) {
   GetWindowRect(GetDlgItem(window, profile_control), &checkbox);
   POINT inset{checkbox.left, checkbox.top};
   ScreenToClient(window, &inset);
-  const int width = button.right - button.left, height = button.bottom - button.top;
+  const int width = button.right - button.left, height = std::abs(button.bottom - button.top);
   SetWindowPos(frame, nullptr, 0, 0, client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
   SetWindowPos(restore, nullptr, std::max(0, static_cast<int>(client.right - inset.x) - width),
     std::max(0, static_cast<int>(client.bottom - inset.x) - height), width, height, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -79,10 +83,18 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
     CheckDlgButton(window, enable_control, saved_external.enabled ? BST_CHECKED : BST_UNCHECKED);
     SetDlgItemInt(window, port_control, saved_external.port, FALSE);
     SetDlgItemInt(window, idle_control, saved_idle_webviews, FALSE);
+    CheckDlgButton(window, app_debug_control, saved_diagnostics.app_debug ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(window, runtime_debug_control, saved_diagnostics.runtime_debug ? BST_CHECKED : BST_UNCHECKED);
+    set_text(window, target_control, saved_diagnostics.target);
     show_token(window);
     if (!external_read_error.empty()) error_message(window, external_read_error.c_str());
     resize(window);
     return FALSE;
+  }
+  if (message == WM_COMMAND && LOWORD(command) == logs_control && HIWORD(command) == BN_CLICKED) {
+    try { if (diagnostics_open) diagnostics_open(); }
+    catch (const std::exception& error) { error_message(window, error.what()); }
+    return TRUE;
   }
   if (message == WM_SIZE) { resize(window); return TRUE; }
   if (message == WM_COMMAND && LOWORD(command) == copy_control && HIWORD(command) == BN_CLICKED) {
@@ -104,8 +116,8 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
     catch (const std::exception& error) { error_message(window, error.what()); }
     return TRUE;
   }
-  if (message == WM_COMMAND && ((LOWORD(command) == enable_control && HIWORD(command) == BN_CLICKED) ||
-      ((LOWORD(command) == port_control || LOWORD(command) == idle_control) && HIWORD(command) == EN_CHANGE))) {
+  if (message == WM_COMMAND && (((LOWORD(command) == enable_control || LOWORD(command) == app_debug_control || LOWORD(command) == runtime_debug_control) && HIWORD(command) == BN_CLICKED) ||
+      ((LOWORD(command) == port_control || LOWORD(command) == idle_control || LOWORD(command) == target_control) && HIWORD(command) == EN_CHANGE))) {
     EnableWindow(GetDlgItem(GetParent(window), 0x478), TRUE);
     return TRUE;
   }
@@ -116,6 +128,9 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
           TEXT("ReaWebAPI settings"), MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return TRUE;
       CheckDlgButton(window, profile_control, BST_UNCHECKED);
       CheckDlgButton(window, enable_control, BST_UNCHECKED);
+      CheckDlgButton(window, app_debug_control, BST_UNCHECKED);
+      CheckDlgButton(window, runtime_debug_control, BST_UNCHECKED);
+      set_text(window, target_control, "");
       SetDlgItemInt(window, port_control, 9123, FALSE);
       SetDlgItemInt(window, idle_control, default_idle_webviews, FALSE);
     }
@@ -124,6 +139,21 @@ INT_PTR CALLBACK procedure(HWND window, UINT message, WPARAM command, LPARAM) {
   }
   if (message == WM_USER * 2) {
     try {
+      DiagnosticSettings diagnostics;
+      diagnostics.app_debug = IsDlgButtonChecked(window, app_debug_control) == BST_CHECKED;
+      diagnostics.runtime_debug = IsDlgButtonChecked(window, runtime_debug_control) == BST_CHECKED;
+      char target[1025]{};
+#ifdef _WIN32
+      GetDlgItemTextA(window, target_control, target, sizeof(target));
+#else
+      GetDlgItemText(window, target_control, target, sizeof(target));
+#endif
+      diagnostics.target = target;
+      if (!(diagnostics == saved_diagnostics)) {
+        write_diagnostic_settings(settings_file, diagnostics);
+        saved_diagnostics = diagnostics;
+        if (diagnostics_apply) diagnostics_apply(diagnostics);
+      }
       BOOL idle_valid = FALSE;
       const auto idle = GetDlgItemInt(window, idle_control, &idle_valid, FALSE);
       if (!idle_valid || idle > max_idle_webviews) throw Error("INVALID_ARGUMENT", "Idle WebView count must be an integer from 0 to 32.");
@@ -168,11 +198,15 @@ prefs_page_register_t page{"reawebapi", "ReaWebAPI", create, 0x9a, "", 0, nullpt
 const ExternalSettings& external_preferences() { return saved_external; }
 unsigned idle_webview_preferences() { return saved_idle_webviews; }
 prefs_page_register_t* initialize_preferences(REAPER_PLUGIN_HINSTANCE instance, const std::filesystem::path& resource,
-    std::function<void(const ExternalSettings&)> apply_external, std::function<void(unsigned)> apply_webviews) {
+    std::function<void(const ExternalSettings&)> apply_external, std::function<void(unsigned)> apply_webviews,
+    std::function<void(const DiagnosticSettings&)> apply_diagnostics, std::function<void()> open_diagnostics) {
   module = instance;
   settings_file = resource / "ReaWebAPI.ini";
   external_apply = std::move(apply_external);
   webviews_apply = std::move(apply_webviews);
+  diagnostics_apply = std::move(apply_diagnostics);
+  diagnostics_open = std::move(open_diagnostics);
+  saved_diagnostics = read_diagnostic_settings(settings_file);
 #ifdef _WIN32
   saved_idle_webviews = GetPrivateProfileIntW(L"ReaWebAPI", L"IdleWebViews", default_idle_webviews, settings_file.c_str());
 #else

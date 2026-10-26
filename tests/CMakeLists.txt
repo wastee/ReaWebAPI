@@ -1,3 +1,6 @@
+add_executable(diagnostics_tests diagnostics_tests.cpp)
+target_link_libraries(diagnostics_tests PRIVATE reaweb_core)
+add_test(NAME diagnostics COMMAND diagnostics_tests)
 add_executable(core_tests core_tests.cpp)
 target_link_libraries(core_tests PRIVATE reaweb_core)
 add_test(NAME core COMMAND core_tests)

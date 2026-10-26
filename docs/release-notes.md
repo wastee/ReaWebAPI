@@ -2,10 +2,12 @@
 
 ## English
 
-- Move JSFX enumeration metadata from `parameter.reaweb.enum` to `parameter.enum`.
-- Remove the unused JSFX parameter fields `unit` and `section`, and the empty `reaweb` wrapper. Update SDK types and examples.
+- Add persistent Runtime Diagnostics for Apps and JSFX WebUI on Windows, macOS and Linux, with separate Runtime/App logs, rotation and bounded retention.
+- Add independent App and Runtime debug logging controls, Target App ID and a diagnostics-folder shortcut in Preferences.
+- Record WebView, bridge and host-message lifecycle failures and observable JSFX binding and native-session changes without persisting message bodies or authentication tokens.
 
 ## 简体中文
 
-- 将 JSFX 枚举元数据由 `parameter.reaweb.enum` 移至顶层 `parameter.enum`。
-- 移除无效的 JSFX 参数字段 `unit`、`section` 及空的 `reaweb` 包装层，同步更新 SDK 类型和示例。
+- 为 Windows、macOS、Linux 的 App 与 JSFX WebUI 新增持久化 Runtime Diagnostics，Runtime 与 App 分文件保存，支持轮转和数量限制。
+- 在 Preferences 新增独立的 App 与 Runtime 调试开关、Target App ID 和诊断日志目录入口。
+- 记录 WebView、Bridge、宿主消息通道的生命周期及失败，以及可观测的 JSFX 绑定与原生会话变化，不持久化通信正文或认证令牌。

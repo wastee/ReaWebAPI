@@ -19,18 +19,30 @@ void Runtime::enqueue_message(Session& s, const std::string& message, bool to_we
 
 bool Runtime::send(int id, const std::string& message) {
   check_thread();
-  if (!is_open(id)) throw Error("WINDOW_CLOSED", "Host message window is closed or unknown");
+  if (!is_open(id)) {
+    diagnostic_log_.event(Diagnostics::Level::Warn, Diagnostics::Scope::Runtime, "lua.send.fail", {}, id, "WINDOW_CLOSED");
+    throw Error("WINDOW_CLOSED", "Host message window is closed or unknown");
+  }
   auto& s = *sessions_.at(id);
-  if (!s.ready) throw Error("NOT_READY", "Wait for ReaWeb_IsReady before sending a host message");
-  enqueue_message(s, message, true);
+  if (!s.ready) { trace(s, "lua.send.fail", Diagnostics::Level::Warn, "NOT_READY"); throw Error("NOT_READY", "Wait for ReaWeb_IsReady before sending a host message"); }
+  try {
+    enqueue_message(s, message, true);
+    if (!s.diagnostic_host_connected) { s.diagnostic_host_connected = true; trace(s, "lua.channel.begin", Diagnostics::Level::Info); }
+    trace(s, "lua.send.end");
+  } catch (const Error& error) { trace(s, "lua.send.fail", Diagnostics::Level::Error, error.code.c_str()); throw; }
   return true;
 }
 
 std::string Runtime::receive(int id) {
   check_thread();
-  if (!is_open(id)) throw Error("WINDOW_CLOSED", "Host message window is closed or unknown");
+  if (!is_open(id)) {
+    diagnostic_log_.event(Diagnostics::Level::Warn, Diagnostics::Scope::Runtime, "lua.receive.fail", {}, id, "WINDOW_CLOSED");
+    throw Error("WINDOW_CLOSED", "Host message window is closed or unknown");
+  }
   auto& s = *sessions_.at(id);
+  if (!s.diagnostic_host_connected) { s.diagnostic_host_connected = true; trace(s, "lua.channel.begin", Diagnostics::Level::Info); }
   if (s.to_host.empty()) return {};
+  trace(s, "lua.receive.end");
   auto message = std::move(s.to_host.front());
   s.to_host.pop_front();
   s.message_bytes -= message.size();

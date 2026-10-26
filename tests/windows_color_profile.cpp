@@ -23,7 +23,7 @@ HRESULT inspect_environment(PCWSTR browser, PCWSTR data, ICoreWebView2Environmen
 #include "plugin/preferences.hpp"
 
 using namespace reaweb;
-#define CHECK(value) do { if (!(value)) throw std::runtime_error("Check failed: " #value); } while (false)
+#define CHECK(value) do { if (!(value)) throw std::runtime_error(std::string("Check failed at ") + std::to_string(__LINE__) + ": " #value); } while (false)
 
 void pump(const std::function<bool()>& done) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -49,7 +49,7 @@ void check_layout(HWND dialog) {
   CHECK(client.right - button.right == checkbox.left && client.bottom - button.bottom == checkbox.left);
   int controls = 0;
   for (auto child = GetWindow(dialog, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) ++controls;
-  CHECK(controls == 16);
+  CHECK(controls == 23);
   CHECK(GetDlgItem(dialog, 1004));
   for (const auto id : {1009, 1010, 1011, 1012, 1013, 1014}) CHECK(GetDlgItem(dialog, id));
 }
@@ -137,12 +137,29 @@ int main(int argc, char**) {
     CHECK(startup_color_profile == ColorProfile::Default);
     CHECK(WritePrivateProfileStringW(L"ReaWebAPI", L"WebViewColorProfile", srgb ? L"sRGB" : L"Default", ini.c_str()));
     initialize_preferences(module, root);
+    DiagnosticSettings applied;
+    int opened = 0;
+    page = initialize_preferences(module, root, {}, {}, [&](const DiagnosticSettings& settings) { applied = settings; }, [&] { ++opened; });
+    dialog = page->create(parent);
+    CHECK(IsDlgButtonChecked(dialog, 1021) == BST_UNCHECKED && IsDlgButtonChecked(dialog, 1023) == BST_UNCHECKED);
+    SetDlgItemTextA(dialog, 1022, "target-app"); SendDlgItemMessageW(dialog, 1021, BM_CLICK, 0, 0);
+    DestroyWindow(dialog); dialog = page->create(parent);
+    CHECK(IsDlgButtonChecked(dialog, 1021) == BST_UNCHECKED);
+    SetDlgItemTextA(dialog, 1022, "target-app"); SendDlgItemMessageW(dialog, 1021, BM_CLICK, 0, 0);
+    SendMessageW(dialog, WM_USER * 2, 0, 0);
+    CHECK(applied.app_debug && !applied.runtime_debug && applied.target == "target-app");
+    SendDlgItemMessageW(dialog, 1023, BM_CLICK, 0, 0); SendMessageW(dialog, WM_USER * 2, 0, 0);
+    CHECK(applied.runtime_debug && read_diagnostic_settings(ini) == applied);
+    SendDlgItemMessageW(dialog, 1024, BM_CLICK, 0, 0); CHECK(opened == 1);
+    SendDlgItemMessageW(dialog, 1003, BM_CLICK, 0, 0); SendMessageW(dialog, WM_USER * 2, 0, 0);
+    CHECK(!applied.app_debug && !applied.runtime_debug && applied.target.empty());
+    DestroyWindow(dialog);
     DestroyWindow(parent);
 
     const auto entry = root / "index.html";
     std::ofstream(entry) << "<!doctype html><title>Color profile</title><body style='background:#808080'>sRGB</body>";
     auto platform = make_platform(root / "WebViewData");
-    CHECK(browser_arguments == (srgb ? L"--force-color-profile=srgb" : L""));
+    CHECK((browser_arguments.find(L"--force-color-profile=srgb") != std::wstring::npos) == srgb);
     std::string error;
     int ready = 0;
     WindowOptions options;

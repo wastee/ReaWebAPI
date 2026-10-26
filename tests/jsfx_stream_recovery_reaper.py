@@ -11,6 +11,7 @@ import time
 parser = argparse.ArgumentParser(description=__doc__)
 for name in ('reaper', 'extension', 'output'):
     parser.add_argument('--' + name, type=Path, required=True)
+parser.add_argument('--diagnostics', action='store_true')
 args = parser.parse_args()
 source = Path(__file__).resolve().parents[1]
 root = args.output.resolve()
@@ -81,6 +82,8 @@ elif sys.platform.startswith('linux'):
 else:
     settings += '[audioconfig]\nmode=4\nwaveout_devicein=-1\nwaveout_deviceout=0\nwaveout_srate=48000\nwaveout_bps=16\nwaveout_bs=256\nwaveout_numblocks=4\nwaveout_nch_out=2\n'
 (root / 'reaper.ini').write_text(settings)
+if args.diagnostics:
+    (root / 'ReaWebAPI.ini').write_text('[Diagnostics]\nRuntimeDebug=1\nAppDebug=0\nTargetAppId=\n')
 resource = Path.home() / 'Library/Application Support/REAPER' if sys.platform == 'darwin' else args.reaper.parent
 for name in ('reaper-install-rev.txt', 'reaper-license.rk'):
     if (resource / name).is_file():
@@ -133,6 +136,9 @@ end
 local ok,err=xpcall(main,debug.traceback)
 if not ok then write('error.txt',err) end
 '''
+if args.diagnostics and sys.platform == 'darwin':
+    lua = lua.replace('local ok,err=xpcall(main,debug.traceback)\nif not ok then write(\'error.txt\',err) end',
+        "local ready=reaper.time_precise()+1\nlocal function start()\nif reaper.time_precise()<ready then reaper.defer(start);return end\nlocal ok,err=xpcall(main,debug.traceback)\nif not ok then write('error.txt',err) end\nend\nreaper.defer(start)")
 (root / 'launch.lua').write_text(lua.replace('ROOT', '[[' + root.as_posix() + ']]'))
 results = {}
 with (root / 'process.log').open('w') as log:
@@ -157,7 +163,7 @@ with (root / 'process.log').open('w') as log:
             time.sleep(.1)
         raise AssertionError('Timed out waiting for DSP stream recovery')
     def snapshot():
-        return json.loads((root / 'snapshot.json').read_text())
+        return wait(lambda: json.loads((root / 'snapshot.json').read_text()))
     def command(op):
         value = str(time.time_ns()) + ':' + op
         (root / 'command.tmp').write_text(value)
@@ -195,6 +201,15 @@ with (root / 'process.log').open('w') as log:
         assert results['manual-close']['diagnostics']['native']['streams'] == 0
         command('delete'); time.sleep(1)
         results['fx-delete'] = 'completed'
+        if args.diagnostics:
+            rows = [json.loads(line) for line in (root / 'ReaWebAPI/Diagnostics/runtime.log').read_text().splitlines()]
+            events = {row['event'] for row in rows}
+            for event in ('jsfx.instance.identified', 'jsfx.attach.end', 'jsfx.native.session.changed', 'jsfx.park', 'jsfx.binding.invalid'):
+                assert event in events, (event, sorted(events))
+            assert not any('compile' in event for event in events), events
+            assert all('message' not in row and 'token' not in row for row in rows)
+            assert list((root / 'ReaWebAPI/Diagnostics').glob('app-*.log'))
+            results['persistent-diagnostics'] = sorted(events)
         (root / 'result.json').write_text(json.dumps(results, indent=2))
         print(json.dumps({'passed': True, 'scenarios': list(results), 'output': str(root)}), flush=True)
     finally:

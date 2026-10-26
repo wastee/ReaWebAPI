@@ -3,6 +3,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 
 namespace {
 reaper_plugin_info_t* host;
@@ -23,6 +24,7 @@ void run() {
     check(GetDlgItemInt(dialog, 1004, nullptr, FALSE) == 2);
     if (!idle_test) for (const auto width : {900, 640, 1100}) {
       SetWindowPos(dialog, nullptr, 0, 0, width, 520, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+      SendMessage(dialog, WM_SIZE, 0, 0);
       RECT client{}, frame{}, button{}, control{};
       GetClientRect(dialog, &client);
       GetWindowRect(GetDlgItem(dialog, 1000), &frame);
@@ -31,10 +33,28 @@ void run() {
       POINT origin{0, 0}; ClientToScreen(dialog, &origin);
       check(frame.left == origin.x && frame.top == origin.y &&
         frame.right - frame.left == client.right && frame.bottom - frame.top == client.bottom);
-      check(origin.x + client.right - button.right == control.left - origin.x &&
-        origin.y + client.bottom - button.bottom == control.left - origin.x);
+      const auto inset = control.left - origin.x;
+      const auto right = origin.x + client.right - button.right, bottom = origin.y + client.bottom - std::max(button.top, button.bottom);
+      if (right != inset || bottom != inset) throw std::runtime_error("Layout inset=" + std::to_string(inset) + ", right=" + std::to_string(right) + ", bottom=" + std::to_string(bottom));
     }
-    if (idle_test) {
+    if (std::filesystem::exists(resource / "preferences-test.diagnostics")) {
+      DestroyWindow(dialog);
+      reaweb::DiagnosticSettings applied;
+      int opened = 0;
+      page = reaweb::initialize_preferences(nullptr, resource, {}, {}, [&](const auto& settings) { applied = settings; }, [&] { ++opened; });
+      dialog = page->create(host->hwnd_main);
+      check(IsDlgButtonChecked(dialog, 1021) == BST_UNCHECKED && IsDlgButtonChecked(dialog, 1023) == BST_UNCHECKED);
+      SetDlgItemText(dialog, 1022, "target-app"); CheckDlgButton(dialog, 1021, BST_CHECKED);
+      DestroyWindow(dialog); dialog = page->create(host->hwnd_main);
+      check(IsDlgButtonChecked(dialog, 1021) == BST_UNCHECKED);
+      SetDlgItemText(dialog, 1022, "target-app"); CheckDlgButton(dialog, 1021, BST_CHECKED);
+      check(SendMessage(dialog, WM_USER * 2, 0, 0) != 0);
+      check(applied.app_debug && !applied.runtime_debug && applied.target == "target-app");
+      CheckDlgButton(dialog, 1023, BST_CHECKED); check(SendMessage(dialog, WM_USER * 2, 0, 0) != 0);
+      check(applied.runtime_debug && reaweb::read_diagnostic_settings(resource / "ReaWebAPI.ini") == applied);
+      SendMessage(dialog, WM_COMMAND, MAKEWPARAM(1024, BN_CLICKED), 0); check(opened == 1);
+      result = "PASS: Diagnostics native controls, independent toggles, target, Cancel, Apply, persistence and folder callback";
+    } else if (idle_test) {
       SetDlgItemInt(dialog, 1004, 7, FALSE); DestroyWindow(dialog);
       unsigned applied = 99;
       page = reaweb::initialize_preferences(nullptr, resource, {}, [&](unsigned count) { applied = count; });

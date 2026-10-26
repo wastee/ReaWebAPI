@@ -10,6 +10,7 @@
 #include "runtime/native_producers.hpp"
 #include "runtime/external_transport.hpp"
 #include "runtime/external_settings.hpp"
+#include "runtime/diagnostics.hpp"
 #include "runtime/jsfx_webui.hpp"
 #include "runtime/jsfx_control.hpp"
 #include <deque>
@@ -45,6 +46,8 @@ public:
   StreamHub& streams() { return streams_; }
   NativeTasks& tasks() { return tasks_; }
   NativeProducers& producers() { return producers_; }
+  void configure_diagnostics(const DiagnosticSettings& settings) { check_thread(); diagnostic_log_.configure(settings); }
+  void open_diagnostics_folder();
   void configure_external(const ExternalSettings& settings);
   void initialize_jsfx(JsfxDiscovery discovery);
   uint16_t external_port() const;
@@ -107,6 +110,7 @@ private:
     Clock::time_point closing_since = Clock::now();
     uint64_t generation = 0, event_sequence = 0, processed = 0;
     size_t outstanding = 0, output_pending = 0;
+    bool diagnostic_host_connected = false, diagnostic_jsfx_released = false;
     bool ready = false, capture_keyboard = true;
     bool daw_keyboard = false, space_down = false;
     std::deque<char> space_events;
@@ -162,11 +166,12 @@ private:
   DockApi dock_;
   fs::path resource_;
   std::function<void(const std::string&)> log_;
+  Diagnostics diagnostic_log_;
   std::weak_ptr<Platform> platform_;
   std::shared_ptr<Platform> warmed_platform_;
   bool platform_warmup_pending_ = false;
   unsigned idle_webviews_ = 0;
-  std::shared_ptr<Platform> prepare_platform();
+  std::shared_ptr<Platform> prepare_platform(const std::string& app = {});
   std::map<std::string, std::weak_ptr<App>> apps_;
   std::map<int, std::shared_ptr<Session>> sessions_;
   std::map<std::string, Json> state_cache_;
@@ -258,6 +263,8 @@ private:
   bool lifecycle(Session& session, const std::string& action);
   bool defer_reload(int id);
   void complete_lifecycle(Session& session);
+  void trace(const Session& session, const char* event, Diagnostics::Level level = Diagnostics::Level::Debug,
+    const char* result = "ok", Diagnostics::Scope scope = Diagnostics::Scope::Runtime) noexcept;
   void append_log(Session& session, Json entry);
   void persist(Session& session, bool force = false);
   void fail(Session& session, const std::string& message);

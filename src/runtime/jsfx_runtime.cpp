@@ -66,6 +66,8 @@ void Runtime::end_jsfx_edit(Session& session) {
 void Runtime::release_jsfx(Session& session) {
   release_daw_space(session);
   if (!session.jsfx) return;
+  if (!session.diagnostic_jsfx_released) trace(session, "jsfx.release", Diagnostics::Level::Info);
+  session.diagnostic_jsfx_released = true;
   end_jsfx_edit(session);
   if(session.jsfx->instance->native)session.jsfx->instance->native->close_window(session.id);
   auto host = session.jsfx->editor.host;
@@ -77,6 +79,7 @@ void Runtime::release_jsfx(Session& session) {
 void Runtime::park_jsfx(Session& session) {
   auto& ui = *session.jsfx;
   if (!ui.editor.host) return;
+  trace(session, "jsfx.park", Diagnostics::Level::Info);
   release_daw_space(session);
   end_jsfx_edit(session);
   if(ui.instance->native)ui.instance->native->close_window(session.id);
@@ -111,6 +114,8 @@ Json Runtime::jsfx_state(Session& session) {
   return state;
 }
 void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
+  trace(session, "jsfx.attach.begin");
+  session.diagnostic_jsfx_released = false;
   auto& ui = *session.jsfx;
   if (session.ready) {
     session.startup_timing->reset("cachedReopen", ui.discovered);
@@ -135,6 +140,7 @@ void Runtime::attach_jsfx(Session& session, const JsfxEditor& editor) {
     {{"sessionId", ui.instance->session_id}, {"active", true}, {"activation", ui.activation}, {"paramState", jsfx_state(session)},
       {"editorSize", jsfx_size_state(session)}});
   if (session.ready) session.startup_timing->mark(StartupTiming::StateNotified);
+  trace(session, "jsfx.attach.end", Diagnostics::Level::Info);
 }
 Json Runtime::jsfx_result(int window, const std::string& method, const Json& payload) {
   Json result;
@@ -142,6 +148,7 @@ Json Runtime::jsfx_result(int window, const std::string& method, const Json& pay
   if (it != sessions_.end() && it->second->jsfx) result["sessionId"] = it->second->jsfx->instance->session_id;
   try { result["data"] = jsfx_call(window, method, payload); result["ok"] = true; }
   catch (const Error& error) {
+    if (it != sessions_.end()) trace(*it->second, "jsfx.api.fail", Diagnostics::Level::Error, error.code.c_str());
     result["ok"] = false; result["error"] = {{"code", error.code}, {"message", error.what()}};
     if (!error.details.is_null()) result["error"]["details"] = error.details;
   } catch (const std::exception& error) {
@@ -339,8 +346,11 @@ void Runtime::tick_jsfx() {
       },[this] {if(undo_owner_==-1)finish_undo();});
       if(undo_owner_==-1)undo_deadline_=Clock::now()+std::chrono::seconds(30);
       if(changed) {
+        for (auto& item : sessions_) if (item.second->jsfx && item.second->jsfx->instance == instance)
+          trace(*item.second, "jsfx.native.session.previous", Diagnostics::Level::Info);
         instance->session_id=external_token();instance->revision=0;
         for(auto& item:sessions_)if(item.second->jsfx && item.second->jsfx->instance==instance) {
+          trace(*item.second, "jsfx.native.session.changed", Diagnostics::Level::Info);
           end_jsfx_edit(*item.second);
           service_event(jsfx_service_,"jsfx",item.first,"capabilitiesChanged",
             {{"sessionId",instance->session_id},{"capabilityRevision",instance->native->capabilities(instance->session_id)["capabilityRevision"]},{"reason","sessionChanged"}});
@@ -357,6 +367,9 @@ void Runtime::tick_jsfx() {
           service_event(jsfx_service_,"jsfx",item.first,event.first,event.second);
       }
     } catch(const Error& error) {
+      if (instance->native_error != error.code)
+        for (auto& item : sessions_) if (item.second->jsfx && item.second->jsfx->instance == instance)
+          trace(*item.second, "jsfx.native.fail", Diagnostics::Level::Warn, error.code.c_str());
       instance->native_error=error.code;
       if(error.code=="FX_STALE")instance->native.reset();
     }
@@ -394,10 +407,15 @@ void Runtime::tick_jsfx() {
       if (!ui.presented && now - ui.last_used > std::chrono::seconds(15))
         throw Error("FX_NOT_READY", "JSFX page did not acknowledge its host state within 15 seconds");
       if (!ui.editing.empty() && now - ui.last_edit > std::chrono::seconds(30)) end_jsfx_edit(s);
-      if (ui.host_revision != host_revision) { ui.host_revision = host_revision; ui.next_poll = now; }
+      if (ui.host_revision != host_revision) { ui.host_revision = host_revision; trace(s, "jsfx.host.revision.changed"); ui.next_poll = now; }
       if (!s.ready || !ui.initialized || !s.window->visible() || now < ui.next_poll || Clock::now() >= deadline || s.output_pending >= 8) continue;
       jsfx_poll_cursor_ = s.id;
-      if (!ui.scan) ui.count = ui.instance->binding->parameter_count();
+      if (!ui.scan) {
+        const auto count = ui.instance->binding->parameter_count();
+        const bool changed = count != ui.count;
+        ui.count = count;
+        if (changed) trace(s, "jsfx.parameter.count.changed", Diagnostics::Level::Info);
+      }
       for (int n = 0; ui.scan < ui.count && n < 32 && Clock::now() < deadline; ++n, ++ui.scan) {
         auto value = ui.instance->binding->parameter(ui.scan);
         if (ui.values.size() <= static_cast<size_t>(ui.scan)) { ui.values.push_back(value); ui.changes.push_back(value); }
@@ -409,6 +427,7 @@ void Runtime::tick_jsfx() {
       }
     } catch (const Error& error) {
       if (error.code == "FX_STALE") {
+        trace(s, "jsfx.binding.invalid", Diagnostics::Level::Warn, "FX_STALE");
         jsfx_instances_.erase(std::remove(jsfx_instances_.begin(), jsfx_instances_.end(), ui.instance), jsfx_instances_.end());
         release_jsfx(s); s.closing = true;
       }
@@ -496,6 +515,7 @@ void Runtime::tick_jsfx() {
       open_impl(association->entry.u8string(), {}, "", "", true, false, true, false, ui);
     } catch (const std::exception& error) {
       editor.host->restore(); jsfx_blocked_[editor.host->parent()] = editor.host;
+      diagnostic_log_.event(Diagnostics::Level::Error, Diagnostics::Scope::Runtime, "jsfx.discovery.fail", {}, 0, "JSFX_ERROR");
       log_(std::string("JSFX Web UI: ") + error.what());
     }
   }

@@ -15,12 +15,14 @@ void Runtime::configure_webviews(unsigned idle_count) {
   else warmed_platform_.reset();
 #endif
 }
-std::shared_ptr<Platform> Runtime::prepare_platform() {
+std::shared_ptr<Platform> Runtime::prepare_platform(const std::string& app) {
   auto platform = platform_.lock();
   if (!platform) {
     const auto data = resource_ / "ReaWebAPI" / "WebViewData";
     fs::create_directories(data);
+    diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "platform.create.begin", app);
     platform = make_platform(data);
+    diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "platform.create.end", app);
     platform->set_idle_capacity(idle_webviews_);
     platform_ = platform;
   }
@@ -75,12 +77,17 @@ int Runtime::open_dev(const std::string& url, const fs::path& base) {
 int Runtime::open_impl(const std::string& path, const fs::path& base, const std::string& dev_url, const std::string& launcher_source, bool hidden, bool frameless, bool resizable, bool transparent, std::shared_ptr<Session::Jsfx> jsfx) {
   check_thread();
   const auto requested = Clock::now();
+  std::string diagnostic_app;
+  diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "webview.open.begin");
+  try {
   const auto directory = base.empty() ? resource_ / "Scripts" : base;
   auto entry = dev_url.empty() ? resolve_html(directory, path) : fs::absolute(directory / (".reaweb-dev-" + state_key(dev_url, 0) + ".html"));
   if (sessions_.size() >= 32) throw Error("WINDOW_LIMIT", "At most 32 ReaWebAPI windows may be open");
   if (next_id_ == std::numeric_limits<int>::max()) throw Error("WINDOW_LIMIT", "Window id space exhausted");
   const auto app_id = jsfx && !fs::exists(entry.parent_path() / "app.json") ? "jsfx-" + state_key(jsfx->instance->binding->ident(), 0) :
     dev_url.empty() ? app_identity(entry.parent_path(), launcher_source) : "dev-" + state_key(dev_url, 0);
+  diagnostic_app = app_id;
+  diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "app.resolve.end", app_id);
   const auto profile = resource_ / "ReaWebAPI" / "Apps" / app_id;
   const auto app_key = (dev_url.empty() ? "app:" : "dev:") + app_id;
   auto app = apps_[app_key].lock();
@@ -102,7 +109,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
       app->resources = std::make_shared<WebResources>(entry.parent_path(), app_id);
       app->origin = app->resources->origin();
     } else app->origin = dev_url.substr(0, dev_url.find('/', 7));
-    app->platform = prepare_platform();
+    app->platform = prepare_platform(app_id);
     apps_[app_key] = app;
   }
   const auto id = ++next_id_;
@@ -118,6 +125,11 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   session->transparent = transparent;
   session->entry = entry;
   session->app = app;
+  trace(*session, "instance.bind", Diagnostics::Level::Info);
+  if (session->jsfx) {
+    trace(*session, "jsfx.instance.identified", Diagnostics::Level::Info);
+    if (!session->jsfx->instance->native_error.empty()) trace(*session, "jsfx.native.unavailable", Diagnostics::Level::Warn, session->jsfx->instance->native_error.c_str());
+  }
   session->daw_keyboard = daw_keyboard_default(*session);
   std::set<int> slots;
   for (const auto& item : sessions_) if (item.second->entry == entry) slots.insert(item.second->slot);
@@ -135,6 +147,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   }, std::to_string(id));
   std::weak_ptr<Session> weak = session;
   auto window_resources = app->resources ? std::make_shared<WebResources>(app->resources->root(), app_id) : nullptr;
+  trace(*session, "webview.create.begin");
   session->window = app->platform->open(WindowOptions{entry, std::string(bridge_script) +
     (dock_.daw_space ? std::string(daw_keyboard_script) : ""), session->title,
     [this, weak](std::string message) {
@@ -210,6 +223,7 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
           try { active = s->jsfx->instance->binding->editor_matches(s->jsfx->editor); } catch (...) {}
           if (s->closing || !active) { release_jsfx(*s); s->closing = true; return; }
         }
+        trace(*s, "webview.load.fail", Diagnostics::Level::Error, "WEBVIEW_ERROR");
         fail(*s, error);
       }
     }, session->jsfx ? session->jsfx->editor.host->parent() : dock_.parent, [this, weak] { if (auto s = weak.lock()) navigate(*s); }, app->resources ? app->resources->entry_url(entry) : dev_url,
@@ -237,6 +251,8 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
         dock_.activate(s->window->native_handle());
     }, hidden, frameless, resizable, transparent, bool(session->jsfx), session->startup_timing,
     [weak] { auto s = weak.lock(); return s && !s->closing && s->capture_keyboard; }});
+  trace(*session, "webview.create.end");
+  trace(*session, "webview.load.begin");
   session->window->set_media_resources(window_resources);
   if (session->jsfx) session->jsfx->editor.host->resize(session->window->native_handle());
   sessions_.emplace(id, session);
@@ -262,6 +278,13 @@ int Runtime::open_impl(const std::string& path, const fs::path& base, const std:
   try { session->window->show_after_create(); }
   catch (...) { sessions_.erase(id); throw; }
   return id;
+  } catch (const Error& error) {
+    diagnostic_log_.event(Diagnostics::Level::Error, Diagnostics::Scope::Runtime, "webview.open.fail", diagnostic_app, 0, error.code.c_str());
+    throw;
+  } catch (...) {
+    diagnostic_log_.event(Diagnostics::Level::Error, Diagnostics::Scope::Runtime, "webview.open.fail", diagnostic_app, 0, "NATIVE_ERROR");
+    throw;
+  }
 }
 
 bool Runtime::is_open(int id) const {
@@ -282,6 +305,7 @@ bool Runtime::close(int id) {
   if (it == sessions_.end()) return false;
   if (it->second->window->presentation_pending() && it->second->lifecycle_action == "reload")
     it->second->lifecycle_action = "close";
+  trace(*it->second, "webview.close.begin");
   it->second->window->cancel_pending_show();
   if (!it->second->closing && lifecycle(*it->second, "close")) return true;
   if (!it->second->closing) it->second->closing_since = Clock::now();

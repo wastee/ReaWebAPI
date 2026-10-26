@@ -248,7 +248,9 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       if (runtime) runtime->configure_external(settings);
     }, [](unsigned count) {
       if (runtime) runtime->configure_webviews(count);
-    }));
+    }, [](const DiagnosticSettings& settings) {
+      if (runtime) runtime->configure_diagnostics(settings);
+    }, [] { if (runtime) runtime->open_diagnostics_folder(); }));
     auto enum_projects = load<ReaProject* (*)(int, char*, int)>(rec, "EnumProjects");
     auto count_selected = load<int (*)(ReaProject*)>(rec, "CountSelectedTracks");
     auto get_selected = load<MediaTrack* (*)(ReaProject*, int)>(rec, "GetSelectedTrack");

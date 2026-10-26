@@ -48,6 +48,8 @@ WebView2 没有公开的嵌入式检查器控制器。ReaWebAPI 通过 [`OpenDev
 
 生产资源在 Console、Sources 和 Network 中使用 `reaweb://<appId>/...` URL。原生 Inspector 会话、快捷键及 Embedded/Floating 控制保持原有行为。
 
+持久化日志在 REAPER Preferences 中独立配置，参见[运行时诊断](diagnostics.zh-CN.md)。
+
 ## 启动计时
 
 macOS 和 Linux 的绘制前编辑器探针计入共享观察器的检查与准备阶段统计。Windows 专用的钩子和窗口遮蔽计数在这两个平台仍为零。

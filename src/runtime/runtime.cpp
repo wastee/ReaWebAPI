@@ -30,7 +30,8 @@ bool small_message(const Json& value, size_t& budget) {
 Runtime::Runtime(Host host, fs::path resource, std::function<void(const std::string&)> log, DockApi dock)
   : host_(std::move(host)), services_([this](auto handle, const auto& service, int window, const auto& name, Json data) {
       service_event(handle, service, window, name, std::move(data));
-    }), producers_(host_, streams_), dock_(std::move(dock)), resource_(std::move(resource)), log_(std::move(log)), main_thread_(std::this_thread::get_id()) {
+    }), producers_(host_, streams_), dock_(std::move(dock)), resource_(std::move(resource)), log_(std::move(log)), diagnostic_log_(resource_), main_thread_(std::this_thread::get_id()) {
+  diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "runtime.start.begin");
   project_ = host_.current_project();
   host_generation_ = host_.project_generation ? host_.project_generation() : 0;
   project_epoch_ = 1;
@@ -44,8 +45,10 @@ Runtime::Runtime(Host host, fs::path resource, std::function<void(const std::str
     }, nullptr};
   uint64_t handle = 0;
   services_.add("runtime", &builtin, &handle);
+  diagnostic_log_.event(Diagnostics::Level::Info, Diagnostics::Scope::Runtime, "runtime.start.end");
 }
 Runtime::~Runtime() {
+  diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "runtime.stop.begin");
   jsfx_discovery_.reset();
   for (auto& item : sessions_) release_jsfx(*item.second);
   jsfx_blocked_.clear();
@@ -57,7 +60,10 @@ Runtime::~Runtime() {
     producers_.close_window(item.first);
     tasks_.cancel_window(item.first);
     services_.cancel_window(item.first);
+    trace(*item.second, "webview.release.begin");
     try { persist(*item.second, true); detach(*item.second); } catch (...) {}
+    if (item.second->diagnostic_host_connected) trace(*item.second, "lua.channel.end", Diagnostics::Level::Info);
+    trace(*item.second, "instance.unbind", Diagnostics::Level::Info);
   }
   sessions_.clear();
   jsfx_instances_.clear();
@@ -65,6 +71,7 @@ Runtime::~Runtime() {
   apps_.clear();
   jsfx_platform_.reset();
   warmed_platform_.reset();
+  diagnostic_log_.event(Diagnostics::Level::Info, Diagnostics::Scope::Runtime, "runtime.stop.end");
 }
 void Runtime::check_thread() const {
   if (std::this_thread::get_id() != main_thread_)
@@ -479,7 +486,7 @@ void Runtime::tick() {
     auto& s = *it->second;
     if (work.kind == Work::Fault) {
       if (work.path.empty()) fail(s, work.text);
-      else { s.last_error = work.text; log_(work.text); }
+      else { trace(s, "worker.fail", Diagnostics::Level::Warn, "IO_ERROR"); s.last_error = work.text; log_(work.text); }
       continue;
     }
     if (work.generation != s.generation || s.window->closed()) continue;
@@ -566,6 +573,7 @@ void Runtime::tick() {
             s->window->evaluate(std::string("window.__reawebSetDawKeyboard?.(") + (s->daw_keyboard ? "true" : "false") + ");");
         }
         s->document = document; s->ready = true;
+        trace(*s, "webview.load.end", Diagnostics::Level::Info);
         s->startup_timing->mark(StartupTiming::Handshake);
         auto query = data; query["method"] = "ReaWeb_GetCapabilities"; query["args"] = Json::array();
         response = s->bridge->dispatch_request(query);
@@ -588,7 +596,12 @@ void Runtime::tick() {
           throw Error("UNDO_BUSY", "End the managed Undo gesture before batching or using another page");
         if (undo_owner_ && project_call) s->bridge->validate_managed_call(method, data.at("args"));
         if (start_async(*s, request)) { ++s->processed; continue; }
+        const bool diagnostic_call = diagnostic_log_.enabled(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, s->app->id);
+        const auto call_started = diagnostic_call ? Clock::now() : Clock::time_point{};
+        if (diagnostic_call) diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "api.call.begin", s->app->id, s->id, "pending", {{"method", method}});
         response = s->bridge->dispatch_request(data);
+        if (diagnostic_call) diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "api.call.end", s->app->id, s->id,
+          response.contains("error") ? "error" : "ok", {{"method", method}, {"durationMs", std::chrono::duration<double, std::milli>(Clock::now() - call_started).count()}});
         if (method == "ReaWeb_GetCapabilities" && response.contains("result")) {
           response["result"]["webRuntime"] = web_runtime(*s);
           response["result"]["runtime"]["window"] = s->window->window_capabilities();
@@ -648,9 +661,20 @@ void Runtime::tick() {
         if (closed_diagnostics_.size() >= 32) closed_diagnostics_.erase(closed_diagnostics_.begin());
         closed_diagnostics_[s.id] = std::move(final_state);
         if (drag_owner_ == s.id) drag_owner_ = 0;
-        detach(s); it = sessions_.erase(it); continue;
+        trace(s, "webview.release.begin");
+        detach(s);
+        if (s.diagnostic_host_connected) trace(s, "lua.channel.end", Diagnostics::Level::Info);
+        trace(s, "instance.unbind", Diagnostics::Level::Info);
+        // Keep only diagnostic metadata across destruction, never extend the WebView lifetime.
+        const auto app_id = s.app->id; const auto window_id = s.id;
+        it = sessions_.erase(it);
+        diagnostic_log_.event(Diagnostics::Level::Debug, Diagnostics::Scope::Runtime, "webview.release.end", app_id, window_id);
+        continue;
       }
-      if (!s.ready && Clock::now() - s.started > std::chrono::seconds(30)) fail(s, "WebView bridge did not become ready within 30 seconds");
+      if (!s.ready && Clock::now() - s.started > std::chrono::seconds(30)) {
+        trace(s, "webview.load.fail", Diagnostics::Level::Error, "BRIDGE_TIMEOUT");
+        fail(s, "WebView bridge did not become ready within 30 seconds");
+      }
       auto state = window_state(s);
       if (state != s.last_state) { s.last_state = state; emit(s, "windowstatechange", std::move(state)); }
       persist(s);

@@ -60,6 +60,8 @@ Run `Scripts/ReaWebAPI/Example/ReaWebAPI_Demo.lua` from the Action List to open 
 
 ## Development
 
+**Diagnostics** on the same Preferences page provides independent App and Runtime debug logging, an exact Target App ID and a log-folder shortcut. Settings apply immediately. See [Runtime Diagnostics](docs/diagnostics.md).
+
 External programs can enable **External Clients** in the same Preferences page and connect to `ws://127.0.0.1:9123`. The server is disabled by default. See the [protocol](docs/external-clients.md) and [standalone browser Demo](web/external-client/README.md).
 
 Lua opens an App with `reaper.ReaWeb_Open(path, instanceKey)`. Pass `debug.getinfo(1, "S").source` as `instanceKey` to reuse the launcher's window. Omitting the key creates a new window. In JavaScript, await `reaper.lifecycle.ready`, then call the REAPER Mirror or Runtime namespaces such as `reaper.window` and `reaper.events`. API calls return Promises, with arguments and results following REAPER's Lua signatures.

@@ -1,7 +1,36 @@
 #include "runtime/runtime.hpp"
+#include <string_view>
 
 namespace reaweb {
+void Runtime::trace(const Session& s, const char* event, Diagnostics::Level level, const char* result, Diagnostics::Scope scope) noexcept {
+  const auto& app = s.app->id;
+  if (!diagnostic_log_.enabled(level, scope, app)) return;
+  try {
+    Json fields{{"generation", s.generation}};
+    if (std::string_view(event) == "webview.load.end")
+      fields["durationMs"] = std::chrono::duration<double, std::milli>(Clock::now() - s.started).count();
+    if (s.jsfx) {
+      const auto& ui = *s.jsfx;
+      const auto target = ui.instance->binding->target();
+      fields.update({{"fxGuid", ui.instance->binding->guid()}, {"fxIndex", ui.editor.fx},
+        {"fxLocation", target.take ? "take" : target.input ? "input" : "track"},
+        {"fxSessionId", ui.instance->session_id}, {"activation", ui.activation}, {"count", ui.count}, {"revision", ui.host_revision}});
+    }
+    diagnostic_log_.event(level, scope, event, app, s.id, result, fields);
+  } catch (...) {}
+}
+void Runtime::open_diagnostics_folder() {
+  check_thread();
+  const auto& path = diagnostic_log_.directory();
+  if (path.empty()) throw Error("DIAGNOSTICS_IO", "Diagnostics directory is unavailable");
+  fs::create_directories(path);
+  prepare_platform()->desktop("ReaWeb_RevealPath", Json::array({path.u8string()}), [this](Json result) {
+    if (result.contains("error")) log_("Could not open diagnostics log folder");
+  });
+}
+
 void Runtime::fail(Session& session, const std::string& message) {
+  trace(session, "runtime.fail", Diagnostics::Level::Error, "RUNTIME_ERROR");
   if (session.jsfx) {
     release_jsfx(session);
     auto host = session.jsfx->editor.host;
@@ -58,6 +87,16 @@ Json Runtime::diagnostics(int id) const {
 }
 
 void Runtime::append_log(Session& session, Json entry) {
+  try {
+    const auto level = entry.value("level", "debug");
+    const auto source = entry.value("source", "runtime");
+    const auto severity = level == "error" ? Diagnostics::Level::Error : level == "warn" ? Diagnostics::Level::Warn :
+      level == "info" ? Diagnostics::Level::Info : Diagnostics::Level::Debug;
+    trace(session, source == "javascript" ? "javascript.log" : source == "native" ? "api.fail" : "lifecycle.timeout", severity,
+      source == "native" ? entry.value("code", std::string("API_ERROR")).c_str() : source == "runtime" ? "TIMEOUT" : "reported",
+      source == "javascript" ? Diagnostics::Scope::App : Diagnostics::Scope::Runtime);
+  } catch (...) {}
+
   entry["windowId"] = session.id;
   entry["appId"] = session.app->id;
   entry["documentGeneration"] = session.generation;

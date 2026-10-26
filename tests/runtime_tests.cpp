@@ -3,6 +3,7 @@
 #include "runtime/services.hpp"
 #include "platform/shared/devtools.hpp"
 #include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <iostream>
 #include <set>
@@ -1475,6 +1476,33 @@ int main() {
       try { app_info(metadata_root, root / "MetadataData", "stable-id"); }
       catch (const Error& error) { rejected = error.code == "APP_MANIFEST_INVALID"; }
       CHECK(rejected);
+    }
+    {
+      const auto diagnostic_root = root / "diagnostic-profile";
+      const auto target = "test-" + state_key(entry.parent_path().u8string(), 0);
+      write_diagnostic_settings(diagnostic_root / "ReaWebAPI.ini", {true, false, target});
+      Runtime runtime(host, diagnostic_root, [](const std::string&) {}, docks);
+      const auto first = runtime.open(entry.u8string()); auto a = windows.back().lock();
+      const auto second = runtime.open(entry.u8string()); auto b = windows.back().lock();
+      result(runtime, *a, a->send("__reawebHello", {1}));
+      result(runtime, *b, b->send("__reawebHello", {1}));
+      CHECK(runtime.send(first, "secret-transport-body"));
+      result(runtime, *a, a->send("ReaWeb_Log", {{{"level", "debug"}, {"message", "secret-js-body"}}}));
+      a->options.on_error("secret-url?token=secret-token");
+      runtime.tick();
+      runtime.close(second); runtime.tick();
+      std::ifstream file(diagnostic_root / "ReaWebAPI" / "Diagnostics" / Diagnostics::filename(target));
+      std::string text{std::istreambuf_iterator<char>(file), {}};
+      CHECK(text.find("secret-") == std::string::npos);
+      std::set<int> ids; std::set<std::string> events;
+      std::istringstream input(text); std::string line;
+      while (std::getline(input, line)) {
+        const auto record = Json::parse(line);
+        ids.insert(record["windowId"].get<int>()); events.insert(record["event"].get<std::string>());
+      }
+      CHECK(ids.count(first) && ids.count(second));
+      for (const auto* event : {"webview.create.begin", "webview.create.end", "webview.load.end", "lua.channel.begin",
+          "javascript.log", "webview.load.fail", "instance.unbind", "webview.release.end"}) CHECK(events.count(event));
     }
     fs::remove_all(root);
     std::cout << "Runtime: handshake, worker dispatch, project/reload isolation, subscriptions, keyboard capture, queue limits and persistent docking passed\n";

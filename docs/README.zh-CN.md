@@ -7,6 +7,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [开发指南](development.zh-CN.md) | 项目配置、调用约定、资源管理和分发 |
+| [Runtime Diagnostics](diagnostics.zh-CN.md) | 持久化日志、App/Runtime 筛选及可观测生命周期事件 |
 | [DevTools](devtools.zh-CN.md) | 快捷键、检查器布局、状态保存及平台降级 |
 | [SDK](../runtime/README.zh-CN.md) | 类型声明、模板和示例 |
 | [REAPER API](api-reference.md) | 730 项 REAPER 7.80 接口签名和返回类型 |

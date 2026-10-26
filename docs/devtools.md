@@ -48,6 +48,8 @@ Public `WKWebView.inspectable` remains enabled. Programmatic Inspector control a
 
 Production resources retain `reaweb://<appId>/...` URLs in Console, Sources and Network. The native Inspector session, shortcuts and Embedded/Floating controls are unchanged.
 
+Persistent logs are configured separately in REAPER Preferences. See [Runtime Diagnostics](diagnostics.md).
+
 ## Startup timing
 
 On macOS and Linux, pre-paint editor probes contribute to the shared observer's inspection and preparation counters. The Windows-only hook and cloaking counters remain zero on these platforms.
